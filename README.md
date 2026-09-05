@@ -209,7 +209,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Android Studio에서 `app` 실행 구성을 선택한 뒤 `Run`을 눌러도 됩니다.
 
-> 참고: 현재 초기 프로젝트의 `AndroidManifest.xml`에는 실행 가능한 Activity가 선언되어 있지 않습니다. 따라서 APK 빌드는 가능하지만 Android Studio의 `Run`에서 기본 실행 Activity를 찾지 못할 수 있습니다. 화면을 실행하려면 Activity를 추가하고 Manifest에 `MAIN`/`LAUNCHER` 인텐트 필터를 선언해야 합니다.
+> TTS 기능 브랜치에는 `MAIN`/`LAUNCHER`가 등록된 `MainActivity`가 있습니다. 실행하면 한국어 TTS 검증 화면이 열립니다. 이 화면은 TTS 동작 확인용이며 팀의 최종 UI는 아닙니다.
 
 ## 9. 자주 발생하는 문제
 
@@ -287,3 +287,95 @@ chmod +x ./gradlew
 # 빌드 산출물 삭제 후 재빌드
 ./gradlew clean assembleDebug
 ```
+
+## 12. TTS 기능 명세 — Android TextToSpeech
+
+### 목적과 범위
+
+사용자가 입력한 한국어 문장을 기기의 기본 TTS 엔진으로 읽는 최소 기능입니다. 기본 문장은 `안녕하세요`이며 입력 내용을 바꿔 재생할 수 있습니다. 담당 브랜치는 `feature/tts`입니다.
+
+STT, LLM 및 최종 UI 구현은 포함하지 않습니다. 현재 `MainActivity`의 입력창·버튼·상태 문구는 TTS를 독립적으로 검증하기 위한 화면입니다.
+
+### 선택한 방식과 실행 조건
+
+- Android 기본 `TextToSpeech` API를 사용합니다. Piper 모델이나 추가 네이티브 라이브러리는 포함하지 않습니다.
+- 앱은 API 24 이상에서 실행되며 compileSdk/targetSdk는 기존 API 37을 유지합니다.
+- 기기에 활성화된 TTS 엔진과 한국어 음성 지원이 필요합니다. 앱이 음성 데이터 설치를 자동으로 수행하지는 않습니다.
+- 음질·속도·오프라인 가능 여부는 기기의 엔진과 설치된 음성 데이터에 따라 달라집니다. 앱 자체는 오프라인 음성을 강제하지 않습니다.
+- 마이크 권한과 앱 자체의 인터넷 권한은 추가하지 않았습니다. 엔진의 네트워크 이용 여부는 엔진 설정에 따릅니다.
+
+### 코드 위치와 동작
+
+| 파일 | 역할 |
+| --- | --- |
+| `app/src/main/java/com/sihoo/aemx/MainActivity.kt` | 검증 화면, 엔진 초기화, 한국어 설정, 발화 요청, 상태 표시와 자원 해제 |
+| `app/src/main/AndroidManifest.xml` | 실행 Activity와 Android 11 이상 TTS 서비스 조회용 `<queries>` 등록 |
+| `app/src/main/res/values/strings.xml` | 기본 문장과 TTS 화면·상태 문구 |
+
+1. Activity 생성 시 `TextToSpeech(this, this)`로 엔진을 비동기 초기화합니다. 완료 전에는 재생 버튼을 비활성화합니다.
+2. `onInit()`에서 초기화 성공과 `setLanguage(Locale.KOREAN)` 결과를 확인합니다. 초기화 실패 또는 한국어 데이터 부족·미지원 시 안내를 표시하고 재생을 차단합니다.
+3. 재생 버튼을 누르면 입력 앞뒤 공백을 제거합니다. 빈 문장은 안내만 표시합니다.
+4. `speak(text, TextToSpeech.QUEUE_FLUSH, null, "aemx-korean-tts")`를 호출합니다. 재생 중 다시 누르면 이전 발화를 대체합니다.
+5. `UtteranceProgressListener`의 시작·완료·오류 콜백을 UI 스레드의 상태 문구에 반영합니다. `speak()`의 즉시 오류 반환도 처리합니다.
+6. Activity가 파괴되면 `stop()`과 `shutdown()`으로 엔진을 정리합니다.
+
+### 다른 파트와 통합할 때
+
+현재 TTS 로직은 `MainActivity`에 포함되어 있으며 외부에서 호출하는 별도의 공용 TTS 클래스는 없습니다. UI 담당자가 최종 화면을 통합할 때 엔진 초기화·언어 확인·발화·종료 흐름을 함께 옮기거나 별도 클래스로 분리해야 합니다. 준비 완료 전에 `speak()`를 호출하지 않도록 유지합니다.
+
+STT 또는 LLM이 제공하는 문자열을 발화 입력으로 연결할 수 있습니다. `MainActivity`와 Manifest의 LAUNCHER 등록은 UI 담당자 변경과 겹칠 수 있으므로 PR 리뷰에서 최종 실행 화면을 조율합니다.
+
+### 재현 방법과 완료 기준
+
+프로젝트 루트에서 실행합니다. Windows PowerShell에서는 `./gradlew` 대신 `.\gradlew.bat`를 사용합니다.
+
+```bash
+./gradlew assembleDebug test lint
+adb devices
+adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 shell am start -n com.sihoo.aemx/.MainActivity
+```
+
+`emulator-5554`는 `adb devices`에 나온 대상 식별자로 바꿉니다. Android Studio의 Run으로 실행해도 됩니다.
+
+| 확인 항목 | 기대 결과 |
+| --- | --- |
+| 앱 시작 | `안녕하세요`가 표시되고 엔진 초기화 후 재생 버튼 활성화 |
+| 기본 문장 재생 | 한국어 음성이 들리고 `음성 재생을 완료했습니다.` 표시 |
+| 다른 짧은 한국어 문장 | 입력한 문장으로 재생 |
+| 빈 입력 또는 공백 | `재생할 문장을 입력해 주세요.` 표시 |
+| 초기화 실패 또는 한국어 미지원 | 안내 표시 및 재생 버튼 비활성화 |
+| 화면 종료 후 재진입 | 엔진 정리 후 재초기화 |
+
+한국어가 준비되지 않았으면 기기의 TTS 설정에서 한국어 음성 데이터를 설치하거나 지원 엔진을 선택한 뒤 앱을 다시 실행합니다. 재생 완료 문구만으로 PC 스피커에서 소리가 났다고 판정하지 않으며 미디어 음량과 실제 청취도 확인합니다.
+
+### 검증 기록 및 남은 확인
+
+2026-09-05 로컬 검증 기록입니다.
+
+- `assembleDebug`, `test`, `lint` 작업 성공. 기존 `ExampleUnitTest` 1개 통과. 이 테스트는 TTS 자동 테스트가 아닙니다.
+- Lint XML 기준 오류 0개, 경고 2개. 경고는 기존 AppCompat/Material의 새 버전 알림입니다.
+- 격리된 Windows 빌드 환경의 파일 접근 오류 때문에 검증 시에만 JDK 17, 동일 버전의 직접 의존성 선언, 로컬 디버그 서명을 사용했습니다. 저장소 설정은 JDK 25와 version catalog로 복원했습니다. 팀 환경의 원본 설정 빌드는 PR 전 재확인해야 합니다.
+- API 36 Google Play x86_64 에뮬레이터에 APK 설치와 Activity 실행 성공.
+- `안녕하세요` 버튼을 눌러 한국어 `kor-KOR` 합성 요청, `ko-kr-x-ism-lstm-embedded` 엔진 선택 및 앱의 재생 완료 콜백을 확인했습니다.
+- 당시 호스트 오디오 드라이버 초기화 경고가 있었으므로 실제 스피커 청취는 미확인입니다. 빈 입력·미지원 엔진·화면 재생성 등 예외 경로는 위 표에 따라 추가 확인합니다.
+- 장문 분할, 엔진 선택 UI, 음성 데이터 자동 설치, 초기화 재시도 버튼은 현재 구현 범위에 없습니다. 장문과 빠른 연속 입력은 추가 검증이 필요합니다.
+
+### 에뮬레이터와 팀 합의
+
+현재 로컬 AVD는 `AEMX_TTS_API_36`, Pixel 7 하드웨어 프로필, API 36 Google Play x86_64입니다. 이 PC에서는 그래픽 안정화를 위해 화면을 720×1280 / 280 dpi로 조정하고 호스트 GPU와 Vulkan 비활성화 옵션을 사용했습니다. **팀 공통 디바이스로 확정된 설정이 아닙니다.**
+
+팀원들과 모델, 화면 크기·해상도·밀도, Android API 및 시스템 이미지 종류를 합의한 후 공통 환경에서도 TTS를 재검증합니다. PC별 SDK 경로, AVD 데이터, APK와 서명 키는 커밋하지 않습니다.
+
+### PR 준비
+
+`feature/tts`에서 개발하고 `main`을 대상으로 PR을 제출합니다. 2026-09-05에 전달받은 일정 기준 제출 예정일은 다음 주 토요일 또는 일요일(9월 12~13일)이며 최종 날짜는 팀에서 확정합니다.
+
+- [x] 한국어 TTS 최소 기능 및 검증 화면 구현
+- [x] README 기능 명세 작성
+- [x] 에뮬레이터 APK 설치·실행 및 재생 완료 콜백 확인
+- [ ] 팀 공통 에뮬레이터 모델·크기 합의 및 해당 환경 재검증
+- [ ] 정상 사용자 환경에서 원본 Gradle 설정 빌드 재확인
+- [ ] 실제 스피커 청취 및 예외 경로 확인
+- [ ] 기능 브랜치 push 및 `feature/tts` → `main` PR 제출
+- [ ] 팀 리뷰·충돌 조정 후 main merge
