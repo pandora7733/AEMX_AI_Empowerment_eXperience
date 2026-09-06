@@ -304,16 +304,31 @@ STT, LLM 및 최종 UI 구현은 포함하지 않습니다. 현재 `MainActivity
 - 음질·속도·오프라인 가능 여부는 기기의 엔진과 설치된 음성 데이터에 따라 달라집니다. 앱 자체는 오프라인 음성을 강제하지 않습니다.
 - 마이크 권한과 앱 자체의 인터넷 권한은 추가하지 않았습니다. 엔진의 네트워크 이용 여부는 엔진 설정에 따릅니다.
 
+### Android TTS와 sherpa-onnx + Piper 비교
+
+아래 평가는 동일한 기기와 문장으로 실제 측정한 절대값이 아니라, 아키텍처에 따른 상대 비교입니다. sherpa-onnx의 정확한 APK 증가량과 생성 속도는 포함하는 ABI, Piper 모델 및 양자화 여부에 따라 달라지므로 도입 시 후보 모델로 다시 측정해야 합니다.
+
+| 항목 | Android `TextToSpeech` | sherpa-onnx + Piper |
+| --- | --- | --- |
+| 앱 용량 | 프레임워크 API만 호출하므로 앱 증가량이 매우 작음. 음성 데이터는 기기 TTS 엔진이 별도 관리 | 네이티브 라이브러리, ONNX 모델, 토큰·발음 데이터가 필요해 APK/AAB 또는 첫 다운로드 용량이 큼 |
+| 음질 | 설치된 엔진과 한국어 음성에 따라 달라져 기기별 차이가 생길 수 있음 | 선택한 모델에 따라 음색과 품질이 달라지지만, 같은 모델을 배포하면 기기 간 결과가 비교적 일정함 |
+| 속도 | 별도 모델 로딩이 없어 최소 기능의 첫 재생이 간단하고 대체로 빠름. 엔진 구현에 따라 네트워크를 사용할 수도 있음 | 완전한 기기 내 추론이 가능하지만 첫 모델 로딩과 CPU 추론 비용이 있음. 저사양 기기와 큰 모델에서는 느려질 수 있음 |
+| 개발 난이도 | Kotlin API만으로 초기화·언어 설정·재생·종료 구현 가능 | Android용 네이티브 라이브러리와 모델 패키징, ABI, 메모리와 모델 수명 관리가 추가로 필요 |
+| 이번 프로젝트 판단 | **최소 기능과 빠른 팀 통합에 적합하여 채택** | 기기별 음성 차이를 없애거나 완전 오프라인·고정 음성이 필수일 때 후속 검토 |
+
+공식 참고 자료: [Android TextToSpeech API](https://developer.android.com/reference/android/speech/tts/TextToSpeech), [sherpa-onnx Android 빌드](https://k2-fsa.github.io/sherpa/onnx/android/build-sherpa-onnx.html), [sherpa-onnx Piper 모델 안내](https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/tts/piper.rst)
+
 ### 코드 위치와 동작
 
 | 파일 | 역할 |
 | --- | --- |
-| `app/src/main/java/com/sihoo/aemx/MainActivity.kt` | 검증 화면, 엔진 초기화, 한국어 설정, 발화 요청, 상태 표시와 자원 해제 |
+| `app/src/main/java/com/sihoo/aemx/AndroidTtsController.kt` | 엔진 초기화, 한국어 설정, 발화 요청, 상태 콜백과 자원 해제 |
+| `app/src/main/java/com/sihoo/aemx/MainActivity.kt` | 수정 가능한 검증 화면과 `AndroidTtsController` 연동 |
 | `app/src/main/AndroidManifest.xml` | 실행 Activity와 Android 11 이상 TTS 서비스 조회용 `<queries>` 등록 |
 | `app/src/main/res/values/strings.xml` | 기본 문장과 TTS 화면·상태 문구 |
 
-1. Activity 생성 시 `TextToSpeech(this, this)`로 엔진을 비동기 초기화합니다. 완료 전에는 재생 버튼을 비활성화합니다.
-2. `onInit()`에서 초기화 성공과 `setLanguage(Locale.KOREAN)` 결과를 확인합니다. 초기화 실패 또는 한국어 데이터 부족·미지원 시 안내를 표시하고 재생을 차단합니다.
+1. Activity 생성 시 `AndroidTtsController`가 `TextToSpeech` 엔진을 비동기 초기화합니다. 완료 전에는 재생 버튼을 비활성화합니다.
+2. 컨트롤러가 초기화 성공과 `setLanguage(Locale.KOREAN)` 결과를 확인합니다. 초기화 실패 또는 한국어 데이터 부족·미지원 시 상태 콜백으로 알리고 재생을 차단합니다.
 3. 재생 버튼을 누르면 입력 앞뒤 공백을 제거합니다. 빈 문장은 안내만 표시합니다.
 4. `speak(text, TextToSpeech.QUEUE_FLUSH, null, "aemx-korean-tts")`를 호출합니다. 재생 중 다시 누르면 이전 발화를 대체합니다.
 5. `UtteranceProgressListener`의 시작·완료·오류 콜백을 UI 스레드의 상태 문구에 반영합니다. `speak()`의 즉시 오류 반환도 처리합니다.
@@ -321,7 +336,22 @@ STT, LLM 및 최종 UI 구현은 포함하지 않습니다. 현재 `MainActivity
 
 ### 다른 파트와 통합할 때
 
-현재 TTS 로직은 `MainActivity`에 포함되어 있으며 외부에서 호출하는 별도의 공용 TTS 클래스는 없습니다. UI 담당자가 최종 화면을 통합할 때 엔진 초기화·언어 확인·발화·종료 흐름을 함께 옮기거나 별도 클래스로 분리해야 합니다. 준비 완료 전에 `speak()`를 호출하지 않도록 유지합니다.
+`AndroidTtsController`는 화면과 분리되어 있으므로 UI 또는 LLM 파트에서 문자열을 그대로 전달할 수 있습니다. 상태 콜백은 UI 스레드가 아닐 수 있으므로 화면 변경은 `runOnUiThread` 또는 Compose 상태 수집 경로에서 처리합니다.
+
+```kotlin
+private lateinit var ttsController: AndroidTtsController
+
+// 화면 생성 후 한 번 초기화
+ttsController = AndroidTtsController(applicationContext) { state ->
+    runOnUiThread { renderTtsState(state) }
+}
+
+// 사용자가 입력한 문장 또는 LLM 응답을 전달
+ttsController.speak(llmAnswer)
+
+// Activity/ViewModel 수명 종료 시 반드시 해제
+ttsController.shutdown()
+```
 
 STT 또는 LLM이 제공하는 문자열을 발화 입력으로 연결할 수 있습니다. `MainActivity`와 Manifest의 LAUNCHER 등록은 UI 담당자 변경과 겹칠 수 있으므로 PR 리뷰에서 최종 실행 화면을 조율합니다.
 

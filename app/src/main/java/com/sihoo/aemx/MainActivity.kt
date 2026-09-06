@@ -1,8 +1,6 @@
 package com.sihoo.aemx
 
 import android.os.Bundle
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -10,15 +8,13 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.android.material.R as MaterialR
-import java.util.Locale
 
-class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
-    private var textToSpeech: TextToSpeech? = null
+class MainActivity : AppCompatActivity() {
+    private lateinit var ttsController: AndroidTtsController
     private lateinit var speechInput: TextInputEditText
     private lateinit var speakButton: Button
     private lateinit var statusView: TextView
@@ -26,7 +22,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(createContentView())
-        textToSpeech = TextToSpeech(this, this)
+        ttsController = AndroidTtsController(applicationContext, ::handleTtsState)
     }
 
     private fun createContentView(): LinearLayout {
@@ -108,78 +104,36 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         inputMethodManager.showSoftInput(speechInput, 0)
     }
 
-    override fun onInit(status: Int) {
-        val engine = textToSpeech
-        if (status != TextToSpeech.SUCCESS || engine == null) {
-            showUnavailable(R.string.tts_status_init_failed)
-            return
-        }
-
-        when (engine.setLanguage(Locale.KOREAN)) {
-            TextToSpeech.LANG_MISSING_DATA,
-            TextToSpeech.LANG_NOT_SUPPORTED,
-            -> {
-                showUnavailable(R.string.tts_status_korean_unavailable)
-                return
-            }
-        }
-
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {
-                updateStatus(R.string.tts_status_speaking)
-            }
-
-            override fun onDone(utteranceId: String?) {
-                updateStatus(R.string.tts_status_done)
-            }
-
-            @Deprecated("Deprecated by the Android framework")
-            override fun onError(utteranceId: String?) {
-                updateStatus(R.string.tts_status_speak_failed)
-            }
-        })
-
-        speakButton.isEnabled = true
-        statusView.setText(R.string.tts_status_ready)
-    }
-
     private fun speak() {
-        val text = speechInput.text.toString().trim()
-        if (text.isEmpty()) {
-            statusView.setText(R.string.tts_status_empty)
-            return
-        }
+        ttsController.speak(speechInput.text.toString())
+    }
 
-        val result = textToSpeech?.speak(
-            text,
-            TextToSpeech.QUEUE_FLUSH,
-            null,
-            UTTERANCE_ID,
+    private fun handleTtsState(state: AndroidTtsController.State) {
+        val messageResId = when (state) {
+            AndroidTtsController.State.INITIALIZING -> R.string.tts_status_initializing
+            AndroidTtsController.State.READY -> R.string.tts_status_ready
+            AndroidTtsController.State.SPEAKING -> R.string.tts_status_speaking
+            AndroidTtsController.State.DONE -> R.string.tts_status_done
+            AndroidTtsController.State.EMPTY_TEXT -> R.string.tts_status_empty
+            AndroidTtsController.State.INIT_FAILED -> R.string.tts_status_init_failed
+            AndroidTtsController.State.KOREAN_UNAVAILABLE -> R.string.tts_status_korean_unavailable
+            AndroidTtsController.State.SPEAK_FAILED -> R.string.tts_status_speak_failed
+        }
+        val isEngineAvailable = state !in setOf(
+            AndroidTtsController.State.INITIALIZING,
+            AndroidTtsController.State.INIT_FAILED,
+            AndroidTtsController.State.KOREAN_UNAVAILABLE,
         )
-        if (result == TextToSpeech.ERROR) {
-            statusView.setText(R.string.tts_status_speak_failed)
+        runOnUiThread {
+            speakButton.isEnabled = isEngineAvailable
+            statusView.setText(messageResId)
         }
-    }
-
-    private fun showUnavailable(@StringRes messageResId: Int) {
-        speakButton.isEnabled = false
-        statusView.setText(messageResId)
-    }
-
-    private fun updateStatus(@StringRes messageResId: Int) {
-        runOnUiThread { statusView.setText(messageResId) }
     }
 
     override fun onDestroy() {
-        textToSpeech?.run {
-            stop()
-            shutdown()
+        if (::ttsController.isInitialized) {
+            ttsController.shutdown()
         }
-        textToSpeech = null
         super.onDestroy()
-    }
-
-    private companion object {
-        const val UTTERANCE_ID = "aemx-korean-tts"
     }
 }
