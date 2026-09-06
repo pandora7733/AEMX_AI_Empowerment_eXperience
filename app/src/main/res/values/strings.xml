@@ -3,6 +3,7 @@
     <string name="tts_title">Android TTS 테스트</string>
     <string name="tts_description">아래 문장을 기기의 한국어 음성으로 재생합니다.</string>
     <string name="tts_text_label">재생할 문장</string>
+    <string name="tts_edit_hint">입력창을 눌러 원하는 문장으로 수정하세요.</string>
     <string name="tts_sample_text">안녕하세요</string>
     <string name="tts_speak">음성 재생</string>
     <string name="tts_status_initializing">음성 엔진을 준비하는 중입니다.</string>

@@ -3,19 +3,23 @@ package com.sihoo.aemx
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.text.InputType
+import android.view.Gravity
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import com.google.android.material.R as MaterialR
 import java.util.Locale
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var textToSpeech: TextToSpeech? = null
-    private lateinit var speechInput: EditText
+    private lateinit var speechInput: TextInputEditText
     private lateinit var speakButton: Button
     private lateinit var statusView: TextView
 
@@ -42,12 +46,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 setText(R.string.tts_description)
             }, matchWidthWrapHeight().apply { topMargin = spacing })
 
-            speechInput = EditText(this@MainActivity).apply {
-                setHint(R.string.tts_text_label)
-                setText(R.string.tts_sample_text)
-                setSelectAllOnFocus(true)
+            val speechInputLayout = TextInputLayout(
+                this@MainActivity,
+                null,
+                com.google.android.material.R.attr.textInputOutlinedStyle,
+            ).apply {
+                hint = getString(R.string.tts_text_label)
+                helperText = getString(R.string.tts_edit_hint)
+                endIconMode = TextInputLayout.END_ICON_CLEAR_TEXT
             }
-            addView(speechInput, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            speechInput = TextInputEditText(speechInputLayout.context).apply {
+                id = R.id.tts_speech_input
+                setText(R.string.tts_sample_text)
+                inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                    InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                gravity = Gravity.TOP or Gravity.START
+                minLines = 2
+                maxLines = 5
+                isSingleLine = false
+                setHorizontallyScrolling(false)
+                showSoftInputOnFocus = true
+                setSelection(text?.length ?: 0)
+                setOnClickListener { showKeyboard() }
+            }
+            speechInputLayout.addView(
+                speechInput,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(speechInputLayout, matchWidthWrapHeight().apply { topMargin = spacing })
 
             speakButton = Button(this@MainActivity).apply {
                 setText(R.string.tts_speak)
@@ -70,6 +101,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     )
 
     private fun dpToPx(dp: Int) = (dp * resources.displayMetrics.density).toInt()
+
+    private fun showKeyboard() {
+        speechInput.requestFocus()
+        val inputMethodManager = getSystemService(InputMethodManager::class.java)
+        inputMethodManager.showSoftInput(speechInput, 0)
+    }
 
     override fun onInit(status: Int) {
         val engine = textToSpeech
