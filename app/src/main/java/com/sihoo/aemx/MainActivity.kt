@@ -69,7 +69,7 @@ class MainActivity : AppCompatActivity() {
             }
             speechInputLayout.addView(
                 speechInput,
-                ViewGroup.LayoutParams(
+                LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                 ),
