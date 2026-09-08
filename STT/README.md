@@ -16,6 +16,84 @@ sherpa-onnx의 실시간 스트리밍 한국어 음성 인식(`sherpa-onnx-strea
 | 모델 | `sherpa-onnx-streaming-zipformer-korean-2024-06-16` (Zipformer, int8 경량화 mobile 버전) |
 | 방식 | Android AudioRecord로 마이크 입력 → OnlineRecognizer로 실시간 디코딩 |
 
+## 기능 명세서
+
+### 개요
+
+마이크로 들어오는 한국어 음성을 실시간(스트리밍)으로 텍스트로 변환한다. 네트워크 없이 기기 안에서만 동작한다(온디바이스).
+
+### 입력 / 출력
+
+| 구분 | 내용 |
+|---|---|
+| 입력 | 16kHz, mono, 16-bit PCM 오디오 샘플 (`AudioRecord`에서 100ms(1600 sample) 단위 청크로 공급) |
+| 출력 | `OnlineRecognizerResult` — `text: String`(인식된 문장), `tokens: Array<String>`, `timestamps: FloatArray`, `ysProbs: FloatArray` |
+| 권한 | `android.permission.RECORD_AUDIO` (런타임 권한 요청 필요) |
+
+### 핵심 API (`OnlineRecognizer.kt`, `OnlineStream.kt`)
+
+다른 파트에서 STT 결과를 가져다 쓰려면 아래 흐름을 그대로 따르면 된다 (`MainActivity.processSamples()`가 실제 사용 예시).
+
+```kotlin
+// 1. 앱 시작 시 한 번만 생성 (모델 로딩 비용이 있으므로 재사용)
+val recognizer = OnlineRecognizer(
+    assetManager = context.assets,
+    config = OnlineRecognizerConfig(
+        featConfig = getFeatureConfig(sampleRate = 16000, featureDim = 80),
+        modelConfig = getModelConfig(type = 14)!!,   // 14 = 한국어 zipformer
+        endpointConfig = getEndpointConfig(),
+        enableEndpoint = true,
+    )
+)
+
+// 2. 발화(하나의 세션)마다 스트림 생성
+val stream = recognizer.createStream()
+
+// 3. 오디오 청크가 들어올 때마다 공급하고 디코딩
+stream.acceptWaveform(samples: FloatArray, sampleRate = 16000)
+while (recognizer.isReady(stream)) {
+    recognizer.decode(stream)
+}
+
+// 4. 현재까지 인식된 텍스트 확인
+val text = recognizer.getResult(stream).text
+
+// 5. 침묵 등으로 문장이 끝났는지 확인 → 끝났으면 스트림 리셋
+if (recognizer.isEndpoint(stream)) {
+    recognizer.reset(stream)   // 다음 문장을 위해 상태 초기화
+}
+
+// 6. 완전히 끝나면 스트림 해제
+stream.release()
+```
+
+### 모델 / 설정
+
+| 항목 | 값 |
+|---|---|
+| 모델 | `sherpa-onnx-streaming-zipformer-korean-2024-06-16` (Zipformer transducer, int8 양자화) |
+| 모델 타입 코드 | `getModelConfig(type = 14)` (`OnlineRecognizer.kt` 참고) |
+| 필요 에셋 파일 | `encoder-epoch-99-avg-1.int8.onnx`, `decoder-epoch-99-avg-1.onnx`, `joiner-epoch-99-avg-1.int8.onnx`, `tokens.txt` |
+
+### Endpoint(발화 끝) 감지 규칙
+
+`getEndpointConfig()` 기준, 아래 셋 중 하나라도 만족하면 "문장이 끝났다"고 판단한다.
+
+| 규칙 | 조건 |
+|---|---|
+| rule1 | 무음 2.4초 이상 지속 (발화 내용 유무 무관) |
+| rule2 | 발화가 있었고, 그 뒤 무음 1.4초 이상 지속 |
+| rule3 | 발화 길이가 20초를 초과 |
+
+필요 시 `EndpointRule(mustContainNonSilence, minTrailingSilence, minUtteranceLength)` 값을 조정해서 문장 끊김 민감도를 바꿀 수 있다.
+
+### 성능 / 제약
+
+- 완전 온디바이스 처리 — 네트워크 불필요, 인터넷 끊겨도 동작
+- 모델 로딩(최초 `OnlineRecognizer` 생성) 시 약간의 지연 있음 → 앱 시작 시 미리 초기화해두는 걸 권장
+- int8 경량화 모델이라 정확도와 속도의 균형을 맞춘 버전 (실기기 테스트에서 짧은 문장 인식 정상 확인)
+- 네이티브 라이브러리(.so)는 `arm64-v8a`(실기기), `x86_64`(에뮬레이터)만 받아둠 — 32비트 기기 지원 필요하면 `armeabi-v7a`, `x86`도 `setup_assets.sh`에서 추가로 받아야 함
+
 ## 폴더 구조
 
 ```
