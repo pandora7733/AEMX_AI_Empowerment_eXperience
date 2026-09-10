@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?><!-- 메인 화면: 상단 툴바 + 프래그먼트 컨테이너 + 하단 네비게이션 + FAB 구조 -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/color_background"
+    tools:context=".ui.main.MainActivity">
+
+    <!-- 상단 앱바: 그림자 없이 배경과 같은 색으로 평평하게 -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBarMain"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/color_background"
+        app:elevation="@dimen/elevation_none"
+        app:liftOnScroll="false">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbarMain"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/color_background"
+            app:titleTextAppearance="@style/TextAppearance.AEMX.Title"
+            app:titleTextColor="@color/color_text_primary"
+            tools:title="@string/title_home" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <!-- 프래그먼트가 교체되는 영역. android:name 을 주지 않고 코드에서 add/show/hide 한다 -->
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/fragmentContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginBottom="@dimen/bottom_nav_height"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior" />
+
+    <!-- 계정 추가 버튼: 하단 네비게이션 위로 띄운다 -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabAddAccount"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="@dimen/space_m"
+        android:layout_marginBottom="@dimen/list_bottom_padding"
+        android:contentDescription="@string/fab_add_account"
+        app:backgroundTint="@color/color_primary"
+        app:elevation="@dimen/elevation_fab"
+        app:srcCompat="@drawable/ic_add_24"
+        app:tint="@color/color_on_primary" />
+
+    <!-- 하단 탭: 홈 / 계정 / 설정 -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/bottom_nav_height"
+        android:layout_gravity="bottom"
+        android:background="@color/color_surface"
+        app:elevation="@dimen/elevation_card"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

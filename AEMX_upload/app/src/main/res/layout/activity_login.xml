@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 로그인 화면: 앱의 첫인상이 되는 화면. 로고 · 입력 · 주 버튼 · 대체 수단 순으로 시선 흐름을 잡았다. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/color_background"
+    android:fillViewport="true"
+    android:scrollbars="none"
+    tools:context=".ui.auth.LoginActivity">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="@dimen/screen_horizontal_padding"
+        android:paddingTop="@dimen/space_xxxl"
+        android:paddingEnd="@dimen/screen_horizontal_padding"
+        android:paddingBottom="@dimen/space_l">
+
+        <!-- 브랜드 로고 -->
+        <ImageView
+            android:id="@+id/ivLoginLogo"
+            android:layout_width="@dimen/icon_xl"
+            android:layout_height="@dimen/icon_xl"
+            android:contentDescription="@string/cd_app_logo"
+            android:src="@drawable/ic_shield_24"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:tint="@color/color_primary" />
+
+        <!-- 타이틀 / 부제 -->
+        <TextView
+            android:id="@+id/tvLoginTitle"
+            style="@style/TextAppearance.AEMX.Headline"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_l"
+            android:text="@string/login_title"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/ivLoginLogo" />
+
+        <TextView
+            android:id="@+id/tvLoginSubtitle"
+            style="@style/TextAppearance.AEMX.Secondary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_xs"
+            android:lineSpacingExtra="@dimen/space_xxs"
+            android:text="@string/login_subtitle"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tvLoginTitle" />
+
+        <!-- 아이디 입력 -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilLoginId"
+            style="@style/Widget.AEMX.TextInputLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_xxl"
+            android:hint="@string/login_hint_id"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tvLoginSubtitle"
+            app:startIconContentDescription="@string/login_hint_id"
+            app:startIconDrawable="@drawable/ic_person_24"
+            app:startIconTint="@color/color_icon_tint">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etLoginId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:imeOptions="actionNext"
+                android:inputType="textEmailAddress"
+                android:maxLines="1"
+                android:textSize="@dimen/text_body_l"
+                tools:text="aemx.demo@example.com" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- 비밀번호 입력 (오른쪽 눈 아이콘으로 표시 전환) -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilLoginPassword"
+            style="@style/Widget.AEMX.TextInputLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_s"
+            android:hint="@string/login_hint_password"
+            app:endIconMode="password_toggle"
+            app:endIconTint="@color/color_icon_tint"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tilLoginId"
+            app:startIconContentDescription="@string/login_hint_password"
+            app:startIconDrawable="@drawable/ic_lock_24"
+            app:startIconTint="@color/color_icon_tint">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etLoginPassword"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:imeOptions="actionDone"
+                android:inputType="textPassword"
+                android:maxLines="1"
+                android:textSize="@dimen/text_body_l" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- 로그인 상태 유지 / 비밀번호 찾기 : 같은 baseline 좌우 배치 -->
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/cbKeepSignedIn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_s"
+            android:minHeight="@dimen/icon_l"
+            android:text="@string/login_keep_signed_in"
+            android:textAppearance="@style/TextAppearance.AEMX.Secondary"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tilLoginPassword" />
+
+        <TextView
+            android:id="@+id/tvForgotPassword"
+            style="@style/TextAppearance.AEMX.Secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="@dimen/space_xxs"
+            android:text="@string/login_forgot_password"
+            android:textColor="@color/color_primary"
+            app:layout_constraintBaseline_toBaselineOf="@+id/cbKeepSignedIn"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- 주 버튼 -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLogin"
+            style="@style/Widget.AEMX.Button"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/button_height"
+            android:layout_marginTop="@dimen/space_l"
+            android:text="@string/login_button"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/cbKeepSignedIn" />
+
+        <!-- 구분선 위에 '또는' 라벨을 겹쳐 얹어 상용 앱 스타일의 분리선을 만든다 -->
+        <com.google.android.material.divider.MaterialDivider
+            android:id="@+id/dividerLogin"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_xl"
+            app:dividerColor="@color/color_divider"
+            app:dividerThickness="@dimen/stroke_width"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/btnLogin" />
+
+        <TextView
+            android:id="@+id/tvLoginDividerOr"
+            style="@style/TextAppearance.AEMX.Caption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@color/color_background"
+            android:paddingStart="@dimen/space_s"
+            android:paddingEnd="@dimen/space_s"
+            android:text="@string/login_divider_or"
+            app:layout_constraintBottom_toBottomOf="@+id/dividerLogin"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="@+id/dividerLogin" />
+
+        <!-- 대체 로그인 수단 -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnBiometricLogin"
+            style="@style/Widget.AEMX.Button.Outlined"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/button_height"
+            android:layout_marginTop="@dimen/space_xl"
+            android:text="@string/login_biometric"
+            app:icon="@drawable/ic_fingerprint_24"
+            app:iconGravity="textStart"
+            app:iconPadding="@dimen/space_xs"
+            app:iconSize="@dimen/icon_s"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/dividerLogin" />
+
+        <!-- 회원가입 유도 : 화면이 남으면 하단에 붙고, 부족하면 내용에 밀려 내려간다 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_xl"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/btnBiometricLogin"
+            app:layout_constraintVertical_bias="1.0">
+
+            <TextView
+                android:id="@+id/tvGoSignUpLabel"
+                style="@style/TextAppearance.AEMX.Secondary"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/login_go_sign_up" />
+
+            <TextView
+                android:id="@+id/tvGoSignUp"
+                style="@style/TextAppearance.AEMX.Body"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="@dimen/space_xxs"
+                android:text="@string/login_go_sign_up_action"
+                android:textColor="@color/color_primary"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</ScrollView>

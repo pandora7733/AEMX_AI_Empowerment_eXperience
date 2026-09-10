@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 알약 배지 배경 - 중립 톤. "수동" 배지처럼 강조가 필요 없는 라벨에 사용 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <solid android:color="@color/color_chip_bg" />
+
+    <corners android:radius="@dimen/radius_pill" />
+</shape>
