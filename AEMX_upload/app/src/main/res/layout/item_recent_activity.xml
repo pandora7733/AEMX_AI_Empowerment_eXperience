@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?><!-- 홈 화면의 "최근 활동" 한 줄. 홈에서 include 로 3번 재사용한다 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="@dimen/space_s">
+
+    <!-- 활동 종류 아이콘 (코드에서 항목마다 다른 아이콘으로 교체) -->
+    <ImageView
+        android:id="@+id/ivActivityIcon"
+        android:layout_width="@dimen/avatar_s"
+        android:layout_height="@dimen/avatar_s"
+        android:background="@drawable/bg_icon_rounded"
+        android:contentDescription="@string/cd_activity_icon"
+        android:padding="@dimen/space_xs"
+        android:src="@drawable/ic_check_circle_24"
+        app:tint="@color/color_primary" />
+
+    <!-- 제목 + 부가 설명 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_s"
+        android:layout_marginEnd="@dimen/space_xs"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvActivityTitle"
+            style="@style/TextAppearance.AEMX.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/sample_activity_title_1"
+            android:textStyle="bold"
+            tools:text="네이버 자동 로그인 성공" />
+
+        <TextView
+            android:id="@+id/tvActivitySub"
+            style="@style/TextAppearance.AEMX.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_xxs"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/sample_activity_sub_1"
+            tools:text="Galaxy S24 · 서울" />
+
+    </LinearLayout>
+
+    <!-- 경과 시간 -->
+    <TextView
+        android:id="@+id/tvActivityTime"
+        style="@style/TextAppearance.AEMX.Caption"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:maxLines="1"
+        android:text="@string/sample_activity_time_1"
+        tools:text="3분 전" />
+
+</LinearLayout>

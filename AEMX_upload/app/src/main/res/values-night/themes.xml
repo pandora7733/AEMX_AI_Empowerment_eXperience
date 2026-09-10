@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- =====================================================================
+         AEMX 기본 테마 (다크)
+         색 값 자체는 values-night/colors.xml 이 이미 치환하므로
+         여기서는 상태바 아이콘 색만 어두운 배경에 맞게 바꾼다.
+         ===================================================================== -->
+    <style name="Theme.AEMX" parent="Theme.Material3.DayNight.NoActionBar">
+
+        <!-- 브랜드 색 -->
+        <item name="colorPrimary">@color/color_primary</item>
+        <item name="colorOnPrimary">@color/color_on_primary</item>
+        <item name="colorPrimaryContainer">@color/color_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/color_on_primary_container</item>
+        <item name="colorSecondary">@color/color_secondary</item>
+        <item name="colorOnSecondary">@color/color_on_secondary</item>
+
+        <!-- 배경과 표면 -->
+        <item name="android:colorBackground">@color/color_background</item>
+        <item name="colorSurface">@color/color_surface</item>
+        <item name="colorOnSurface">@color/color_text_primary</item>
+        <item name="colorSurfaceVariant">@color/color_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/color_text_secondary</item>
+
+        <!-- 오류 / 외곽선 -->
+        <item name="colorError">@color/color_danger</item>
+        <item name="colorOutline">@color/color_stroke</item>
+
+        <!-- 시스템 바 — 어두운 배경이므로 상태바 아이콘은 밝게(false) 둔다 -->
+        <item name="android:statusBarColor">@color/color_background</item>
+        <item name="android:navigationBarColor">@color/color_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
+
+        <!-- Material3 파생 색 보정 (라이트와 동일한 규칙) -->
+        <item name="colorSecondaryContainer">@color/color_primary_container</item>
+        <item name="colorOnSecondaryContainer">@color/color_on_primary_container</item>
+        <item name="colorErrorContainer">@color/color_danger_bg</item>
+        <item name="colorOnErrorContainer">@color/color_danger</item>
+        <item name="colorOutlineVariant">@color/color_divider</item>
+        <item name="colorSurfaceContainerLowest">@color/color_surface</item>
+        <item name="colorSurfaceContainerLow">@color/color_surface</item>
+        <item name="colorSurfaceContainer">@color/color_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/color_surface_variant</item>
+        <item name="colorSurfaceContainerHighest">@color/color_surface_variant</item>
+        <item name="elevationOverlayEnabled">false</item>
+
+        <!-- 기본 컴포넌트 스타일 -->
+        <item name="materialButtonStyle">@style/Widget.AEMX.Button</item>
+        <item name="textInputStyle">@style/Widget.AEMX.TextInputLayout</item>
+        <item name="materialCardViewStyle">@style/Widget.AEMX.Card</item>
+        <item name="chipStyle">@style/Widget.AEMX.Chip</item>
+    </style>
+
+</resources>

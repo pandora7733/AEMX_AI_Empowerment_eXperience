@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 계정 추가 화면: 사이트 정보 입력 / 분류 선택 / 자동 로그인 (AddAccountActivity.java 에서 사용) -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/color_background"
+    tools:context=".ui.accounts.AddAccountActivity">
+
+    <!-- 상단 앱바 -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/color_background"
+        app:elevation="@dimen/elevation_none"
+        app:liftOnScroll="false">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbarAddAccount"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/color_background"
+            app:navigationContentDescription="@string/action_back"
+            app:navigationIcon="@drawable/ic_arrow_back_24"
+            app:navigationIconTint="@color/color_text_primary"
+            app:title="@string/add_title"
+            app:titleTextColor="@color/color_text_primary" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/screen_horizontal_padding"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingEnd="@dimen/screen_horizontal_padding"
+            android:paddingBottom="@dimen/space_xxl">
+
+            <!-- 안내 문구 -->
+            <TextView
+                android:id="@+id/tvAddHeadline"
+                style="@style/TextAppearance.AEMX.Headline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/space_l"
+                android:text="@string/add_headline" />
+
+            <!-- 사이트 이름 -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilSiteName"
+                style="@style/Widget.AEMX.TextInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/add_hint_site_name"
+                app:startIconContentDescription="@string/cd_site_icon"
+                app:startIconDrawable="@drawable/ic_globe_24">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etSiteName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPersonName"
+                    android:maxLines="1"
+                    tools:text="네이버" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- 사이트 주소 -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilSiteUrl"
+                style="@style/Widget.AEMX.TextInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_s"
+                android:hint="@string/add_hint_site_url"
+                app:helperText="@string/add_helper_site_url"
+                app:helperTextEnabled="true"
+                app:startIconContentDescription="@null"
+                app:startIconDrawable="@drawable/ic_link_24">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etSiteUrl"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textUri"
+                    android:maxLines="1"
+                    tools:text="https://www.naver.com" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- 로그인 아이디 -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilLoginId"
+                style="@style/Widget.AEMX.TextInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_s"
+                android:hint="@string/add_hint_login_id"
+                app:startIconContentDescription="@null"
+                app:startIconDrawable="@drawable/ic_person_24">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etLoginId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textEmailAddress"
+                    android:maxLines="1"
+                    tools:text="aemx_demo" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- 로그인 비밀번호 -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilLoginPassword"
+                style="@style/Widget.AEMX.TextInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_s"
+                android:hint="@string/add_hint_login_password"
+                app:endIconMode="password_toggle"
+                app:startIconContentDescription="@null"
+                app:startIconDrawable="@drawable/ic_lock_24">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etLoginPassword"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword"
+                    android:maxLines="1" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- 메모 (여러 줄) -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilMemo"
+                style="@style/Widget.AEMX.TextInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_s"
+                android:hint="@string/add_hint_memo">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etMemo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="top|start"
+                    android:inputType="textMultiLine"
+                    android:maxLines="5"
+                    android:minLines="3"
+                    tools:text="회사 계정과 혼동 주의" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- ===== 분류 선택 ===== -->
+            <TextView
+                android:id="@+id/tvAddSectionCategory"
+                style="@style/TextAppearance.AEMX.SectionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_xxs"
+                android:layout_marginTop="@dimen/space_l"
+                android:layout_marginBottom="@dimen/space_xs"
+                android:text="@string/add_section_category" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chipGroupCategory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:chipSpacingHorizontal="@dimen/space_xs"
+                app:selectionRequired="true"
+                app:singleLine="false"
+                app:singleSelection="true">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipCategoryShopping"
+                    style="@style/Widget.AEMX.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="@string/add_category_shopping" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipCategorySns"
+                    style="@style/Widget.AEMX.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/add_category_sns" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipCategoryBank"
+                    style="@style/Widget.AEMX.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/add_category_bank" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipCategorySchool"
+                    style="@style/Widget.AEMX.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/add_category_school" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipCategoryEtc"
+                    style="@style/Widget.AEMX.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/add_category_etc" />
+
+            </com.google.android.material.chip.ChipGroup>
+
+            <!-- ===== 등록 후 자동 로그인 사용 ===== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.AEMX.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_l">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:minHeight="@dimen/list_row_height"
+                    android:orientation="horizontal"
+                    android:paddingStart="@dimen/space_m"
+                    android:paddingTop="@dimen/space_s"
+                    android:paddingEnd="@dimen/space_m"
+                    android:paddingBottom="@dimen/space_s">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/TextAppearance.AEMX.Body"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/add_auto_login" />
+
+                        <TextView
+                            style="@style/TextAppearance.AEMX.Secondary"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/space_xxs"
+                            android:text="@string/detail_auto_login_desc" />
+
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchAddAutoLogin"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/space_m"
+                        android:checked="true"
+                        android:contentDescription="@string/add_auto_login" />
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ===== 저장 / 취소 ===== -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSaveAccount"
+                style="@style/Widget.AEMX.Button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xl"
+                android:text="@string/action_save"
+                app:icon="@drawable/ic_check_circle_24"
+                app:iconGravity="textStart"
+                app:iconSize="@dimen/icon_s" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCancelAdd"
+                style="@style/Widget.AEMX.Button.Outlined"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/action_cancel" />
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

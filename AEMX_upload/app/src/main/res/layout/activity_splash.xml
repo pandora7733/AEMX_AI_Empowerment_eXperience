@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 스플래시 화면: 브랜드 그라데이션 배경 위에 로고 · 앱 이름 · 태그라인 · 로딩 표시를 보여준다. -->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gradient_brand"
+    android:paddingStart="@dimen/screen_horizontal_padding"
+    android:paddingEnd="@dimen/screen_horizontal_padding"
+    tools:context=".ui.splash.SplashActivity">
+
+    <!-- 로고 → 앱 이름 → 태그라인 : 세로 체인으로 묶어 화면 중앙보다 살짝 위에 배치 -->
+    <ImageView
+        android:id="@+id/ivSplashLogo"
+        android:layout_width="@dimen/icon_splash"
+        android:layout_height="@dimen/icon_splash"
+        android:contentDescription="@string/cd_app_logo"
+        android:src="@drawable/ic_shield_24"
+        app:layout_constraintBottom_toTopOf="@+id/tvSplashAppName"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.42"
+        app:layout_constraintVertical_chainStyle="packed"
+        app:tint="@color/white" />
+
+    <TextView
+        android:id="@+id/tvSplashAppName"
+        style="@style/TextAppearance.AEMX.Display"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_l"
+        android:letterSpacing="0.06"
+        android:text="@string/app_name"
+        android:textColor="@color/white"
+        app:layout_constraintBottom_toTopOf="@+id/tvSplashTagline"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/ivSplashLogo" />
+
+    <TextView
+        android:id="@+id/tvSplashTagline"
+        style="@style/TextAppearance.AEMX.Body"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_xs"
+        android:alpha="0.8"
+        android:gravity="center_horizontal"
+        android:text="@string/app_tagline"
+        android:textColor="@color/white"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/tvSplashAppName" />
+
+    <!-- 하단 로딩 영역: 인디케이터 + 안내 문구 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        app:layout_constraintBottom_toTopOf="@+id/tvSplashVersion"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginBottom="@dimen/space_xl">
+
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/progressSplash"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:indeterminate="true"
+            app:indicatorColor="@color/white"
+            app:indicatorSize="@dimen/icon_l"
+            app:trackCornerRadius="@dimen/space_xxs" />
+
+        <TextView
+            style="@style/TextAppearance.AEMX.Caption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_s"
+            android:alpha="0.8"
+            android:text="@string/splash_loading"
+            android:textColor="@color/white" />
+
+    </LinearLayout>
+
+    <!-- 버전 표기: 화면 최하단 고정 -->
+    <TextView
+        android:id="@+id/tvSplashVersion"
+        style="@style/TextAppearance.AEMX.Caption"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/space_xl"
+        android:alpha="0.6"
+        android:text="@string/app_version"
+        android:textColor="@color/white"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- ===== 팔레트(원색) — 직접 쓰지 말고 아래 시맨틱 색을 쓸 것 ===== -->
+    <color name="brand_50">#FFEEF2FF</color>
+    <color name="brand_100">#FFE0E7FF</color>
+    <color name="brand_200">#FFC7D2FE</color>
+    <color name="brand_500">#FF4F46E5</color>
+    <color name="brand_600">#FF4338CA</color>
+    <color name="brand_700">#FF3730A3</color>
+
+    <color name="teal_50">#FFECFEFF</color>
+    <color name="teal_500">#FF06B6D4</color>
+
+    <color name="green_50">#FFDCFCE7</color>
+    <color name="green_500">#FF16A34A</color>
+
+    <color name="amber_50">#FFFEF3C7</color>
+    <color name="amber_500">#FFF59E0B</color>
+
+    <color name="red_50">#FFFEE2E2</color>
+    <color name="red_500">#FFDC2626</color>
+
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+
+    <color name="gray_50">#FFF7F8FA</color>
+    <color name="gray_100">#FFF3F4F6</color>
+    <color name="gray_200">#FFE5E7EB</color>
+    <color name="gray_300">#FFD1D5DB</color>
+    <color name="gray_400">#FF9CA3AF</color>
+    <color name="gray_500">#FF6B7280</color>
+    <color name="gray_700">#FF374151</color>
+    <color name="gray_900">#FF111827</color>
+
+    <color name="night_bg">#FF0F1115</color>
+    <color name="night_surface">#FF171A21</color>
+    <color name="night_surface_variant">#FF1F232C</color>
+    <color name="night_divider">#FF2A2F3A</color>
+    <color name="night_text_primary">#FFF3F4F6</color>
+    <color name="night_text_secondary">#FF9AA3B2</color>
+
+    <!-- ===== 시맨틱 색 — 레이아웃/테마에서는 이 이름만 사용 ===== -->
+    <color name="color_primary">@color/brand_500</color>
+    <color name="color_primary_dark">@color/brand_700</color>
+    <color name="color_on_primary">@color/white</color>
+    <color name="color_primary_container">@color/brand_50</color>
+    <color name="color_on_primary_container">@color/brand_700</color>
+
+    <color name="color_secondary">@color/teal_500</color>
+    <color name="color_on_secondary">@color/white</color>
+
+    <color name="color_background">@color/gray_50</color>
+    <color name="color_surface">@color/white</color>
+    <color name="color_surface_variant">@color/gray_100</color>
+    <color name="color_divider">@color/gray_200</color>
+    <color name="color_stroke">@color/gray_200</color>
+
+    <color name="color_text_primary">@color/gray_900</color>
+    <color name="color_text_secondary">@color/gray_500</color>
+    <color name="color_text_tertiary">@color/gray_400</color>
+    <color name="color_icon_tint">@color/gray_500</color>
+
+    <color name="color_success">@color/green_500</color>
+    <color name="color_success_bg">@color/green_50</color>
+    <color name="color_warning">@color/amber_500</color>
+    <color name="color_warning_bg">@color/amber_50</color>
+    <color name="color_danger">@color/red_500</color>
+    <color name="color_danger_bg">@color/red_50</color>
+
+    <color name="color_chip_bg">@color/gray_100</color>
+    <color name="color_scrim">#33000000</color>
+
+    <!-- 런처 아이콘 배경 -->
+    <color name="ic_launcher_background">@color/brand_500</color>
+
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 보조 면 배경: 배경보다 한 톤 눌린 회색 블록 (섹션·인풋 감싸기용) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <solid android:color="@color/color_surface_variant" />
+
+    <corners android:radius="@dimen/radius_m" />
+</shape>

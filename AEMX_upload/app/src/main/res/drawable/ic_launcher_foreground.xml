@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  런처 아이콘 전경 레이어 (108x108).
+  적응형 아이콘 안전영역(가운데 66x66)을 벗어나지 않도록 방패를 x 31~77, y 27~82 범위 안에 그린다.
+  방패 안쪽 열쇠구멍은 evenOdd 규칙으로 뚫어서 배경 레이어 색이 비쳐 보이게 한다.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 방패 바깥으로 살짝 번지는 옅은 후광 (본체를 1.07배 키운 같은 모양) -->
+    <path
+        android:fillAlpha="0.22"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,25.6 L75.9,34.7 C77.5,35.3 78.6,36.8 78.6,38.5 L78.6,53.9 C78.6,68.4 68.6,80.2 54,83.9 C39.5,80.2 29.4,68.4 29.4,53.9 L29.4,38.5 C29.4,36.8 30.5,35.3 32.1,34.7 Z" />
+
+    <!-- 방패 본체 + 열쇠구멍(evenOdd 로 내부를 비움) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,27.5 L74.5,36 C76,36.6 77,38 77,39.6 L77,54 C77,67.5 67.6,78.5 54,82 C40.4,78.5 31,67.5 31,54 L31,39.6 C31,38 32,36.6 33.5,36 Z M54,43.5 C58.1,43.5 61.5,46.9 61.5,51 C61.5,53.6 60.1,55.9 58,57.2 L59.6,66.5 C59.8,67.6 59,68.5 57.9,68.5 L50.1,68.5 C49,68.5 48.2,67.6 48.4,66.5 L50,57.2 C47.9,55.9 46.5,53.6 46.5,51 C46.5,46.9 49.9,43.5 54,43.5 Z" />
+</vector>
