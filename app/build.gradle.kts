@@ -37,6 +37,8 @@ dependencies {
     implementation(libs.material)
     // 파이프라인 상태머신은 코루틴/Flow 위에서 돈다.
     implementation(libs.kotlinx.coroutines.android)
+    // lifecycleScope 로 화면 수명에 맞춰 파이프라인을 돌린다.
+    implementation(libs.androidx.lifecycle.runtime.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -87,6 +87,32 @@ class FakeActionExecutor(
 }
 
 /**
+ * 명령을 받을 때마다 대본에 적힌 화면으로 넘어가는 가짜 실행모듈.
+ *
+ * 실제 조작이 화면을 바꾸는 효과를 흉내 낸다. [screensAfterEach] 의 n번째 값이
+ * n번째 명령을 수행한 뒤의 화면이 되고, **null 이면 화면이 그대로다** —
+ * 눌렀는데 아무 반응이 없는 경우를 만들어 재분석 경로를 태울 수 있다.
+ * 대본이 동나면 그 뒤로는 화면이 바뀌지 않는다.
+ */
+class ScriptedActionExecutor(
+    private val observer: FakeScreenObserver,
+    private val screensAfterEach: List<ScreenSnapshot?>,
+    private val ready: Boolean = true
+) : ActionExecutor {
+
+    val performed = mutableListOf<ActionExecutor.Command>()
+
+    override fun isReady(): Boolean = ready
+
+    override suspend fun execute(command: ActionExecutor.Command): ExecutionResult {
+        val next = screensAfterEach.getOrNull(performed.size)
+        performed += command
+        if (next != null) observer.advanceTo(next)
+        return ExecutionResult.Performed
+    }
+}
+
+/**
  * 대본대로 화면을 바꿔 주는 가짜 화면 관찰자.
  *
  * [advanceTo] 를 부르면 그 화면으로 바뀌고 변화 이벤트를 흘린다.

@@ -14,4 +14,10 @@
     <string name="tts_status_init_failed">음성 엔진을 초기화하지 못했습니다.</string>
     <string name="tts_status_korean_unavailable">이 기기의 음성 엔진에서 한국어를 지원하지 않습니다.</string>
     <string name="tts_status_speak_failed">음성 재생을 시작하지 못했습니다.</string>
+    <string name="pipeline_title">파이프라인 테스트</string>
+    <string name="pipeline_description">STT·LLM·실행모듈이 아직 합류하지 않아 가짜 구현으로 흐름만 확인하는 개발용 화면입니다.</string>
+    <string name="pipeline_command_label">음성 명령 (STT 결과 대신 직접 입력)</string>
+    <string name="pipeline_sample_command">알라딘에서 로그인하고 싶어</string>
+    <string name="pipeline_run">실행</string>
+    <string name="pipeline_state_idle">대기 중</string>
 </resources>
