@@ -1,6 +1,65 @@
 # AEMX
 
-AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 이 문서는 저장소를 처음 내려받은 뒤 Android 개발환경을 구성하고, 프로젝트를 빌드하여 개발을 시작하기까지의 절차를 설명합니다.
+AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하면 앱을 대신 조작해주는 접근성 도우미로, 스마트폰 사용이 어려운 고령층·장애인 사용자가 음성만으로 온라인 서점(교보문고, 알라딘)에서 로그인·검색·구매를 할 수 있게 하는 것이 목표입니다.
+
+아래 "프로젝트 현황"은 각 파트의 진행 상태를, 1장부터는 개발환경 구성 및 빌드 절차를 설명합니다.
+
+## 프로젝트 현황
+
+### 전체 파이프라인
+
+```text
+사용자 음성 → [STT] → 텍스트 → [LLM] → 실행계획 JSON → [AccessibilityService] → 실제 화면 조작
+                                                                    ↓
+                                                        [TTS] 결과 음성 안내
+```
+
+### 파트별 상태
+
+| 파트 | 담당 | 상태 | 문서 |
+| --- | --- | --- | --- |
+| STT (음성 인식) | 배재준 | 완료 — sherpa-onnx 한국어 스트리밍 인식, 실기기 확인 | [STT/README.md](STT/README.md) |
+| TTS (음성 출력) | 공규태 | 완료 — Android TextToSpeech 한국어 재생 | [TTS/README.md](TTS/README.md) |
+| LLM (의도 분석) | 배재준 | 완료 — 온디바이스 Qwen3 1.7B, 실기기 확인 | [LLM/README.md](LLM/README.md) |
+| AccessibilityService (화면 조작) | 공규태 | 진행 예정 | [TASK_공규태.md](TASK_공규태.md) |
+| 파이프라인 연결 + 오류 재분석 | 김정우 | 진행 예정 | [TASK_김정우.md](TASK_김정우.md) |
+
+STT·TTS·LLM은 각각 독립 실행형으로 동작 검증까지 끝났고, `main`에 병합되어 있습니다. 아직 세 파트를 하나로 이어붙이지는 않았습니다.
+
+### LLM 실기기 테스트 결과 (갤럭시 S22 Ultra, Android 16)
+
+| 명령 | 응답 시간 | 결과 |
+| --- | --- | --- |
+| "교보문고에서 로그인하고 싶어" | 31.5초 | 정확 |
+| "알라딘에서 데미안 검색해줘" | 34.4초 | 정확 |
+| "알라딘에서 미움받을 용기 사고싶어" | 22.8초 | 정확 |
+
+초기에는 한 명령에 93초가 걸렸으나, Qwen3 thinking 모드가 75초를 차지하는 것을 확인하고 생각 토큰을 150개로 제한하여 약 3배 단축했습니다(정확도 손실 없음). 자세한 내용은 [LLM/README.md](LLM/README.md)를 참고합니다.
+
+에뮬레이터는 arm64 번역 오버헤드 때문에 추론 도중 앱이 강제 종료되므로, LLM 파트는 실기기에서 테스트해야 합니다.
+
+### 폴더 구조
+
+```text
+AEMX_AI_Empowerment_eXperience/
+├── app/          메인 앱 모듈 (com.sihoo.aemx) — 현재 TTS 검증 화면
+├── STT/          음성 인식 참고 프로젝트 (독립 실행형)
+├── TTS/          음성 출력 파트 문서
+├── LLM/          의도 분석 참고 프로젝트 (독립 실행형) + 프롬프트·빌드 스크립트
+└── AEMX_upload/  제출용 자료
+```
+
+모델 파일과 대용량 네이티브 라이브러리는 저장소에 커밋하지 않습니다. 각 파트의 setup 스크립트(`STT/setup_assets.sh`, `LLM/setup_llamademo.sh`)로 내려받습니다.
+
+### 브랜치
+
+| 브랜치 | 용도 |
+| --- | --- |
+| `main` | STT + TTS + LLM 병합 완료 |
+| `feature/accessibility` | AccessibilityService 실행 모듈 (공규태) |
+| `feature/pipeline` | 파이프라인 연결 + 오류 재분석 (김정우) |
+
+작업은 각자 브랜치에서 진행하고, PR을 올려 팀 확인 후 `main`에 병합합니다.
 
 ## 1. 프로젝트 구성
 
@@ -209,7 +268,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Android Studio에서 `app` 실행 구성을 선택한 뒤 `Run`을 눌러도 됩니다.
 
-> 참고: 현재 초기 프로젝트의 `AndroidManifest.xml`에는 실행 가능한 Activity가 선언되어 있지 않습니다. 따라서 APK 빌드는 가능하지만 Android Studio의 `Run`에서 기본 실행 Activity를 찾지 못할 수 있습니다. 화면을 실행하려면 Activity를 추가하고 Manifest에 `MAIN`/`LAUNCHER` 인텐트 필터를 선언해야 합니다.
+> 참고: `app` 모듈에는 TTS 검증용 `MainActivity`가 실행 Activity로 선언되어 있어 `Run`으로 바로 실행됩니다. STT·LLM은 각각 `STT/`, `LLM/` 아래 독립 프로젝트로 있으므로, 해당 파트를 실행하려면 그 폴더를 Android Studio에서 따로 열어야 합니다.
 
 ## 9. 자주 발생하는 문제
 
