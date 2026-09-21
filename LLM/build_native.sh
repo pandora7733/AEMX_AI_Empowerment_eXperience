@@ -42,9 +42,14 @@ fi
 echo "=== libai-chat.so 컴파일 중 ==="
 "$CLANGXX" \
   -std=c++17 -fPIC -shared -O2 \
+  -Wl,-z,max-page-size=16384 \
   -I"$LLAMA_SRC" -I"$LLAMA_SRC/common" -I"$LLAMA_SRC/include" -I"$LLAMA_SRC/ggml/include" -I"$LLAMA_SRC/ggml/src" \
   "$CPP_DIR/ai_chat.cpp" \
   -L"$JNILIBS" -lllama -lllama-common -landroid -llog \
   -o "$JNILIBS/libai-chat.so"
 
-echo "완료: $JNILIBS/libai-chat.so"
+echo "=== libc++_shared.so 복사 중 (libai-chat.so 실행에 필요) ==="
+CXX_SHARED=$(find "$NDK_DIR/toolchains/llvm/prebuilt" -path "*aarch64-linux-android/libc++_shared.so" | head -1)
+cp "$CXX_SHARED" "$JNILIBS/"
+
+echo "완료: $JNILIBS/libai-chat.so, $JNILIBS/libc++_shared.so"

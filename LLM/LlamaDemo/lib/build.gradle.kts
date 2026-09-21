@@ -53,7 +53,10 @@ android {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.datastore.preferences)
+    // AEMX: androidx.datastore.preferences 제거함 - 코드에서 전혀 안 쓰이는데
+    // x86_64용 .so(libdatastore_shared_counter.so)를 같이 넣고 있어서, 안드로이드가
+    // 이 앱의 "네이티브 지원 ABI"를 x86_64로 착각하고 arm64-v8a 폴더(우리 llama
+    // 라이브러리들이 있는 곳)를 통째로 무시해버리는 원인이었음.
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

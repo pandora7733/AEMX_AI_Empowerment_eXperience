@@ -49,5 +49,7 @@ androidx = [
     "androidx-appcompat",
     "androidx-constraintlayout",
     "androidx-core-ktx",
-    "androidx-datastore-preferences",
+    # AEMX: androidx-datastore-preferences 제거함 - 코드에서 안 쓰이는데
+    # x86_64용 .so를 같이 실어서 안드로이드의 ABI 선택을 망가뜨리는 원인이었음
+    # (lib/build.gradle.kts 주석 참고).
 ]

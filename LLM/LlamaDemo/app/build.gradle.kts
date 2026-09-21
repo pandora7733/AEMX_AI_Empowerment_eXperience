@@ -20,6 +20,13 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // AEMX: 명시적으로 arm64-v8a만 선언. lib 모듈의 llama .so들이 arm64 전용이라,
+        // 다른 의존성이 x86_64 .so를 끼워넣으면 안드로이드가 x86_64를 "지원 ABI"로
+        // 착각해서 arm64-v8a 폴더 전체를 무시해버리는 문제가 있었음(datastore 사건 참고).
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
