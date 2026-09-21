@@ -1,0 +1,11 @@
+/build
+
+# AEMX: 미리 빌드된 llama.cpp .so (용량 문제로 커밋 안 함, setup_llamademo.sh로 받음).
+# libai-chat.so(우리가 직접 빌드, 수십 KB)와 libc++_shared.so(NDK 제공 C++
+# 런타임, libai-chat.so 실행에 필요, ~1.8MB)는 예외로 커밋해둠 - 이 둘만 있으면
+# CMake 없이 바로 실행됨 (build_native.sh 참고).
+/src/main/jniLibs/*
+!/src/main/jniLibs/*/
+/src/main/jniLibs/*/*
+!/src/main/jniLibs/*/libai-chat.so
+!/src/main/jniLibs/*/libc++_shared.so
