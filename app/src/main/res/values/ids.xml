@@ -1,0 +1,3 @@
+<resources>
+    <item name="tts_speech_input" type="id" />
+</resources>
