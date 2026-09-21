@@ -27,6 +27,12 @@ static std::string join(const std::vector<T> &values, const std::string &delim) 
 constexpr int   N_THREADS_MIN           = 2;
 constexpr int   N_THREADS_MAX           = 4;
 constexpr int   N_THREADS_HEADROOM      = 2;
+// AEMX: 토큰 생성(디코드)은 메모리 대역폭이 병목이라 스레드를 늘려도 이득이 적거나
+// 오히려 동기화 비용 때문에 느려질 수 있어 N_THREADS_MAX를 보수적으로 유지함.
+// 반면 프롬프트 처리(prefill, 시스템 프롬프트/사용자 입력을 한번에 디코드하는 것)는
+// 완전 병렬화가 가능한 연산이라 코어를 최대한 쓰는 게 유리함 - 실기기(8코어)에서
+// 이 부분만 별도로 더 많은 스레드를 쓰도록 분리함.
+constexpr int   N_THREADS_BATCH_HEADROOM = 1;
 
 constexpr int   DEFAULT_CONTEXT_SIZE    = 8192;
 constexpr int   OVERFLOW_HEADROOM       = 4;
@@ -35,6 +41,15 @@ constexpr int   BATCH_SIZE              = 512;
 // temperature=0(결정적 출력)으로 고정. 0.3에서는 같은 입력도 가끔 다른
 // (틀린) 결과가 나오는 걸 PC 테스트에서 확인함 (LLM/README.md 참고).
 constexpr float DEFAULT_SAMPLER_TEMP    = 0.0f;
+
+// AEMX: Qwen3의 thinking 모드(<think>...</think>)는 복잡한 문장의 정확도를
+// 높여주지만, 실기기 로그 확인 결과 한 번 생각하는 데 75초 넘게 걸리는 경우가
+// 있었음(의도분석처럼 즉시 응답이 필요한 AI 도우미 용도로는 너무 느림). 정확도
+// 이점은 유지하되 최악의 지연을 막기 위해, 생각이 이 토큰 수를 넘으면 강제로
+// </think>를 삽입해서 답변으로 넘어가게 함.
+constexpr llama_token THINK_START_TOKEN = 151667;
+constexpr llama_token THINK_END_TOKEN   = 151668;
+constexpr int   MAX_THINK_TOKENS        = 150;
 
 static llama_model                      * g_model;
 static llama_context                    * g_context;
@@ -83,10 +98,12 @@ static llama_context *init_context(llama_model *model, const int n_ctx = DEFAULT
     }
 
     // Multi-threading setup
+    const int n_cores = (int) sysconf(_SC_NPROCESSORS_ONLN);
     const int n_threads = std::max(N_THREADS_MIN, std::min(N_THREADS_MAX,
-                                                     (int) sysconf(_SC_NPROCESSORS_ONLN) -
-                                                     N_THREADS_HEADROOM));
-    LOGi("%s: Using %d threads", __func__, n_threads);
+                                                     n_cores - N_THREADS_HEADROOM));
+    const int n_threads_batch = std::max(N_THREADS_MIN, n_cores - N_THREADS_BATCH_HEADROOM);
+    LOGi("%s: Using %d threads (generation), %d threads (batch/prefill), %d cores detected",
+         __func__, n_threads, n_threads_batch, n_cores);
 
     // Context parameters setup
     llama_context_params ctx_params = llama_context_default_params();
@@ -99,7 +116,7 @@ static llama_context *init_context(llama_model *model, const int n_ctx = DEFAULT
     ctx_params.n_batch = BATCH_SIZE;
     ctx_params.n_ubatch = BATCH_SIZE;
     ctx_params.n_threads = n_threads;
-    ctx_params.n_threads_batch = n_threads;
+    ctx_params.n_threads_batch = n_threads_batch;
     auto *context = llama_init_from_model(g_model, ctx_params);
     if (context == nullptr) {
         LOGe("%s: llama_new_context_with_model() returned null)", __func__);
@@ -309,11 +326,15 @@ static std::string chat_add_and_format(const std::string &role, const std::strin
 static llama_pos stop_generation_position;
 static std::string cached_token_chars;
 static std::ostringstream assistant_ss;
+static bool in_thinking;
+static int think_token_count;
 
 static void reset_short_term_states() {
     stop_generation_position = 0;
     cached_token_chars.clear();
     assistant_ss.str("");
+    in_thinking = false;
+    think_token_count = 0;
 }
 
 static int decode_tokens_in_batches(
@@ -505,7 +526,20 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     }
 
     // Sample next token
-    const auto new_token_id = common_sampler_sample(g_sampler, g_context, -1);
+    auto new_token_id = common_sampler_sample(g_sampler, g_context, -1);
+
+    // Enforce thinking token budget: force-close a runaway <think> block
+    if (new_token_id == THINK_START_TOKEN) {
+        in_thinking = true;
+        think_token_count = 0;
+    } else if (new_token_id == THINK_END_TOKEN) {
+        in_thinking = false;
+    } else if (in_thinking && ++think_token_count >= MAX_THINK_TOKENS) {
+        LOGw("%s: Thinking budget (%d tokens) exceeded, forcing </think>", __func__, MAX_THINK_TOKENS);
+        new_token_id = THINK_END_TOKEN;
+        in_thinking = false;
+    }
+
     common_sampler_accept(g_sampler, new_token_id, true);
 
     // Populate the batch with new token, then decode
