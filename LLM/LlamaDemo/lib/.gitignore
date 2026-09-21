@@ -1,1 +1,9 @@
 /build
+
+# AEMX: 미리 빌드된 llama.cpp .so (용량 문제로 커밋 안 함, setup_llamademo.sh로 받음).
+# libai-chat.so는 예외 - 우리가 직접 빌드한 작은 파일(수십 KB)이고, 이게 있어야
+# CMake 없이 바로 실행되니 커밋해둠 (build_native.sh 참고).
+/src/main/jniLibs/*
+!/src/main/jniLibs/*/
+/src/main/jniLibs/*/*
+!/src/main/jniLibs/*/libai-chat.so

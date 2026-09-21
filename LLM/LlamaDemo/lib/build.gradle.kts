@@ -7,11 +7,6 @@ android {
     namespace = "com.arm.aichat"
     compileSdk = 36
 
-    // AEMX: NDK 29는 아직 rc1(정식 출시 전)이라 CMake 3.31.6과 조합했을 때
-    // C 컴파일러 식별 직후 cmake.exe가 크래시하는 문제가 있었음.
-    // 안정적인 NDK 27로 낮춰서 사용.
-    ndkVersion = "27.2.12479018"
-
     defaultConfig {
         minSdk = 33
 
@@ -19,33 +14,16 @@ android {
         consumerProguardFiles("consumer-rules.pro")
 
         ndk {
-             abiFilters += listOf("arm64-v8a", "x86_64")
-        }
-        externalNativeBuild {
-            cmake {
-                arguments += "-DCMAKE_BUILD_TYPE=Release"
-                arguments += "-DCMAKE_MESSAGE_LOG_LEVEL=DEBUG"
-                arguments += "-DCMAKE_VERBOSE_MAKEFILE=ON"
-
-                arguments += "-DBUILD_SHARED_LIBS=ON"
-                arguments += "-DLLAMA_BUILD_APP=OFF"
-                arguments += "-DLLAMA_BUILD_COMMON=ON"
-                arguments += "-DLLAMA_OPENSSL=OFF"
-
-                arguments += "-DGGML_NATIVE=OFF"
-                arguments += "-DGGML_BACKEND_DL=ON"
-                arguments += "-DGGML_CPU_ALL_VARIANTS=ON"
-                arguments += "-DGGML_LLAMAFILE=OFF"
-            }
+             // AEMX: 이 PC에서 CMake가 NDK 툴체인으로 컴파일러를 식별할 때 원인불명
+             // 크래시(재현 조건 특정 못 함)가 있어서, Gradle의 externalNativeBuild(CMake)를
+             // 아예 쓰지 않기로 함. 대신 NDK의 clang++를 직접 호출해서 libai-chat.so를
+             // 미리 컴파일해두고 jniLibs에 넣음 (build_native.sh 참고, llama 본체 .so들과
+             // 같은 방식). 그 .so가 arm64-v8a만 있어서 x86_64 제외.
+             // 에뮬레이터가 아니라 실기기로 테스트할 것.
+             abiFilters += listOf("arm64-v8a")
         }
         aarMetadata {
             minCompileSdk = 35
-        }
-    }
-    externalNativeBuild {
-        cmake {
-            path("src/main/cpp/CMakeLists.txt")
-            version = "3.31.6"
         }
     }
     compileOptions {
