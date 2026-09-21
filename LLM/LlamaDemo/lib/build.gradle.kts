@@ -1,0 +1,82 @@
+plugins {
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.jetbrains.kotlin.android)
+}
+
+android {
+    namespace = "com.arm.aichat"
+    compileSdk = 36
+
+    // AEMX: NDK 29는 아직 rc1(정식 출시 전)이라 CMake 3.31.6과 조합했을 때
+    // C 컴파일러 식별 직후 cmake.exe가 크래시하는 문제가 있었음.
+    // 안정적인 NDK 27로 낮춰서 사용.
+    ndkVersion = "27.2.12479018"
+
+    defaultConfig {
+        minSdk = 33
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles("consumer-rules.pro")
+
+        ndk {
+             abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += "-DCMAKE_BUILD_TYPE=Release"
+                arguments += "-DCMAKE_MESSAGE_LOG_LEVEL=DEBUG"
+                arguments += "-DCMAKE_VERBOSE_MAKEFILE=ON"
+
+                arguments += "-DBUILD_SHARED_LIBS=ON"
+                arguments += "-DLLAMA_BUILD_APP=OFF"
+                arguments += "-DLLAMA_BUILD_COMMON=ON"
+                arguments += "-DLLAMA_OPENSSL=OFF"
+
+                arguments += "-DGGML_NATIVE=OFF"
+                arguments += "-DGGML_BACKEND_DL=ON"
+                arguments += "-DGGML_CPU_ALL_VARIANTS=ON"
+                arguments += "-DGGML_LLAMAFILE=OFF"
+            }
+        }
+        aarMetadata {
+            minCompileSdk = 35
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlin {
+        jvmToolchain(17)
+
+        compileOptions {
+            targetCompatibility = JavaVersion.VERSION_17
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    publishing {
+        singleVariant("release") {
+            withJavadocJar()
+        }
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.datastore.preferences)
+
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+}
