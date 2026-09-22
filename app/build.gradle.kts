@@ -2,6 +2,9 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+/** 빌드할 때 만들어 넣는 에셋이 모이는 곳. 아래 copySystemPrompt 참고. */
+val generatedAssetsDir = layout.buildDirectory.dir("generated/aemxAssets")
+
 android {
     namespace = "com.sihoo.aemx"
     compileSdk {
@@ -41,12 +44,15 @@ android {
     // 시스템 프롬프트는 LLM/system_prompt.txt 하나만 진짜로 친다. 빌드할 때 assets 로
     // 복사해서 앱이 읽게 한다 — 예전엔 코드 상수로 복사해 두는 바람에 프롬프트를 고치면
     // 두 곳을 같이 고쳐야 했고, 안 고치면 조용히 어긋났다.
-    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/aemxAssets"))
+    //
+    // AGP 9 는 소스 경로로 Provider 를 거부해서(생성물인지 원본인지 구분할 수 없다는 이유)
+    // 경로를 File 로 풀어서 넘기고, 복사 시점은 아래 preBuild 의존으로 직접 보장한다.
+    sourceSets["main"].assets.srcDir(generatedAssetsDir.get().asFile)
 }
 
 val copySystemPrompt by tasks.registering(Copy::class) {
     from(rootProject.file("LLM/system_prompt.txt"))
-    into(layout.buildDirectory.dir("generated/aemxAssets"))
+    into(generatedAssetsDir)
 }
 
 tasks.named("preBuild") {
