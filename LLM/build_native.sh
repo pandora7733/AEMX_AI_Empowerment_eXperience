@@ -33,10 +33,15 @@ if [ -z "$NDK_DIR" ]; then
 fi
 echo "사용할 NDK: $NDK_DIR"
 
-CLANGXX="$NDK_DIR/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android33-clang++.cmd"
+# 이 값이 앱 전체의 minSdk 하한을 정한다. llama.cpp 미리 빌드된 .so 들이 API 28
+# 기준이라 그보다 낮출 수는 없고, 28이면 안드로이드 9 이상이라 대부분의 기기가 들어온다.
+# (처음엔 33으로 잡았다가, 앱 minSdk를 33까지 끌어올려야 해서 28로 낮춤)
+API_LEVEL=28
+
+CLANGXX="$NDK_DIR/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android${API_LEVEL}-clang++.cmd"
 if [ ! -f "$CLANGXX" ]; then
   # macOS/Linux용 fallback (prebuilt 디렉터리명이 다름)
-  CLANGXX=$(find "$NDK_DIR/toolchains/llvm/prebuilt" -maxdepth 2 -name "aarch64-linux-android33-clang++*" | head -1)
+  CLANGXX=$(find "$NDK_DIR/toolchains/llvm/prebuilt" -maxdepth 2 -name "aarch64-linux-android${API_LEVEL}-clang++*" | head -1)
 fi
 
 echo "=== libai-chat.so 컴파일 중 ==="

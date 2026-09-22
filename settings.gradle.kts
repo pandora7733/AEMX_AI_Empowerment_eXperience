@@ -24,4 +24,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "AEMX"
 include(":app")
+// 폴더 이름이 llm 이 아니라 llm-engine 인 이유: 윈도우는 대소문자를 구분하지 않아서
+// llm/ 을 만들면 기존 LLM/ 폴더와 같은 것으로 취급된다. 팀원 환경(리눅스/맥)에서만
+// 깨지는 종류의 문제라 아예 겹치지 않는 이름을 쓴다.
+include(":llm-engine")
  

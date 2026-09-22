@@ -1,9 +1,11 @@
 package com.sihoo.aemx.pipeline.ui
 
 import android.os.Bundle
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -21,9 +23,13 @@ import com.sihoo.aemx.pipeline.fake.FakeCredentialStore
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
 import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
+import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
+import com.sihoo.aemx.pipeline.port.PlanGenerator
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.google.android.material.R as MaterialR
 
 /**
@@ -40,6 +46,8 @@ class PipelineDebugActivity : AppCompatActivity() {
 
     private lateinit var commandInput: TextInputEditText
     private lateinit var runButton: Button
+    private lateinit var realLlmSwitch: CheckBox
+    private var llmPlanner: LlamaPlanGenerator? = null
     private lateinit var stateView: TextView
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
@@ -62,10 +70,46 @@ class PipelineDebugActivity : AppCompatActivity() {
      */
     private fun resetPipeline() {
         collectJob?.cancel()
-        orchestrator = buildOrchestrator()
+        orchestrator = buildOrchestrator(planner = null)
         collectJob = lifecycleScope.launch {
             launch { orchestrator.state.collect { render(it) } }
             launch { orchestrator.log.collect { entries -> renderLog(entries) } }
+        }
+    }
+
+    /**
+     * 온디바이스 LLM 을 준비해서 파이프라인에 꽂는다.
+     *
+     * 모델이 1.2GB 라 이 앱에서 처음 켜면 내려받는다(Wi-Fi 권장). 준비가 끝날 때까지
+     * 실행 버튼을 막고 진행 상황을 상태줄에 보여 준다.
+     */
+    private fun prepareRealLlm() {
+        realLlmSwitch.isEnabled = false
+        runButton.isEnabled = false
+
+        lifecycleScope.launch {
+            val planner = llmPlanner ?: LlamaPlanGenerator(applicationContext).also { llmPlanner = it }
+            try {
+                withContext(Dispatchers.IO) {
+                    planner.prepare { _, message ->
+                        lifecycleScope.launch { stateView.text = message }
+                    }
+                }
+                collectJob?.cancel()
+                orchestrator = buildOrchestrator(planner = planner)
+                collectJob = lifecycleScope.launch {
+                    launch { orchestrator.state.collect { render(it) } }
+                    launch { orchestrator.log.collect { entries -> renderLog(entries) } }
+                }
+                stateView.text = getString(R.string.pipeline_llm_ready)
+            } catch (e: Exception) {
+                Log.e(TAG, "LLM 준비 실패", e)
+                stateView.text = getString(R.string.pipeline_llm_failed, e.message ?: "")
+                realLlmSwitch.isChecked = false
+            } finally {
+                realLlmSwitch.isEnabled = true
+                runButton.isEnabled = true
+            }
         }
     }
 
@@ -76,7 +120,7 @@ class PipelineDebugActivity : AppCompatActivity() {
      * 명령을 받을 때마다 미리 정해 둔 화면으로 넘어간다. 두 번째 명령에서는
      * 일부러 화면이 바뀌지 않게 해서 **재분석 경로가 눈에 보이도록** 해 뒀다.
      */
-    private fun buildOrchestrator(): PipelineOrchestrator {
+    private fun buildOrchestrator(planner: PlanGenerator?): PipelineOrchestrator {
         val observer = FakeScreenObserver(
             ScreenSnapshot(
                 packageName = "com.android.launcher",
@@ -105,7 +149,7 @@ class PipelineDebugActivity : AppCompatActivity() {
             )
         )
 
-        val planner = FakePlanGenerator(
+        val effectivePlanner = planner ?: FakePlanGenerator(
             responses = listOf(
                 """{"app": "알라딘", "steps": [{"action": "open_app", "target": "알라딘"}, {"action": "tap", "target": "로그인"}, {"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}, {"action": "tap", "target": "로그인"}]}""",
                 """{"app": "알라딘", "steps": [{"action": "tap", "target": "회원 로그인"}, {"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}, {"action": "tap", "target": "로그인"}]}"""
@@ -115,7 +159,7 @@ class PipelineDebugActivity : AppCompatActivity() {
         )
 
         return PipelineOrchestrator(
-            planner = planner,
+            planner = effectivePlanner,
             executor = executor,
             screenObserver = observer,
             credentials = FakeCredentialStore(),
@@ -186,11 +230,22 @@ class PipelineDebugActivity : AppCompatActivity() {
             inputLayout.addView(commandInput, matchWidthWrapHeight())
             addView(inputLayout, matchWidthWrapHeight().apply { topMargin = spacing })
 
+            // AEMX: 켜면 가짜 LLM 대신 온디바이스 Qwen3 를 쓴다. 실행모듈·화면관찰은 아직
+            // 가짜 그대로다(공규태 파트 대기 중).
+            realLlmSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_use_real_llm)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) prepareRealLlm() else resetPipeline()
+                }
+            }
+            addView(realLlmSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
             runButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_run)
                 setOnClickListener {
                     val command = commandInput.text?.toString().orEmpty()
-                    resetPipeline()
+                    // 진짜 LLM 은 준비 비용이 커서 매번 다시 만들지 않고 계속 쓴다.
+                    if (!realLlmSwitch.isChecked) resetPipeline()
                     orchestrator.submit(command)
                 }
             }
@@ -228,4 +283,8 @@ class PipelineDebugActivity : AppCompatActivity() {
     )
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val TAG = "PipelineDebug"
+    }
 }
