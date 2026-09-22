@@ -28,17 +28,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!--
+            개발용 화면이라 런처에는 띄우지 않는다(아이콘이 두 개가 되고 Run 대상이
+            모호해짐). 실행은 아래 명령으로 한다.
+              adb shell am start -n com.sihoo.aemx/.pipeline.ui.PipelineDebugActivity
+        -->
         <activity
             android:name=".pipeline.ui.PipelineDebugActivity"
             android:exported="true"
             android:label="@string/pipeline_title"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>

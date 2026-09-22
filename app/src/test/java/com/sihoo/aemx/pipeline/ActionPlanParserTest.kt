@@ -74,6 +74,30 @@ class ActionPlanParserTest {
     }
 
     @Test
+    fun `thinking 블록 안에 JSON 예시가 있어도 진짜 답을 읽는다`() {
+        // 시스템 프롬프트가 JSON 예시로 가득해서, 모델이 생각하는 동안 그 예시를
+        // 그대로 인용하는 일이 있다. 앞에서부터 중괄호를 찾으면 생각 속 예시를
+        // 실행계획으로 착각하게 된다.
+        val raw = """
+            <think>예시를 보면 {"action": "tap", "target": "검색창"} 형태였으니
+            같은 방식으로 만들면 되겠다.</think>
+            {"app": "교보문고", "steps": [{"action": "open_app", "target": "교보문고"}]}
+        """.trimIndent()
+
+        val plan = (ActionPlanParser.parse(raw) as ParseResult.Success).plan
+        assertEquals("교보문고", plan.app)
+        assertEquals(ActionType.OPEN_APP, plan.steps[0].action)
+    }
+
+    @Test
+    fun `thinking 이 닫히지 않으면 계획이 없다고 본다`() {
+        // 생성이 중간에 끊긴 경우. 생각 속 예시를 답으로 오인하면 안 된다.
+        val raw = """<think>{"app": "알라딘", "steps": [{"action": "open_app"}]} 이렇게 하면 될까"""
+
+        assertTrue(ActionPlanParser.parse(raw) is ParseResult.Failure)
+    }
+
+    @Test
     fun `문자열 안의 중괄호에 속지 않는다`() {
         val raw = """{"app": "알라딘", "steps": [{"action": "input_text", "target": "검색창", "value": "중괄호 } 포함"}]}"""
 

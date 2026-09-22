@@ -92,12 +92,32 @@ object ActionPlanParser {
     )
 
     /**
+     * thinking 블록을 먼저 떼어낸다.
+     *
+     * 시스템 프롬프트가 JSON 예시로 가득해서 모델이 생각하는 동안 그 예시를 인용하는 일이
+     * 있다. 그대로 두면 아래 [extractJsonObject] 가 **생각 속의 JSON을 실행계획으로 착각한다.**
+     *
+     * 닫는 태그가 있으면 그 뒤만 남기고, 열기만 하고 안 닫혔으면(생성이 중간에 끊긴 경우)
+     * 그 앞까지만 남긴다.
+     */
+    internal fun stripThinking(raw: String): String {
+        val closed = raw.lastIndexOf(THINK_CLOSE)
+        if (closed >= 0) return raw.substring(closed + THINK_CLOSE.length)
+
+        val opened = raw.indexOf(THINK_OPEN)
+        if (opened >= 0) return raw.substring(0, opened)
+
+        return raw
+    }
+
+    /**
      * 본문에서 첫 번째 완결된 JSON 객체를 도려낸다.
      *
      * 문자열 리터럴 안의 중괄호에 속지 않도록 따옴표와 역슬래시 이스케이프를 따라가며 센다.
-     * 울타리(```)나 `<think>` 블록, 앞뒤 설명 문장은 자연히 버려진다.
+     * 울타리(```)나 앞뒤 설명 문장은 자연히 버려진다.
      */
-    internal fun extractJsonObject(raw: String): String? {
+    internal fun extractJsonObject(input: String): String? {
+        val raw = stripThinking(input)
         val start = raw.indexOf('{')
         if (start < 0) return null
 
@@ -144,6 +164,9 @@ object ActionPlanParser {
 
     private const val MIN_TIMEOUT_MS = 500L
     private const val MAX_TIMEOUT_MS = 30_000L
+
+    private const val THINK_OPEN = "<think>"
+    private const val THINK_CLOSE = "</think>"
 }
 
 sealed interface ParseResult {
