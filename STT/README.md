@@ -73,7 +73,7 @@ stream.release()
 |---|---|
 | 모델 | `sherpa-onnx-streaming-zipformer-korean-2024-06-16` (Zipformer transducer, int8 양자화) |
 | 모델 타입 코드 | `getModelConfig(type = 14)` (`OnlineRecognizer.kt` 참고) |
-| 필요 에셋 파일 | `encoder-epoch-99-avg-1.int8.onnx`, `decoder-epoch-99-avg-1.onnx`, `joiner-epoch-99-avg-1.int8.onnx`, `tokens.txt` |
+| 필요 에셋 파일 | `encoder-epoch-99-avg-1.int8.onnx`, `decoder-epoch-99-avg-1.onnx`, `joiner-epoch-99-avg-1.int8.onnx`, `tokens.txt`, `bpe.model` |
 | 디코딩 | `modified_beam_search` (핫워드 사용에 필요) |
 | 스레드 | 4 |
 | 오디오 소스 | `MediaRecorder.AudioSource.VOICE_RECOGNITION` |
@@ -88,21 +88,34 @@ stream.release()
 | 디코딩 방식 | `greedy_search` | `modified_beam_search` | 후보를 여러 개 유지해 정확도 향상. 핫워드 사용의 전제 조건 |
 | 핫워드 | 없음 | 앱 이름·명령어 11개 | 고정 어휘에 가중치를 줘서 오인식 감소 |
 | 핫워드 가중치 | 1.5 | 2.0 | 기본값은 체감이 약함 |
+| beam 후보 수 | 4 | 8 | 후보를 더 유지해 정확도 확보 |
 | 스레드 | 1 | 4 | 디코딩이 실시간을 못 따라가면 인식이 밀림 |
 | rule2 무음 | 1.4초 | 2.0초 | 천천히 말하면 한 문장이 둘로 잘리는 문제 |
+| 오디오 전처리 | 없음 | 잡음 억제 / 자동 이득 / 에코 제거 | 소음 환경, 작게 말하는 경우, TTS 소리 되먹임 대응 |
 
 #### 핫워드 작성 규칙
 
-`MainActivity.kt`의 `HOTWORDS` 상수에 정의되어 있다. 이 모델은 BPE 토큰을 쓰기 때문에 **한글을 그대로 넣으면 동작하지 않는다.** `tokens.txt`에 존재하는 토큰으로 쪼개서 공백으로 구분해 적어야 하며, `▁`는 어절 시작 표시다.
+`MainActivity.kt`의 `HOTWORDS` 상수에 **한글 그대로** 한 줄씩 적으면 된다.
 
-```text
-▁교 보 문 고     // 교보문고
-▁알 라 딘        // 알라딘
+```kotlin
+private val HOTWORDS = listOf(
+    "교보문고",
+    "알라딘",
+    ...
+)
 ```
+
+이 모델은 내부적으로 BPE 토큰을 쓰기 때문에 원래는 `▁교 보 문 고` 처럼 토큰으로 쪼개서 넣어야 하지만, 모델과 같이 배포되는 `bpe.model`을 `bpeVocab`으로 지정해두면 sherpa-onnx가 알아서 변환한다. 그래서 **새 앱(예: 쿠팡)을 지원할 때 이름 한 줄만 추가하면 되고, 별도 변환 작업이 필요 없다.**
+
+`bpe.model`은 `setup_assets.sh`가 assets에 복사한다. 이 파일이 없으면 핫워드가 조용히 동작하지 않으므로, 핫워드 효과가 없어 보이면 이 파일부터 확인할 것.
 
 **책 제목은 넣지 않는다.** 책은 열린 집합이라 몇 권만 넣으면 그 책들로 인식이 쏠려서 나머지 책이 더 틀리게 된다. 앱 이름·명령어처럼 **항상 똑같이 등장하는 단어만** 넣고, 책 제목은 모델 본래 성능으로 인식한다.
 
-새 앱(예: 쿠팡)을 지원할 때 앱 이름을 핫워드에 추가하면 되고, `tokens.txt`에 있는 토큰 조합인지 반드시 확인할 것.
+#### 오디오 전처리
+
+`enableAudioEffects()`에서 기기가 지원하는 것만 켠다(`isAvailable()` 확인 후 생성). 지원 여부는 기기마다 다르고, 켜진 개수는 로그에서 확인할 수 있다.
+
+에코 제거는 나중에 TTS와 함께 동작할 때 필요하다 — TTS가 말하는 소리가 마이크로 다시 들어가면 그걸 사용자 발화로 인식해버린다.
 
 ### Endpoint(발화 끝) 감지 규칙
 
@@ -122,6 +135,7 @@ stream.release()
 - 모델 로딩(최초 `OnlineRecognizer` 생성) 시 약간의 지연 있음 → 앱 시작 시 미리 초기화해두는 걸 권장
 - int8 경량화 모델이라 정확도와 속도의 균형을 맞춘 버전 (실기기 테스트에서 짧은 문장 인식 정상 확인)
 - **float32(비양자화) 모델은 쓰지 않기로 함** — 같은 릴리스에 들어있지만 인코더 파일 하나가 277MB라(int8은 약 70MB) 앱 용량이 200MB 넘게 늘어난다. 저장공간이 넉넉하지 않은 사용자를 타겟으로 하는 프로젝트라 정확도 이득보다 용량 부담이 크다고 판단함
+- **모델 교체 선택지는 없음** — sherpa-onnx가 제공하는 한국어 스트리밍 모델은 현재 이 모델 하나뿐이다(2024-06-16). 인식률 개선은 모델 교체가 아니라 디코딩 설정·핫워드·오디오 전처리로 해야 한다
 - 네이티브 라이브러리(.so)는 `arm64-v8a`(실기기), `x86_64`(에뮬레이터)만 받아둠 — 32비트 기기 지원 필요하면 `armeabi-v7a`, `x86`도 `setup_assets.sh`에서 추가로 받아야 함
 
 ## 폴더 구조

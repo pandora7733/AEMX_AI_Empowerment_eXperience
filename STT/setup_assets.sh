@@ -39,6 +39,8 @@ cp "$MODEL_NAME/encoder-epoch-99-avg-1.int8.onnx" "$MODEL_DEST/"
 cp "$MODEL_NAME/decoder-epoch-99-avg-1.onnx" "$MODEL_DEST/"
 cp "$MODEL_NAME/joiner-epoch-99-avg-1.int8.onnx" "$MODEL_DEST/"
 cp "$MODEL_NAME/tokens.txt" "$MODEL_DEST/"
+# 핫워드를 한글 그대로 쓰기 위해 필요 (이게 없으면 토큰으로 직접 쪼개서 넣어야 함)
+cp "$MODEL_NAME/bpe.model" "$MODEL_DEST/"
 
 echo "=== [4/4] 압축 해제 및 네이티브 라이브러리 배치 ==="
 tar -xjf "sherpa-onnx-v1.13.7-android.tar.bz2"

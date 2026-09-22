@@ -7,6 +7,10 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
@@ -26,26 +30,26 @@ private const val REQUEST_RECORD_AUDIO_PERMISSION = 200
 /**
  * AEMX: 인식 가중치를 높일 단어 목록(핫워드).
  *
- * 이 모델은 BPE 토큰을 쓰기 때문에 한글을 그대로 넣으면 안 되고, `tokens.txt`에 있는
- * 토큰들로 쪼개서 공백으로 구분해 적어야 한다(`▁`는 어절 시작 표시). 단어를 추가할 때는
- * 반드시 `tokens.txt`에 존재하는 토큰 조합인지 확인할 것.
+ * 한글을 그대로 적으면 된다. 모델과 같이 배포되는 `bpe.model`을 `bpeVocab`으로 지정해뒀기
+ * 때문에(아래 `initModel()` 참고) sherpa-onnx가 알아서 토큰으로 변환한다. 새 앱을 지원할
+ * 때는 이 목록에 앱 이름 한 줄만 추가하면 된다.
  *
  * 앱 이름·명령어처럼 **항상 똑같이 나오는 단어만** 넣는다. 책 제목은 넣지 않는다 —
  * 넣을 수 있는 책은 몇 권뿐인데 그 책들로 인식이 쏠려서 나머지 책이 더 틀리게 된다.
  * 책 제목은 모델 본래 성능으로 인식해야 하는 영역이다.
  */
 private val HOTWORDS = listOf(
-    "▁교 보 문 고",      // 교보문고
-    "▁알 라 딘",         // 알라딘
-    "▁ 로 그 인",        // 로그인
-    "▁ 로 그 아 웃",     // 로그아웃
-    "▁검색",             // 검색
-    "▁구 매",            // 구매
-    "▁주문",             // 주문
-    "▁장 바 구 니",      // 장바구니
-    "▁회 원 가 입",      // 회원가입
-    "▁결 제",            // 결제
-    "▁취 소",            // 취소
+    "교보문고",
+    "알라딘",
+    "로그인",
+    "로그아웃",
+    "검색",
+    "구매",
+    "주문",
+    "장바구니",
+    "회원가입",
+    "결제",
+    "취소",
 ).joinToString("\n")
 
 // To enable microphone in android emulator, use
@@ -108,6 +112,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recordButton: Button
     private lateinit var textView: TextView
     private var recordingThread: Thread? = null
+    private val audioEffects = mutableListOf<AudioEffect>()
 
     // AEMX: MIC(일반 녹음) 대신 VOICE_RECOGNITION 사용. 기기의 음성인식 전용 오디오
     // 경로를 타서 잡음 억제/이득 조절이 음성인식에 맞게 적용됨. 원래 예제는 MIC였음.
@@ -182,6 +187,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             isRecording = false
             audioRecord!!.stop()
+            releaseAudioEffects()
             audioRecord!!.release()
             audioRecord = null
             recordButton.setText(R.string.start)
@@ -270,7 +276,35 @@ class MainActivity : AppCompatActivity() {
             audioFormat,
             numBytes * 2 // a sample has two bytes as we are using 16-bit PCM
         )
+
+        enableAudioEffects(audioRecord!!.audioSessionId)
         return true
+    }
+
+    /**
+     * AEMX: 기기가 제공하는 오디오 전처리를 켠다. 지원 여부는 기기마다 달라서 있는 것만 켠다.
+     *
+     * - 잡음 억제: 주변 소음이 있는 환경에서의 인식률
+     * - 자동 이득 조절: 사용자가 작게 말하거나 마이크에서 멀 때의 입력 크기
+     * - 에코 제거: TTS가 말하는 소리가 마이크로 다시 들어오는 것 (STT와 TTS를 같이 쓰는
+     *   구조라 필요함 - TTS/README.md의 "녹음·재생 순서" 항목 참고)
+     */
+    private fun enableAudioEffects(sessionId: Int) {
+        if (NoiseSuppressor.isAvailable()) {
+            audioEffects += NoiseSuppressor.create(sessionId).apply { enabled = true }
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            audioEffects += AutomaticGainControl.create(sessionId).apply { enabled = true }
+        }
+        if (AcousticEchoCanceler.isAvailable()) {
+            audioEffects += AcousticEchoCanceler.create(sessionId).apply { enabled = true }
+        }
+        Log.i(TAG, "Enabled ${audioEffects.size} audio effects")
+    }
+
+    private fun releaseAudioEffects() {
+        audioEffects.forEach { it.release() }
+        audioEffects.clear()
     }
 
     private fun initModel() {
@@ -311,6 +345,9 @@ class MainActivity : AppCompatActivity() {
             // AEMX: 핫워드(HOTWORDS)를 쓰려면 modified_beam_search가 필수라 greedy_search에서 변경.
             // 후보를 여러 개 유지해서 디코딩이 조금 느려지지만, 명령어 인식률이 더 중요함.
             decodingMethod = "modified_beam_search",
+            // AEMX: 유지할 후보 경로 수. 기본 4에서 늘려 정확도를 조금 더 확보함.
+            // 더 키우면 느려지기만 하고 정확도 이득은 거의 없어짐.
+            maxActivePaths = 8,
             // AEMX: 핫워드 가중치. 기본 1.5는 체감이 약해서 올림. 너무 키우면 비슷한 발음을
             // 전부 핫워드로 끌어당겨서 오히려 틀리므로, 인식 결과 보고 조절할 것.
             hotwordsScore = 2.0f,
@@ -319,6 +356,13 @@ class MainActivity : AppCompatActivity() {
         // AEMX: 원래 예제는 1스레드 고정. 요즘 폰은 코어가 남아돌고, 디코딩이 실시간을
         // 못 따라가면 인식이 밀리므로 늘림.
         config.modelConfig.numThreads = 4
+
+        // AEMX: 핫워드를 한글 그대로 쓰기 위한 설정. 이게 없으면 HOTWORDS를 tokens.txt의
+        // 토큰으로 직접 쪼개서 적어야 해서, 앱을 추가할 때마다 변환 작업이 필요해진다.
+        // bpe.model은 모델과 같이 배포되며 setup_assets.sh가 assets에 복사해둔다.
+        config.modelConfig.modelingUnit = "bpe"
+        config.modelConfig.bpeVocab =
+            "sherpa-onnx-streaming-zipformer-korean-2024-06-16/bpe.model"
 
         if (ruleFsts != null) {
             config.ruleFsts = ruleFsts
