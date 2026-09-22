@@ -23,6 +23,31 @@ import kotlin.concurrent.thread
 private const val TAG = "sherpa-onnx"
 private const val REQUEST_RECORD_AUDIO_PERMISSION = 200
 
+/**
+ * AEMX: 인식 가중치를 높일 단어 목록(핫워드).
+ *
+ * 이 모델은 BPE 토큰을 쓰기 때문에 한글을 그대로 넣으면 안 되고, `tokens.txt`에 있는
+ * 토큰들로 쪼개서 공백으로 구분해 적어야 한다(`▁`는 어절 시작 표시). 단어를 추가할 때는
+ * 반드시 `tokens.txt`에 존재하는 토큰 조합인지 확인할 것.
+ *
+ * 앱 이름·명령어처럼 **항상 똑같이 나오는 단어만** 넣는다. 책 제목은 넣지 않는다 —
+ * 넣을 수 있는 책은 몇 권뿐인데 그 책들로 인식이 쏠려서 나머지 책이 더 틀리게 된다.
+ * 책 제목은 모델 본래 성능으로 인식해야 하는 영역이다.
+ */
+private val HOTWORDS = listOf(
+    "▁교 보 문 고",      // 교보문고
+    "▁알 라 딘",         // 알라딘
+    "▁ 로 그 인",        // 로그인
+    "▁ 로 그 아 웃",     // 로그아웃
+    "▁검색",             // 검색
+    "▁구 매",            // 구매
+    "▁주문",             // 주문
+    "▁장 바 구 니",      // 장바구니
+    "▁회 원 가 입",      // 회원가입
+    "▁결 제",            // 결제
+    "▁취 소",            // 취소
+).joinToString("\n")
+
 // To enable microphone in android emulator, use
 //
 // adb emu avd hostmicon
@@ -84,7 +109,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textView: TextView
     private var recordingThread: Thread? = null
 
-    private val audioSource = MediaRecorder.AudioSource.MIC
+    // AEMX: MIC(일반 녹음) 대신 VOICE_RECOGNITION 사용. 기기의 음성인식 전용 오디오
+    // 경로를 타서 잡음 억제/이득 조절이 음성인식에 맞게 적용됨. 원래 예제는 MIC였음.
+    private val audioSource = MediaRecorder.AudioSource.VOICE_RECOGNITION
     private val sampleRateInHz = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
 
@@ -164,7 +191,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun processSamples() {
         Log.i(TAG, "processing samples")
-        val stream = recognizer.createStream()
+        // AEMX: 스트림마다 핫워드를 넘겨줌 (파일 대신 문자열로 전달, HOTWORDS 주석 참고)
+        val stream = recognizer.createStream(HOTWORDS)
 
         val interval = 0.1 // i.e., 100 ms
         val bufferSize = (interval * sampleRateInHz).toInt() // in samples
@@ -271,9 +299,26 @@ class MainActivity : AppCompatActivity() {
             featConfig = getFeatureConfig(sampleRate = sampleRateInHz, featureDim = 80),
             modelConfig = getModelConfig(type = type)!!,
             // lmConfig = getOnlineLMConfig(type = type),
-            endpointConfig = getEndpointConfig(),
+            // AEMX: 말이 끝났다고 판단하는 무음 길이를 기본값(1.4초)에서 2.0초로 늘림.
+            // 고령층/장애인 사용자가 천천히 말하거나 중간에 쉬면 한 문장이 두 개로
+            // 잘려서 "교보문고에서" / "로그인하고 싶어" 로 따로 인식되는 문제가 있음.
+            endpointConfig = EndpointConfig(
+                rule1 = EndpointRule(false, 2.4f, 0.0f),
+                rule2 = EndpointRule(true, 2.0f, 0.0f),
+                rule3 = EndpointRule(false, 0.0f, 20.0f),
+            ),
             enableEndpoint = true,
+            // AEMX: 핫워드(HOTWORDS)를 쓰려면 modified_beam_search가 필수라 greedy_search에서 변경.
+            // 후보를 여러 개 유지해서 디코딩이 조금 느려지지만, 명령어 인식률이 더 중요함.
+            decodingMethod = "modified_beam_search",
+            // AEMX: 핫워드 가중치. 기본 1.5는 체감이 약해서 올림. 너무 키우면 비슷한 발음을
+            // 전부 핫워드로 끌어당겨서 오히려 틀리므로, 인식 결과 보고 조절할 것.
+            hotwordsScore = 2.0f,
         )
+
+        // AEMX: 원래 예제는 1스레드 고정. 요즘 폰은 코어가 남아돌고, 디코딩이 실시간을
+        // 못 따라가면 인식이 밀리므로 늘림.
+        config.modelConfig.numThreads = 4
 
         if (ruleFsts != null) {
             config.ruleFsts = ruleFsts
