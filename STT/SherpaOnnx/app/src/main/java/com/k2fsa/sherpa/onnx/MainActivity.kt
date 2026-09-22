@@ -27,12 +27,17 @@ import kotlin.concurrent.thread
 private const val TAG = "sherpa-onnx"
 private const val REQUEST_RECORD_AUDIO_PERMISSION = 200
 
+/** 이 모델의 토큰에서 어절 시작을 나타내는 표시 */
+private const val WORD_START = '▁'  // ▁
+
+/** 토큰 하나의 최대 길이. tokens.txt의 가장 긴 항목보다 넉넉하게 잡은 값 */
+private const val MAX_TOKEN_LENGTH = 8
+
 /**
  * AEMX: 인식 가중치를 높일 단어 목록(핫워드).
  *
- * 한글을 그대로 적으면 된다. 모델과 같이 배포되는 `bpe.model`을 `bpeVocab`으로 지정해뒀기
- * 때문에(아래 `initModel()` 참고) sherpa-onnx가 알아서 토큰으로 변환한다. 새 앱을 지원할
- * 때는 이 목록에 앱 이름 한 줄만 추가하면 된다.
+ * **한글을 그대로 적으면 된다.** 앱 실행 시 `encodeHotwords()`가 모델의 토큰 형식으로
+ * 변환한다. 새 앱을 지원할 때는 이 목록에 이름 한 줄만 추가하면 된다.
  *
  * 앱 이름·명령어처럼 **항상 똑같이 나오는 단어만** 넣는다. 책 제목은 넣지 않는다 —
  * 넣을 수 있는 책은 몇 권뿐인데 그 책들로 인식이 쏠려서 나머지 책이 더 틀리게 된다.
@@ -50,7 +55,44 @@ private val HOTWORDS = listOf(
     "회원가입",
     "결제",
     "취소",
-).joinToString("\n")
+)
+
+/**
+ * AEMX: 핫워드(한글)를 모델이 쓰는 토큰 열로 변환한다.
+ *
+ * sherpa-onnx에 핫워드를 넘기려면 `▁교 보 문 고` 처럼 모델의 토큰으로 쪼개서 줘야 한다.
+ * 원래는 라이브러리가 `bpeVocab` 설정으로 대신 해주지만, 이 한국어 모델은 텍스트 형식
+ * vocab을 배포하지 않아서(바이너리 `bpe.model`만 있음) 그 경로를 쓸 수 없다. 그래서
+ * 모델과 같이 있는 `tokens.txt`를 읽어 가장 긴 토큰부터 맞춰가며 직접 쪼갠다.
+ *
+ * 덕분에 HOTWORDS에는 한글만 적으면 되고, 앱을 추가할 때 변환 작업이 필요 없다.
+ * 쪼개지 못한 단어는 건너뛰고 로그를 남긴다 — 핫워드가 안 먹는 것 같으면 로그부터 볼 것.
+ */
+private fun encodeHotwords(assetManager: AssetManager, tokensPath: String): String {
+    val vocab = assetManager.open(tokensPath).bufferedReader().useLines { lines ->
+        lines.mapNotNullTo(HashSet()) { line ->
+            line.substringBeforeLast(' ', missingDelimiterValue = "").ifEmpty { null }
+        }
+    }
+
+    return HOTWORDS.mapNotNull { word ->
+        val text = WORD_START + word.replace(' ', WORD_START)
+        val tokens = mutableListOf<String>()
+        var start = 0
+        while (start < text.length) {
+            var end = minOf(text.length, start + MAX_TOKEN_LENGTH)
+            while (end > start && text.substring(start, end) !in vocab) end--
+            if (end == start) {
+                Log.w(TAG, "Hotword '$word' has no matching tokens, skipping")
+                return@mapNotNull null
+            }
+            tokens += text.substring(start, end)
+            start = end
+        }
+        Log.i(TAG, "Hotword '$word' -> ${tokens.joinToString(" ")}")
+        tokens.joinToString(" ")
+    }.joinToString("\n")
+}
 
 // To enable microphone in android emulator, use
 //
@@ -113,6 +155,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textView: TextView
     private var recordingThread: Thread? = null
     private val audioEffects = mutableListOf<AudioEffect>()
+    private var encodedHotwords: String = ""
 
     // AEMX: MIC(일반 녹음) 대신 VOICE_RECOGNITION 사용. 기기의 음성인식 전용 오디오
     // 경로를 타서 잡음 억제/이득 조절이 음성인식에 맞게 적용됨. 원래 예제는 MIC였음.
@@ -198,7 +241,7 @@ class MainActivity : AppCompatActivity() {
     private fun processSamples() {
         Log.i(TAG, "processing samples")
         // AEMX: 스트림마다 핫워드를 넘겨줌 (파일 대신 문자열로 전달, HOTWORDS 주석 참고)
-        val stream = recognizer.createStream(HOTWORDS)
+        val stream = recognizer.createStream(encodedHotwords)
 
         val interval = 0.1 // i.e., 100 ms
         val bufferSize = (interval * sampleRateInHz).toInt() // in samples
@@ -357,12 +400,8 @@ class MainActivity : AppCompatActivity() {
         // 못 따라가면 인식이 밀리므로 늘림.
         config.modelConfig.numThreads = 4
 
-        // AEMX: 핫워드를 한글 그대로 쓰기 위한 설정. 이게 없으면 HOTWORDS를 tokens.txt의
-        // 토큰으로 직접 쪼개서 적어야 해서, 앱을 추가할 때마다 변환 작업이 필요해진다.
-        // bpe.model은 모델과 같이 배포되며 setup_assets.sh가 assets에 복사해둔다.
-        config.modelConfig.modelingUnit = "bpe"
-        config.modelConfig.bpeVocab =
-            "sherpa-onnx-streaming-zipformer-korean-2024-06-16/bpe.model"
+        // AEMX: 핫워드를 모델의 토큰 형식으로 변환해둔다 (encodeHotwords 주석 참고)
+        encodedHotwords = encodeHotwords(application.assets, config.modelConfig.tokens)
 
         if (ruleFsts != null) {
             config.ruleFsts = ruleFsts
