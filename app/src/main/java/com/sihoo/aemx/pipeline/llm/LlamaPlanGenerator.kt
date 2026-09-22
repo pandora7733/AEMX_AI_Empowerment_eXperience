@@ -14,6 +14,7 @@ import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.flow.toList
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -120,24 +121,58 @@ class LlamaPlanGenerator(
     }
 
     private suspend fun ensureModelDownloaded(onProgress: (Int, String) -> Unit): File {
-        val modelsDir = File(context.filesDir, "models").apply { if (!exists()) mkdirs() }
+        val modelsDir = File(context.filesDir, DIRECTORY_MODELS).apply { if (!exists()) mkdirs() }
         val modelFile = File(modelsDir, MODEL_FILE_NAME)
         if (modelFile.exists() && modelFile.length() > 0) return modelFile
 
-        Log.i(TAG, "모델 다운로드 시작: $MODEL_URL")
         val tmpFile = File(modelsDir, "$MODEL_FILE_NAME.part")
+        var lastError: IOException? = null
+
+        repeat(DOWNLOAD_ATTEMPTS) { attempt ->
+            try {
+                downloadTo(tmpFile, onProgress)
+                check(tmpFile.renameTo(modelFile)) { "받은 모델 파일 이름을 바꾸지 못했다" }
+                Log.i(TAG, "모델 다운로드 완료: ${modelFile.path}")
+                return modelFile
+            } catch (e: IOException) {
+                lastError = e
+                Log.w(TAG, "다운로드 끊김 (${tmpFile.length()}바이트까지 받음), 재시도 ${attempt + 1}", e)
+                onProgress(0, "연결이 끊겼습니다. 이어받는 중...")
+            }
+        }
+
+        throw lastError ?: IOException("모델을 받지 못했다")
+    }
+
+    /**
+     * 받다 만 부분이 있으면 이어서 받는다.
+     *
+     * 1.2GB 를 모바일 네트워크로 받다 보면 한 번쯤 끊긴다. 이어받기가 없으면 그때마다
+     * 처음부터 다시 받게 되어 사실상 끝나지 않는다.
+     *
+     * 다 받은 뒤 크기를 반드시 확인한다. 연결이 중간에 조용히 닫히면 읽기가 정상 종료처럼
+     * 보여서, 확인하지 않으면 **잘린 파일을 완성본으로 착각**하고 모델 로딩에서 실패한다.
+     */
+    private fun downloadTo(tmpFile: File, onProgress: (Int, String) -> Unit) {
+        val already = if (tmpFile.exists()) tmpFile.length() else 0L
+        Log.i(TAG, "모델 다운로드 시작 (${already}바이트부터): $MODEL_URL")
 
         val connection = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            if (already > 0) setRequestProperty("Range", "bytes=$already-")
             connect()
         }
 
-        val totalBytes = connection.contentLengthLong
-        var downloaded = 0L
+        // 206 이면 이어받기가 받아들여진 것이고, 아니면 서버가 처음부터 다시 주는 것이다.
+        val resumed = connection.responseCode == HttpURLConnection.HTTP_PARTIAL
+        val totalBytes = connection.contentLengthLong.let { if (resumed) it + already else it }
+        var downloaded = if (resumed) already else 0L
         var lastPercent = -1
 
         connection.inputStream.use { input ->
-            FileOutputStream(tmpFile).use { output ->
+            FileOutputStream(tmpFile, resumed).use { output ->
                 val buffer = ByteArray(1 shl 16)
                 while (true) {
                     val read = input.read(buffer)
@@ -160,9 +195,9 @@ class LlamaPlanGenerator(
             }
         }
 
-        check(tmpFile.renameTo(modelFile)) { "받은 모델 파일 이름을 바꾸지 못했다" }
-        Log.i(TAG, "모델 다운로드 완료: ${modelFile.path}")
-        return modelFile
+        if (totalBytes > 0 && tmpFile.length() != totalBytes) {
+            throw IOException("받은 크기가 맞지 않는다: ${tmpFile.length()} / $totalBytes")
+        }
     }
 
     companion object {
@@ -170,6 +205,12 @@ class LlamaPlanGenerator(
 
         private const val MAX_SCREEN_TEXTS = 20
 
+        /** 끊겨도 이어받으므로 재시도는 이어받기 횟수다. */
+        private const val DOWNLOAD_ATTEMPTS = 5
+        private const val CONNECT_TIMEOUT_MS = 30_000
+        private const val READ_TIMEOUT_MS = 30_000
+
+        private const val DIRECTORY_MODELS = "models"
         private const val MODEL_FILE_NAME = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
         private const val MODEL_URL =
             "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
