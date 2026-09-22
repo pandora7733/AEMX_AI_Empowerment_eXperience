@@ -176,6 +176,8 @@ STT/
 - **`libsherpa-onnx-jni.so` not found 크래시**: 네이티브 라이브러리는 원래 NDK로 소스 빌드하거나(`build-android-*.sh`, 시간 오래 걸림) GitHub 릴리스의 미리 빌드된 아카이브(`sherpa-onnx-v1.13.7-android.tar.bz2`)를 받아서 `jniLibs/`에 넣어야 함 — `setup_assets.sh`가 이 과정을 자동화함
 - **핫워드용 `bpeVocab` 지정 시 앱이 조용히 종료됨**: 핫워드를 한글 그대로 쓰려고 `modelingUnit = "bpe"` + `bpeVocab = ".../bpe.model"`을 지정했더니, 앱이 시작하자마자 2초 간격으로 계속 재시작됨. **예외도 크래시 덤프(tombstone)도 안 남아서** 원인 추적이 오래 걸림 — 네이티브 라이브러리가 스스로 종료(`exit`)하면 이렇게 아무 흔적이 없다. 원인은 sherpa-onnx가 `bpeVocab`으로 **텍스트 형식**(`ssentencepiece`) 파일을 기대하는데, 이 한국어 모델은 **바이너리** `bpe.model`만 배포한다는 것. 같은 릴리스에 텍스트 vocab이 아예 없어서 이 경로는 쓸 수 없음 → 토큰 변환을 앱에서 직접 하도록 바꿔서 해결(`encodeHotwords()`)
   - 교훈: 로그에 아무것도 없는 즉시 종료는 네이티브 쪽 `exit()`를 의심할 것. 그리고 파일 이름이 그럴듯하다고 형식까지 맞는 건 아님
+- **`modelingUnit`을 비워두면 START 누르는 순간 종료됨**: 위 문제를 되돌리면서 `modelingUnit`까지 같이 지웠더니, 핫워드를 넘기는 시점(녹음 시작)에 라이브러리가 또 `exit`. 이번엔 경고 로그를 남겨줘서(`modeling_unit should be one of bpe, cjkchar or cjkchar+bpe, given`) 금방 찾음 → `cjkchar`로 지정. 핫워드를 쓴다면 이 값은 필수
+- **인식 결과에 띄어쓰기가 전부 사라짐**: `OnlineRecognizerResult.text`를 그대로 쓰면 "교보문고에서로그인하고싶어"처럼 붙어서 나옴. 원인은 sherpa-onnx가 텍스트를 합친 뒤 `RemoveSpaceBetweenCjk()`를 적용하는데, 이 함수의 CJK 범위(`0xA840~0xD7AF`)에 한글 음절(`U+AC00~U+D7A3`)이 들어가기 때문. 중국어·일본어 기준 처리라 한국어에는 틀림 → **토큰 배열에는 어절 경계가 공백으로 남아있으므로**, 토큰을 이어붙여 텍스트를 직접 만드는 방식으로 해결(`textWithSpacing()`). 띄어쓰기가 없으면 뒤에 붙는 LLM이 명령을 해석하기 어려워지므로 중요함
 
 ## 다음 할 일
 

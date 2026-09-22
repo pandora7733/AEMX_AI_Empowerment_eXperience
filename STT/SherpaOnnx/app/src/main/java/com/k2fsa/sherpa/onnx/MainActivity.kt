@@ -51,6 +51,21 @@ private val HOTWORDS = listOf(
     "취소",
 ).joinToString("\n")
 
+/**
+ * AEMX: 인식 결과 텍스트를 토큰에서 직접 만든다.
+ *
+ * `OnlineRecognizerResult.text`를 그대로 쓰면 **띄어쓰기가 전부 사라진다.** sherpa-onnx가
+ * 텍스트를 합친 뒤 `RemoveSpaceBetweenCjk()`로 CJK 글자 사이의 공백을 지우는데, 이 함수의
+ * CJK 범위(`0xA840~0xD7AF`)에 한글 음절(`U+AC00~U+D7A3`)이 포함되기 때문이다. 중국어·
+ * 일본어에는 맞는 처리지만 한국어에는 틀리다.
+ *
+ * 다행히 토큰 배열에는 어절 경계가 공백으로 남아있어서(모델의 `▁` 표시를 라이브러리가
+ * 공백으로 바꿔줌), 토큰을 그대로 이어붙이면 띄어쓰기가 살아있는 문장이 나온다.
+ *
+ * 띄어쓰기가 없으면 뒤에 붙는 LLM이 명령을 해석하기 어려워지므로 중요하다.
+ */
+private fun OnlineRecognizerResult.textWithSpacing(): String = tokens.joinToString("").trim()
+
 // To enable microphone in android emulator, use
 //
 // adb emu avd hostmicon
@@ -213,7 +228,8 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val isEndpoint = recognizer.isEndpoint(stream)
-                var text = recognizer.getResult(stream).text
+                // AEMX: .text 대신 토큰에서 재구성 (띄어쓰기가 사라지는 문제, 위 주석 참고)
+                var text = recognizer.getResult(stream).textWithSpacing()
 
                 // For streaming parformer, we need to manually add some
                 // paddings so that it has enough right context to
@@ -224,7 +240,7 @@ class MainActivity : AppCompatActivity() {
                     while (recognizer.isReady(stream)) {
                         recognizer.decode(stream)
                     }
-                    text = recognizer.getResult(stream).text
+                    text = recognizer.getResult(stream).textWithSpacing()
                 }
 
                 var textToDisplay = lastText
