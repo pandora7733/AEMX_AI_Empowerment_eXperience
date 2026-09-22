@@ -25,6 +25,7 @@ android {
     }
 
     sourceSets["main"].apply {
+        manifest.srcFile("../LLM/LlamaDemo/lib/src/main/AndroidManifest.xml")
         java.srcDirs("../LLM/LlamaDemo/lib/src/main/java")
         jniLibs.srcDirs("../LLM/LlamaDemo/lib/src/main/jniLibs")
     }
