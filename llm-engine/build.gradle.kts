@@ -24,15 +24,23 @@ android {
         minSdk = 28
     }
 
-    sourceSets["main"].apply {
-        manifest.srcFile("../LLM/LlamaDemo/lib/src/main/AndroidManifest.xml")
-        java.srcDirs("../LLM/LlamaDemo/lib/src/main/java")
-        jniLibs.srcDirs("../LLM/LlamaDemo/lib/src/main/jniLibs")
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+// AGP 9 에서는 android { sourceSets["main"] } 로 접근하면 Kotlin DSL 이 예전 AGP 타입으로
+// 캐스팅을 시도하다 깨진다. 새 DSL 인터페이스를 직접 지정해 생성된 접근자를 우회한다.
+extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
+    val libSrc = "../LLM/LlamaDemo/lib/src/main"
+    sourceSets.getByName("main") {
+        manifest.srcFile("$libSrc/AndroidManifest.xml")
+        // 소스가 전부 .kt 라서 kotlin 쪽을 반드시 같이 지정해야 한다. java 만 지정하면
+        // compileKotlin 이 NO-SOURCE 로 지나가고, 앱에서 Unresolved reference 가 난다.
+        java.srcDirs("$libSrc/java")
+        kotlin.srcDirs("$libSrc/java")
+        jniLibs.srcDirs("$libSrc/jniLibs")
     }
 }
 
