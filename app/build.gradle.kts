@@ -41,6 +41,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
+    packaging {
+        jniLibs {
+            // 설치할 때 .so 를 실제 파일로 풀어 놓는다. llama.cpp 가 ggml 백엔드를 경로로
+            // dlopen 하기 때문에, APK 안에 압축된 채로 두면 "no backends are loaded" 로
+            // 모델 로딩이 실패한다. 설치 용량이 늘어나는 대신 이 동작이 꼭 필요하다.
+            useLegacyPackaging = true
+        }
+    }
+
     // 시스템 프롬프트는 LLM/system_prompt.txt 하나만 진짜로 친다. 빌드할 때 assets 로
     // 복사해서 앱이 읽게 한다 — 예전엔 코드 상수로 복사해 두는 바람에 프롬프트를 고치면
     // 두 곳을 같이 고쳐야 했고, 안 고치면 조용히 어긋났다.
