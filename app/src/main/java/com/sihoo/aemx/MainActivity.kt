@@ -1,6 +1,9 @@
 package com.sihoo.aemx
 
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -12,12 +15,14 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.android.material.R as MaterialR
+import com.sihoo.aemx.accessibility.AemxAccessibilityService
 
 class MainActivity : AppCompatActivity() {
     private lateinit var ttsController: AndroidTtsController
     private lateinit var speechInput: TextInputEditText
     private lateinit var speakButton: Button
     private lateinit var statusView: TextView
+    private lateinit var accessibilityStatusView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,7 +93,45 @@ class MainActivity : AppCompatActivity() {
                 accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
             }
             addView(statusView, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            addView(Button(this@MainActivity).apply {
+                setText(R.string.accessibility_settings)
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+            }, matchWidthWrapHeight().apply { topMargin = spacing * 2 })
+
+            accessibilityStatusView = TextView(this@MainActivity).apply {
+                accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
+            }
+            addView(accessibilityStatusView, matchWidthWrapHeight().apply { topMargin = spacing })
+            addView(Button(this@MainActivity).apply {
+                setText(R.string.action_plan_title)
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, com.sihoo.aemx.accessibility.ActionPlanActivity::class.java))
+                }
+            }, matchWidthWrapHeight().apply { topMargin = spacing })
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::accessibilityStatusView.isInitialized) {
+            accessibilityStatusView.setText(
+                if (isAccessibilityServiceEnabled()) R.string.accessibility_status_enabled
+                else R.string.accessibility_status_disabled,
+            )
+        }
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        if (AemxAccessibilityService.isConnected()) return true
+        val expected = ComponentName(this, AemxAccessibilityService::class.java).flattenToString()
+        val enabledServices = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        ).orEmpty()
+        return enabledServices.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
     private fun matchWidthWrapHeight() = LinearLayout.LayoutParams(
