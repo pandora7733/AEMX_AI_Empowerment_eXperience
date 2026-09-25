@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries><package android:name="com.sihoo.aemx" /></queries>
+    <application android:label="AEMX device checks" android:allowBackup="false" />
+    <!-- Self-instrumenting: do not kill the AEMX process hosting the service. -->
+    <instrumentation
+        android:name=".DeviceChecks"
+        android:targetPackage="com.sihoo.aemx.devicechecks"
+        android:functionalTest="true" />
+</manifest>

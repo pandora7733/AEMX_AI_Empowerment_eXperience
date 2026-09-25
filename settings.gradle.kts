@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "AEMX"
 include(":app")
- 
+include(":accessibility-device-tests")
+project(":accessibility-device-tests").projectDir = file("ACCESSIBILITY/device-tests")

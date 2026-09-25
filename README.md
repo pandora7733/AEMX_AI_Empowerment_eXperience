@@ -19,7 +19,7 @@ LLM Action Plan을 실제 Android UI 조작으로 연결하는 실행 계층은
 | minSdk | Android API 24 |
 | Java 소스/타깃 호환성 | Java 11 |
 | 애플리케이션 ID | `com.sihoo.aemx` |
-| 모듈 | `app` |
+| 모듈 | `app`, 개발용 `accessibility-device-tests` |
 
 `Java 소스/타깃 호환성`이 Java 11이라는 뜻과 Gradle을 실행하는 JVM의 버전은 서로 다릅니다. Gradle 9.5 및 최신 Android Gradle Plugin을 실행하려면 JDK 17 이상이 필요하며, 저장소의 `gradle/gradle-daemon-jvm.properties`에 지정된 JDK 25를 권장합니다.
 
