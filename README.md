@@ -2,6 +2,9 @@
 
 AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 이 문서는 저장소를 처음 내려받은 뒤 Android 개발환경을 구성하고, 프로젝트를 빌드하여 개발을 시작하기까지의 절차를 설명합니다.
 
+LLM Action Plan을 실제 Android UI 조작으로 연결하는 실행 계층은
+[`ACCESSIBILITY/README.md`](ACCESSIBILITY/README.md)를 참고하세요.
+
 ## 1. 프로젝트 구성
 
 현재 프로젝트는 다음 환경을 기준으로 구성되어 있습니다.
@@ -81,7 +84,7 @@ git remote -v
 원격 저장소의 최신 변경사항을 반영해야 하는 경우에는 다음을 실행합니다.
 
 ```bash
-git pull --ff-only origin main
+git pull --ff-only
 ```
 
 ## 4. Java 및 Android SDK 확인
@@ -209,7 +212,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Android Studio에서 `app` 실행 구성을 선택한 뒤 `Run`을 눌러도 됩니다.
 
-> 참고: 현재 초기 프로젝트의 `AndroidManifest.xml`에는 실행 가능한 Activity가 선언되어 있지 않습니다. 따라서 APK 빌드는 가능하지만 Android Studio의 `Run`에서 기본 실행 Activity를 찾지 못할 수 있습니다. 화면을 실행하려면 Activity를 추가하고 Manifest에 `MAIN`/`LAUNCHER` 인텐트 필터를 선언해야 합니다.
+현재 `MainActivity`에 `MAIN`/`LAUNCHER`가 등록되어 있습니다. TTS 테스트, 접근성 설정 이동, Action Plan 실행 테스트를 앱에서 열 수 있습니다. 이번 실행 모듈 작업은 기존 `feature/accessibility` 브랜치에서만 진행합니다.
 
 ## 9. 자주 발생하는 문제
 
