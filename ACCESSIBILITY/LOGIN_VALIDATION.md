@@ -19,6 +19,7 @@
   - 기존 5개 UI/접근성 노드 검사.
   - 새 3개: 실제 Keystore 저장·재조회·삭제와 새 IV, 변조 및 다른 앱 암호문 복사 거부, 등록 화면 FLAG_SECURE 및 재생성 후 입력 제거/빈 입력 검사.
 - 테스트 credential은 가짜 값이며 별도 `credential-test-only` 저장소/키를 사용하고 테스트 후 삭제. 실제 계정 저장소에는 테스트 값을 쓰지 않음.
+- 최종 APK 재설치·재부팅 후 서비스가 Bound 상태이며 Crashed 목록에 없음을 확인했다. 별도 `devicechecks` 회귀 도구는 재부팅 직후 System UI 응답 지연과 이후 UiAutomation `DeadObjectException`으로 결과를 내지 못했다. 이번 변경의 외부 5개 회귀 검사는 통과로 집계하지 않는다. 위 8개 앱 instrumentation 테스트는 재부팅 전에 정상 완료했다.
 
 ## 남아 있는 검증
 
