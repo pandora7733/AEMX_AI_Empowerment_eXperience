@@ -13,22 +13,39 @@ import java.util.ArrayDeque;
 public final class DeviceChecks extends Instrumentation {
     private UiAutomation automation;
     private int passed;
+    private String scenario;
 
     @Override public void onCreate(Bundle args) {
         super.onCreate(args);
+        scenario = args == null ? "regression" : args.getString("scenario", "regression");
         start();
     }
 
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
+            android.util.Log.i("AemxDeviceChecks", "Starting UiAutomation connection");
             automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
+            android.util.Log.i("AemxDeviceChecks", "UiAutomation connected");
             Intent launch = new Intent().setClassName("com.sihoo.aemx", "com.sihoo.aemx.MainActivity")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             getTargetContext().startActivity(launch);
             click("Action Plan 실행 테스트");
-            awaitText("실행 준비 완료");
+            click("실행 중단");
+            awaitText("실행 중단됨");
             pass("service_connected");
+
+            if ("kyobo_search".equals(scenario)) {
+                // Selectors observed on Kyobo 3.2.23. No account, purchase or payment operations.
+                submit("{\"app\":\"교보문고\",\"steps\":[{\"action\":\"open_app\",\"target\":\"교보문고\"},"
+                        + "{\"action\":\"input_text\",\"target\":\"searchMainKeyword\",\"value\":\"데미안\"},"
+                        + "{\"action\":\"tap\",\"target\":\"search button\"}]}");
+                SystemClock.sleep(15_000);
+                // This is a manual inspection helper, not an assertion of search success.
+                result.putString("stream", "DISPATCHED kyobo_search; inspect the bookstore result and AEMX status\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
 
             submit("not-json");
             awaitText("Action Plan JSON 형식이 올바르지 않습니다.");
@@ -60,6 +77,8 @@ public final class DeviceChecks extends Instrumentation {
         } catch (Throwable error) {
             result.putString("stream", "FAIL after " + passed + " checks: " + error.getClass().getSimpleName()
                     + ": " + error.getMessage() + "\n");
+            android.util.Log.e("AemxDeviceChecks", result.getString("stream"));
+            sendStatus(-2, result);
             finish(Activity.RESULT_CANCELED, result);
         }
     }

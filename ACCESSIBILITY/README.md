@@ -106,6 +106,8 @@ wait는 value, 없으면 target을 사용한다. 생략/빈 문자열은 1초, �
 
 ## 테스트 방법
 
+현재 구현 전체의 2026-09-26 검수 결과와 통과 범위·미검증 항목은 [FULL_AUDIT.md](FULL_AUDIT.md)를 참고한다.
+
 에뮬레이터 실제 실행 결과와 서비스 프로세스를 유지하는 테스트 방법은
 [`EMULATOR_TESTS.md`](EMULATOR_TESTS.md)를 참고한다. `device-tests/`는 메인 APK에 포함되지 않는 개발용 테스트 앱이다.
 

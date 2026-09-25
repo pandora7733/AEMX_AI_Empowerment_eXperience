@@ -164,4 +164,59 @@ class ActionExecutorTest {
         assertNull(NodeFinder.find(root, "로그인"))
         assertEquals(first, NodeFinder.find(root, "mok.android:id/login"))
     }
+
+    @Test fun `scroll uses requested direction and ignores hidden containers`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val root = node("root").apply { isEditable = false }
+        val hidden = node("hidden").apply { isScrollable = true; isVisibleToUser = false }
+        val content = node("content").apply { isScrollable = true }
+        shadowOf(root).addChild(hidden)
+        shadowOf(root).addChild(content)
+        shadowOf(service).setRootInActiveWindow(root)
+        shadowOf(hidden).setOnPerformActionListener { _, _ -> fail("Hidden container used"); false }
+        val actions = mutableListOf<Int>()
+        shadowOf(content).setOnPerformActionListener { action, _ -> actions += action; true }
+        val events = Events()
+        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("교보문고", listOf(
+            ActionStep(ActionType.SCROLL, "down"), ActionStep(ActionType.SCROLL, "up"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertEquals(listOf(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD), actions)
+        assertTrue(events.completed)
+    }
+
+    @Test fun `rejected UI action times out without advancing`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val root = node("검색창")
+        shadowOf(service).setRootInActiveWindow(root)
+        var attempts = 0
+        shadowOf(root).setOnPerformActionListener { _, _ -> attempts++; false }
+        val events = Events()
+        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("교보문고", listOf(
+            ActionStep(ActionType.INPUT_TEXT, "검색창", "데미안"), ActionStep(ActionType.TAP, "검색창"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(9))
+        assertTrue(attempts > 1)
+        assertTrue(events.failed)
+        assertFalse(events.completed)
+        assertEquals(listOf(0), events.started)
+    }
+
+    @Test fun `credential errors never disclose exception details`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val provider = object : CredentialProvider {
+            override fun getCredential(app: String, field: CredentialField): CharSequence? = error("synthetic-secret")
+        }
+        var failure: String? = null
+        val listener = object : ActionExecutor.Listener {
+            override fun onStepStarted(index: Int, step: ActionStep) = Unit
+            override fun onCompleted(plan: ActionPlan) { fail("Unexpected completion") }
+            override fun onFailed(index: Int, step: ActionStep, message: String) { failure = message }
+        }
+        ActionExecutor(service, provider, listener, java.util.concurrent.Executor { it.run() }).execute(
+            ActionPlan("교보문고", listOf(ActionStep(ActionType.INPUT_CREDENTIAL, "password"))))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNotNull(failure)
+        assertFalse(failure!!.contains("synthetic-secret"))
+    }
 }
