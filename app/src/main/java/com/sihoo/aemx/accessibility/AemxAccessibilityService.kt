@@ -16,7 +16,7 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         super.onServiceConnected()
         if (::executor.isInitialized) executor.cancel()
         ttsController?.shutdown()
-        executor = ActionExecutor(this, UnconfiguredCredentialProvider, this)
+        executor = ActionExecutor(this, KeystoreCredentialProvider(applicationContext), this)
         activeService = WeakReference(this)
         status = "실행 준비 완료"
         ttsController = AndroidTtsController(applicationContext) { }

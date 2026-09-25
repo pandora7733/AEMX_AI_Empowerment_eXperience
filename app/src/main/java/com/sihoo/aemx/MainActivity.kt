@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(createContentView())
+        setContentView(android.widget.ScrollView(this).apply { addView(createContentView()) })
         ttsController = AndroidTtsController(applicationContext, ::handleTtsState)
     }
 
@@ -109,6 +109,12 @@ class MainActivity : AppCompatActivity() {
                 setText(R.string.action_plan_title)
                 setOnClickListener {
                     startActivity(Intent(this@MainActivity, com.sihoo.aemx.accessibility.ActionPlanActivity::class.java))
+                }
+            }, matchWidthWrapHeight().apply { topMargin = spacing })
+            addView(Button(this@MainActivity).apply {
+                setText(R.string.credential_title)
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, com.sihoo.aemx.accessibility.CredentialSettingsActivity::class.java))
                 }
             }, matchWidthWrapHeight().apply { topMargin = spacing })
         }

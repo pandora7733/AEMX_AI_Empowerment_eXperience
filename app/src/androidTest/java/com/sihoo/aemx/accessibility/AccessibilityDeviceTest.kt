@@ -43,7 +43,7 @@ class AccessibilityDeviceTest {
 
     @Test fun launcherOpensJsonScreen() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(R.string.action_plan_title)).perform(click())
+            onView(withText(R.string.action_plan_title)).perform(scrollTo(), click())
             onView(withHint(R.string.action_plan_hint)).check(matches(isDisplayed()))
         }
     }

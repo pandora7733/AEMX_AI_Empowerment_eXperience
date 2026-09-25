@@ -15,7 +15,7 @@
 
 루트 `settings.gradle.kts`는 `app` 모듈을 빌드한다. `STT/SherpaOnnx`, `LLM/LlamaDemo`, `AEMX_upload`는 별도 프로젝트다. 메인 app에는 기존 TTS 컨트롤러와 테스트 Activity가 있다. 실행 코드는 app 소스에 두고 ACCESSIBILITY 문서로 모듈 경계를 관리했다.
 
-`TASK_공규태.md`와 최신 원격 `LLM/README.md`를 확인했다. LLM의 app/steps/action/target/value 형식을 사용하며 wait/scroll 상세 규칙은 LLM 문서에 없어서 로컬 확장으로 명시했다. 보안 credential 저장소는 없으며 기존 더미 UI 데이터를 로그인 정보로 연결하지 않았다.
+`TASK_공규태.md`와 원격 `LLM/README.md`의 app/steps/action/target/value 형식을 사용하며 wait/scroll 상세 규칙은 로컬 확장으로 명시했다. 최초 구현에서 보류했던 보안 credential 저장소는 사용자 요청에 따라 Keystore 기반으로 추가했다. 기존 더미 UI 데이터는 사용하지 않는다. 새 로그인 기능 검증은 [LOGIN_VALIDATION.md](LOGIN_VALIDATION.md)를 참고한다.
 
 ## 자동 검증
 
@@ -45,16 +45,16 @@
 4. JSON 실행 화면에서 `open_app → tap → input_text → tap` 실행. 실제 검색어가 입력되고 정확한 버튼이 눌리는지 확인.
 5. 8초 지연, 비활성/중복/숨김 노드, 팝업, 화면 회전, 다른 앱 전환, 서비스 비활성화, 중단 후 재실행 확인.
 6. API 24/25 기기와 최신 기기, WebView/Compose 화면 확인. 단위 테스트는 실제 접근성 노출을 보장하지 않는다.
-7. credential 미설정 시 계획 중단 확인. 저장 방식과 필드 별칭을 팀이 확정한 뒤 로그인 전체 경로 검증.
+7. 로그인 정보 미등록 시 계획 중단 확인. 로그인 정보 관리에서 계정을 등록하고 실제 앱의 필드 호환성 및 로그인 전체 경로 검증.
 8. TTS 엔진 준비/미준비 상태에서 완료 피드백 확인. 피드백은 UI 명령 전달 완료이며 실제 로그인 성공 판정이 아니다.
 9. scroll up/down 방향과 wait 단위 규칙을 LLM 팀과 합의 후 실제 화면에서 확인.
 
 ## 남은 작업과 한계
 
-- credential 저장/Autofill 구현, id/password 실제 필드 매핑, 별도 LLM 앱의 메인 app 통합은 TODO.
+- Keystore 저장 및 접근성 로그인 입력 구현 완료. Android Autofill 프레임워크 연동, 실제 서점 로그인 화면 호환성 검증, 별도 LLM 앱의 메인 app 통합은 TODO.
 - `검색결과 첫번째 항목` 같은 의미적 위치 선택, 스크롤 거리/컨테이너 지정, 로그인·구매 결과 판정, 실패 후 LLM 재계획은 TODO.
 - 동명 노드는 임의로 누르지 않는다. 고유 resource-id 또는 실기기에서 확인한 별칭이 필요하다.
 - 이벤트 안정화와 다음 target 재탐색은 기본 대기일 뿐 모든 앱의 네트워크 완료를 보장하지 않는다.
-- 프로세스 종료 시 계획을 저장하거나 재개하지 않는다. 입력 JSON과 credential도 영속 저장하지 않는다.
+- 프로세스 종료 시 계획을 저장하거나 재개하지 않는다. 입력 JSON은 영속 저장하지 않으며, 사용자가 등록한 credential만 암호화해 백업 제외 영역에 저장한다.
 
 코드 검토와 기기 검증을 위한 상태이며, 실기기 E2E 통과/배포 완료로 간주하지 않는다.

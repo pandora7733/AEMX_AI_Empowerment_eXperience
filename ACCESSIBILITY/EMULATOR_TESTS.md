@@ -56,4 +56,4 @@ adb shell am instrument -w -r com.sihoo.aemx.devicechecks/.DeviceChecks
 
 ## 미검증 범위
 
-교보문고/알라딘은 가상 기기에 설치되어 있지 않았으며 Google Play는 로그인 화면이었다. 따라서 실제 서점의 앱 실행·검색·로그인 E2E는 아직 검증하지 못했다. 두 앱을 설치한 뒤 실제 노드 라벨/ID를 확인하고 동일한 JSON 경로를 검증해야 한다. credential 저장/로그인 정보 제공은 여전히 팀 결정 사항이다.
+이 최초 테스트 당시 교보문고/알라딘은 설치되어 있지 않아 실제 서점 E2E는 검증하지 못했다. 이후 교보문고 설치와 패키지 `mok.android`를 확인했고 검색은 사용자가 직접 동작을 확인했다. 사용자 요청으로 Keystore 저장·로그인 입력도 추가했다. 해당 추가 검증과 남은 항목은 [LOGIN_VALIDATION.md](LOGIN_VALIDATION.md)를 참고한다. 실제 계정 로그인 성공 및 알라딘 E2E는 아직 미검증이다.

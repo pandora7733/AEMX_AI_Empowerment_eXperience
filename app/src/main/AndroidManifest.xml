@@ -32,6 +32,8 @@
         </activity>
 
         <activity android:name=".accessibility.ActionPlanActivity" android:exported="false" />
+        <activity android:name=".accessibility.CredentialSettingsActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
         <service
             android:name=".accessibility.AemxAccessibilityService"

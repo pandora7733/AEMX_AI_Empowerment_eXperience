@@ -102,7 +102,7 @@ class ActionExecutorTest {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         shadowOf(service).setRootInActiveWindow(node("id"))
         val events = Events()
-        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("교보문고", listOf(
+        ActionExecutor(service, UnconfiguredCredentialProvider, events, java.util.concurrent.Executor { it.run() }).execute(ActionPlan("교보문고", listOf(
             ActionStep(ActionType.INPUT_CREDENTIAL, "id"), ActionStep(ActionType.TAP, "검색창"),
         )))
         shadowOf(Looper.getMainLooper()).idle()

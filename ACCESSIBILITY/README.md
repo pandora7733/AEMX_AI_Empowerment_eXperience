@@ -148,9 +148,21 @@ adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'
 
 ## Credential 보안
 
-저장 방식이 확정되지 않아 `CredentialProvider` 인터페이스와 안전하게 실패하는 미설정 구현만 제공한다. 아이디·비밀번호·API Key는 코드, Git, README, 로그에 저장하지 않는다. 이후 Android Keystore 기반 암호화 저장 또는 Autofill 연동을 팀에서 결정해야 한다. Executor와 서비스 로그에는 credential 값과 입력 텍스트를 출력하지 않는다.
+사용자 요청에 따라 Android Keystore AES-256-GCM 저장 방식을 구현했다. 메인 화면의 **로그인 정보 관리**에서 교보문고 또는 알라딘을 선택하고 실제 계정 정보를 직접 등록한다. 아이디·비밀번호는 JSON/LLM/로그에 넣지 않는다. 입력 화면은 캡처를 차단하고 입력값을 화면 상태에 저장하지 않으며, 저장 후 또는 화면을 떠나면 비운다. 기본 서비스는 재연결 후에도 저장소에 자동 연결된다.
 
-기존 `AEMX_upload`는 독립 UI/더미 데이터 프로젝트이며 재사용 가능한 보안 credential 저장소로 간주하지 않았다. 팀 provider는 연결 후 유휴 상태에서 메인 스레드로 `configureCredentialProvider(provider)`를 호출해 연결한다. 서비스 재연결 시 다시 연결해야 한다. provider는 빠르게 반환해야 하며 I/O를 메인 스레드에서 수행하지 않는다. `id`/`password`는 현재 정확한 노드 라벨/ID와 일치해야 하므로 실기기에서 별칭 매핑 확정이 필요하다.
+암호문은 앱의 `noBackupFilesDir/credentials-v1`에 AtomicFile로 기록하며 백업 대상에서 제외된다. 앱별 키와 인증된 패키지 식별자(AAD), 매번 새 IV를 사용한다. 삭제 시 키도 삭제한다. 키 손실·변조 시 평문으로 대체하지 않고 재등록을 안내한다. 저장·복호화는 작업 스레드에서 수행하며 취소된 작업은 UI에 입력하지 않는다. 복호화된 값은 입력 단계 동안만 참조하지만 JVM 문자열과 입력 대상 앱의 메모리를 완전히 지울 수 있다는 보장은 하지 않는다. 키 사용에 매번 생체 인증을 요구하지 않는 기기 로컬 자동입력 방식이다.
+
+로그인 화면을 연 상태에서 다음 단계를 기존 Action Plan에 사용한다. 입력 후 로그인 버튼 클릭은 별도 `tap` 단계이며 버튼 target은 실제 고유 라벨/ID여야 한다.
+
+```json
+{"app":"교보문고","steps":[{"action":"open_app","target":"교보문고"},{"action":"input_credential","target":"id"},{"action":"input_credential","target":"password"},{"action":"tap","target":"로그인"}]}
+```
+
+현재 패키지의 표시·활성 입력 필드만 검사하며, 고유한 아이디 라벨/ID와 `isPassword` 필드가 각각 하나여야 한다. 검색창, 복수 아이디, 비밀번호 확인 필드가 있는 화면에서는 입력하지 않는다. 앱별 UI 변경으로 필드를 못 찾으면 8초 후 중단한다. 로그인 화면의 실제 노드 호환성 및 실제 계정 로그인 성공 여부는 별도 기기 검증이 필요하다. CAPTCHA/OTP/추가 인증과 로그인 성공 판정은 자동화하지 않는다.
+
+기존 `AEMX_upload`의 더미 데이터는 사용하지 않는다. 팀 provider는 유휴 상태에서 메인 스레드로 `configureCredentialProvider(provider)`를 호출해 교체할 수 있으며, `getCredential`은 이제 작업 스레드에서 호출된다.
+
+참고: [Android Keystore](https://developer.android.com/privacy-and-security/keystore), [암호화 권장사항](https://developer.android.com/privacy-and-security/cryptography).
 
 ## 알려진 제한사항 / 실기기 검증 항목
 
@@ -169,7 +181,7 @@ adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'
 
 - [ ] 교보문고·알라딘 실기기에서 패키지명과 UI 덤프 확정
 - [ ] 앱별 target 별칭 또는 resource-id 우선 탐색 규칙 추가
-- [ ] 팀 결정에 맞는 안전한 `CredentialProvider` 구현
+- [x] 사용자 승인에 따른 Keystore `CredentialProvider` 및 등록·삭제 UI 구현
 - [ ] LLM Android 실행부에서 `submitActionPlan` 연결
 - [ ] 로그인·검색 시나리오 계측 테스트와 실패 UI 추가
 - [ ] 팀 공통 기기에서 전체 STT → LLM → Accessibility → TTS 통합 검증
