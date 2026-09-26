@@ -27,6 +27,22 @@ public final class DeviceChecks extends Instrumentation {
             android.util.Log.i("AemxDeviceChecks", "Starting UiAutomation connection");
             automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
             android.util.Log.i("AemxDeviceChecks", "UiAutomation connected");
+            if ("kyobo_login".equals(scenario)) {
+                AccessibilityNodeInfo root = automation.getRootInActiveWindow();
+                if (root == null || !"mok.android".contentEquals(root.getPackageName())) {
+                    throw new AssertionError("Open the Kyobo login form first");
+                }
+                int passwords = 0;
+                ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>(); queue.add(root);
+                int visited = 0;
+                while (!queue.isEmpty()) {
+                    if (++visited > 2000) throw new AssertionError("Login tree too large");
+                    AccessibilityNodeInfo node = queue.removeFirst();
+                    if (node.isVisibleToUser() && node.isEnabled() && node.isPassword()) passwords++;
+                    for (int i = 0; i < node.getChildCount(); i++) { AccessibilityNodeInfo child = node.getChild(i); if (child != null) queue.add(child); }
+                }
+                if (passwords != 1) throw new AssertionError("Expected one password field before login test");
+            }
             Intent launch = new Intent().setClassName("com.sihoo.aemx", "com.sihoo.aemx.MainActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             getTargetContext().startActivity(launch);
@@ -34,6 +50,19 @@ public final class DeviceChecks extends Instrumentation {
             click("실행 중단");
             awaitText("실행 중단됨");
             pass("service_connected");
+
+            if ("kyobo_login".equals(scenario)) {
+                // Explicit manual scenario only. Credentials stay in the AEMX process and are never arguments or logs.
+                // Do not rerun automatically after a rejected login or additional authentication challenge.
+                submit("{\"app\":\"교보문고\",\"steps\":[{\"action\":\"open_app\",\"target\":\"교보문고\"},"
+                        + "{\"action\":\"input_credential\",\"target\":\"id\"},"
+                        + "{\"action\":\"input_credential\",\"target\":\"password\"},"
+                        + "{\"action\":\"tap\",\"target\":\"loginBtn\"}]}");
+                SystemClock.sleep(20_000);
+                result.putString("stream", "DISPATCHED kyobo_login once; authenticated UI must be verified separately\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
 
             if ("kyobo_search".equals(scenario)) {
                 // Selectors observed on Kyobo 3.2.23. No account, purchase or payment operations.

@@ -55,6 +55,19 @@ class CredentialLoginTest {
         assertNull(CredentialNodeFinder.find(root, "교보문고", CredentialField.ID))
     }
 
+    @Test fun `Kyobo unlabeled web fields require exactly one login button and one ID field`() {
+        val (root, id, password) = form()
+        id.viewIdResourceName = null
+        password.viewIdResourceName = null
+        assertNull(CredentialNodeFinder.find(root, "교보문고", CredentialField.ID))
+        val login = node("loginBtn").apply { isEditable = false; isClickable = true }
+        shadowOf(root).addChild(login)
+        assertEquals(id, CredentialNodeFinder.find(root, "교보문고", CredentialField.ID))
+        assertEquals(password, CredentialNodeFinder.find(root, "교보문고", CredentialField.PASSWORD))
+        shadowOf(root).addChild(node("extraField"))
+        assertNull(CredentialNodeFinder.find(root, "교보문고", CredentialField.ID))
+    }
+
     @Test fun `credentials are delivered in order and cancellation ignores late reads`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         val (root, id, password) = form()
