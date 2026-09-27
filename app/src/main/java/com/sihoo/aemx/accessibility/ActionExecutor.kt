@@ -89,15 +89,25 @@ internal class ActionExecutor(
 
     private fun retryUntilReady(plan: ActionPlan, index: Int, id: Long) {
         val step = plan.steps[index]
-        val deadline = SystemClock.uptimeMillis() + ACTION_TIMEOUT_MS
+        val deadline = SystemClock.uptimeMillis() +
+            if (step.action == ActionType.OPEN_APP) OPEN_APP_TIMEOUT_MS else ACTION_TIMEOUT_MS
+        var foregroundSince = 0L
         lateinit var attempt: Runnable
         attempt = Runnable {
             if (id != executionId) return@Runnable
             pendingRetry = null
-            val result = try {
+            val observed = try {
                 performUiAction(plan.app, step)
             } catch (_: RuntimeException) {
                 StepResult.Fatal("화면 조작 중 오류가 발생했습니다.")
+            }
+            val result = if (step.action == ActionType.OPEN_APP && observed == StepResult.Success) {
+                val now = SystemClock.uptimeMillis()
+                if (foregroundSince == 0L) foregroundSince = now
+                if (now - foregroundSince >= OPEN_APP_STABLE_MS) StepResult.Success else StepResult.NotReady
+            } else {
+                if (step.action == ActionType.OPEN_APP) foregroundSince = 0L
+                observed
             }
             when (result) {
                 is StepResult.Success -> {
@@ -107,7 +117,12 @@ internal class ActionExecutor(
                 is StepResult.Fatal -> fail(index, step, result.message, id)
                 StepResult.NotReady -> {
                     if (SystemClock.uptimeMillis() >= deadline) {
-                        fail(index, step, "대상 화면 또는 조작 가능한 요소를 8초 안에 찾지 못했습니다.", id)
+                        val message = if (step.action == ActionType.OPEN_APP) {
+                            "앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요."
+                        } else {
+                            "대상 화면 또는 조작 가능한 요소를 8초 안에 찾지 못했습니다."
+                        }
+                        fail(index, step, message, id)
                     } else {
                         pendingRetry = attempt
                         handler.postDelayed(attempt, RETRY_INTERVAL_MS)
@@ -214,6 +229,8 @@ internal class ActionExecutor(
 
     private companion object {
         const val ACTION_TIMEOUT_MS = 8_000L
+        const val OPEN_APP_TIMEOUT_MS = 15_000L
+        const val OPEN_APP_STABLE_MS = 3_000L
         const val RETRY_INTERVAL_MS = 250L
     }
 }

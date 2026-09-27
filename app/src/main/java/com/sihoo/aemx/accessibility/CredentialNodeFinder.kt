@@ -5,7 +5,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import java.util.ArrayDeque
 import java.util.Locale
 
-/** Require a unique password field and a uniquely labelled ID field on the same app screen. */
+/** Require unique login fields in the expected app; unlabeled IDs need a unique submit button. */
 internal object CredentialNodeFinder {
     fun find(root: AccessibilityNodeInfo, app: String, field: CredentialField): AccessibilityNodeInfo? {
         val pkg = AppLauncher.packageFor(app) ?: return null
@@ -13,16 +13,20 @@ internal object CredentialNodeFinder {
         val passwords = mutableListOf<AccessibilityNodeInfo>()
         val ids = mutableListOf<AccessibilityNodeInfo>()
         val otherInputs = mutableListOf<AccessibilityNodeInfo>()
-        var kyoboLoginButtons = 0
+        var loginButtons = 0
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0
         while (queue.isNotEmpty()) {
             if (++visited > 2000) return null
             val node = queue.removeFirst()
-            if (pkg == "mok.android" && node.packageName?.toString() == pkg &&
-                node.isVisibleToUser && node.isEnabled &&
-                node.viewIdResourceName?.substringAfterLast('/') == "loginBtn" && node.isClickable) {
-                kyoboLoginButtons++
+            if (node.packageName?.toString() == pkg && node.isVisibleToUser && node.isEnabled && node.isClickable) {
+                val kyoboSubmit = pkg == "mok.android" &&
+                    node.viewIdResourceName?.substringAfterLast('/') == "loginBtn"
+                val aladinSubmit = pkg == "kr.co.aladin.third_shop" &&
+                    node.className?.toString()?.endsWith("Button") == true &&
+                    listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+                        .any { it.trim().lowercase(Locale.ROOT) in setOf("로그인", "login", "log in") }
+                if (kyoboSubmit || aladinSubmit) loginButtons++
             }
             if (node.packageName?.toString() == pkg && node.isVisibleToUser && node.isEnabled &&
                 (node.isEditable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT })) {
@@ -41,7 +45,7 @@ internal object CredentialNodeFinder {
         // Registration/change-password screens (multiple password fields) are not login forms.
         if (passwords.size != 1) return null
         val id = if (ids.size == 1) ids.single()
-            else if (ids.isEmpty() && pkg == "mok.android" && otherInputs.size == 1 && kyoboLoginButtons == 1)
+            else if (ids.isEmpty() && otherInputs.size == 1 && loginButtons == 1)
                 otherInputs.single()
             else return null
         return if (field == CredentialField.PASSWORD) passwords.single() else id

@@ -51,6 +51,16 @@ public final class DeviceChecks extends Instrumentation {
             awaitText("실행 중단됨");
             pass("service_connected");
 
+            if ("aladin_open".equals(scenario)) {
+                // No account or credential entry: the installed bookstore closes during startup on this emulator.
+                submit("{\"app\":\"알라딘\",\"steps\":[{\"action\":\"open_app\",\"target\":\"알라딘\"}]}");
+                awaitNode("1단계 실패: 앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요.", 22_000);
+                pass("aladin_startup_failure_reported");
+                result.putString("stream", "PASS: Aladin startup failure reported without credential submission\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
+
             if ("kyobo_login".equals(scenario)) {
                 // Explicit manual scenario only. Credentials stay in the AEMX process and are never arguments or logs.
                 // Do not rerun automatically after a rejected login or additional authentication challenge.
@@ -132,8 +142,10 @@ public final class DeviceChecks extends Instrumentation {
 
     private void awaitText(String text) { awaitNode(text); }
 
-    private AccessibilityNodeInfo awaitNode(String expected) {
-        long deadline = SystemClock.uptimeMillis() + 15_000;
+    private AccessibilityNodeInfo awaitNode(String expected) { return awaitNode(expected, 15_000); }
+
+    private AccessibilityNodeInfo awaitNode(String expected, long timeoutMs) {
+        long deadline = SystemClock.uptimeMillis() + timeoutMs;
         while (SystemClock.uptimeMillis() < deadline) {
             AccessibilityNodeInfo root = automation.getRootInActiveWindow();
             if (root != null && "com.sihoo.aemx".contentEquals(root.getPackageName())) {

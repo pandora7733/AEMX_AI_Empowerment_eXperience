@@ -25,9 +25,10 @@ class ActionExecutorTest {
         val started = mutableListOf<Int>()
         var completed = false
         var failed = false
+        var failureMessage: String? = null
         override fun onStepStarted(index: Int, step: ActionStep) { started += index }
         override fun onCompleted(plan: ActionPlan) { completed = true }
-        override fun onFailed(index: Int, step: ActionStep, message: String) { failed = true }
+        override fun onFailed(index: Int, step: ActionStep, message: String) { failed = true; failureMessage = message }
     }
 
     private fun node(label: String = "검색창", pkg: String = "mok.android") =
@@ -136,11 +137,41 @@ class ActionExecutorTest {
         assertEquals(listOf(0), events.started)
         shadowOf(service).setRootInActiveWindow(node())
         executor.onAccessibilityTreeChanged()
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(5))
         assertTrue(events.completed)
         val app = shadowOf(RuntimeEnvironment.getApplication())
         assertEquals("mok.android", app.nextStartedActivity.component?.packageName)
         assertNull(app.nextStartedActivity)
+    }
+
+    @Test fun `Aladin launch reports closed app instead of login success`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val appPackage = "kr.co.aladin.third_shop"
+        val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(appPackage)
+        val info = ResolveInfo().apply {
+            activityInfo = ActivityInfo().apply {
+                name = "$appPackage.MainActivity"
+                packageName = appPackage
+                applicationInfo = ApplicationInfo().apply { packageName = appPackage }
+            }
+        }
+        shadowOf(service.packageManager).addResolveInfoForIntent(launch, info)
+        shadowOf(service).setRootInActiveWindow(node("AEMX", "com.sihoo.aemx"))
+        val events = Events()
+        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("알라딘", listOf(
+            ActionStep(ActionType.OPEN_APP, "알라딘"), ActionStep(ActionType.INPUT_CREDENTIAL, "id"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+        shadowOf(service).setRootInActiveWindow(node("splash", appPackage))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertFalse(events.completed)
+        shadowOf(service).setRootInActiveWindow(node("AEMX", "com.sihoo.aemx"))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(16))
+        assertTrue(events.failed)
+        assertFalse(events.completed)
+        assertEquals(listOf(0), events.started)
+        assertEquals("앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요.", events.failureMessage)
+        assertEquals(appPackage, shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity.component?.packageName)
     }
 
     @Test @Config(sdk = [24, 28])

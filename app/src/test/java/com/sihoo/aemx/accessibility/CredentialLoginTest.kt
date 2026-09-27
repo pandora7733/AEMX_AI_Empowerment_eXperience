@@ -17,18 +17,18 @@ import java.util.concurrent.Executor
 @Config(sdk = [24, 28])
 @LooperMode(LooperMode.Mode.PAUSED)
 class CredentialLoginTest {
-    private fun node(id: String, secret: Boolean = false) = AccessibilityNodeInfo.obtain().apply {
-        packageName = "mok.android"
+    private fun node(id: String, secret: Boolean = false, appPackage: String = "mok.android") = AccessibilityNodeInfo.obtain().apply {
+        packageName = appPackage
         viewIdResourceName = id
         isVisibleToUser = true
         isEnabled = true
         isEditable = true
         isPassword = secret
     }
-    private fun form(): Triple<AccessibilityNodeInfo, AccessibilityNodeInfo, AccessibilityNodeInfo> {
-        val root = node("root").apply { isEditable = false }
-        val id = node("mok.android:id/userId")
-        val password = node("password", true)
+    private fun form(appPackage: String = "mok.android"): Triple<AccessibilityNodeInfo, AccessibilityNodeInfo, AccessibilityNodeInfo> {
+        val root = node("root", appPackage = appPackage).apply { isEditable = false }
+        val id = node("$appPackage:id/userId", appPackage = appPackage)
+        val password = node("password", true, appPackage)
         shadowOf(root).addChild(id)
         shadowOf(root).addChild(password)
         return Triple(root, id, password)
@@ -66,6 +66,30 @@ class CredentialLoginTest {
         assertEquals(password, CredentialNodeFinder.find(root, "교보문고", CredentialField.PASSWORD))
         shadowOf(root).addChild(node("extraField"))
         assertNull(CredentialNodeFinder.find(root, "교보문고", CredentialField.ID))
+    }
+
+    @Test fun `Aladin simulated unlabeled form requires one visible login button`() {
+        val (root, id, password) = form("kr.co.aladin.third_shop")
+        id.viewIdResourceName = null
+        password.viewIdResourceName = null
+        assertNull(CredentialNodeFinder.find(root, "알라딘", CredentialField.ID))
+        val login = node("submit", appPackage = "kr.co.aladin.third_shop").apply {
+            isEditable = false
+            isClickable = true
+            className = "android.widget.Button"
+            text = "로그인"
+        }
+        shadowOf(root).addChild(login)
+        assertEquals(id, CredentialNodeFinder.find(root, "알라딘", CredentialField.ID))
+        assertEquals(password, CredentialNodeFinder.find(root, "알라딘", CredentialField.PASSWORD))
+        assertNull(CredentialNodeFinder.find(root, "교보문고", CredentialField.ID))
+        shadowOf(root).addChild(node("another", appPackage = "kr.co.aladin.third_shop").apply {
+            isEditable = false
+            isClickable = true
+            className = "android.widget.Button"
+            text = "로그인"
+        })
+        assertNull(CredentialNodeFinder.find(root, "알라딘", CredentialField.ID))
     }
 
     @Test fun `credentials are delivered in order and cancellation ignores late reads`() {

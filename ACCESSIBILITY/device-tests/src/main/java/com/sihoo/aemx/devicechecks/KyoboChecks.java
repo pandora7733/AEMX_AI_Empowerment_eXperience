@@ -16,6 +16,7 @@ import java.util.List;
 public final class KyoboChecks extends Instrumentation {
     private Bundle arguments;
     private UiAutomation automation;
+    private String targetPackage;
     private static final String[] WORDS = {"로그인", "로그아웃", "마이룸", "마이페이지", "마이", "닫기",
             "아이디", "비밀번호", "회원정보", "회원가입", "인증", "일치하지", "확인해", "실패", "완료", "차단",
             "close", "Close", "login", "Login", "MY", "my", "오늘", "취소", "확인",
@@ -27,9 +28,13 @@ public final class KyoboChecks extends Instrumentation {
         Bundle result = new Bundle();
         try {
             automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
+            targetPackage = arguments.getString("package", "mok.android");
+            if (!"mok.android".equals(targetPackage) && !"kr.co.aladin.third_shop".equals(targetPackage)) {
+                throw new IllegalArgumentException("Unsupported bookstore");
+            }
             String operation = arguments.getString("operation", "inspect");
             if ("launch".equals(operation)) {
-                Intent intent = getTargetContext().getPackageManager().getLaunchIntentForPackage("mok.android");
+                Intent intent = getTargetContext().getPackageManager().getLaunchIntentForPackage(targetPackage);
                 if (intent == null) throw new IllegalStateException("Bookstore not installed");
                 getTargetContext().startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 SystemClock.sleep(3000);
@@ -79,7 +84,7 @@ public final class KyoboChecks extends Instrumentation {
 
     private List<AccessibilityNodeInfo> nodes() {
         AccessibilityNodeInfo root = automation.getRootInActiveWindow();
-        if (root == null || !"mok.android".contentEquals(root.getPackageName())) throw new IllegalStateException("Wrong foreground app");
+        if (root == null || !targetPackage.contentEquals(root.getPackageName())) throw new IllegalStateException("Wrong foreground app");
         List<AccessibilityNodeInfo> result = new ArrayList<>();
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>(); queue.add(root);
         while (!queue.isEmpty()) {
