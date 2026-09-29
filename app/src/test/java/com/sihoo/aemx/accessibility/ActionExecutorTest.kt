@@ -26,9 +26,19 @@ class ActionExecutorTest {
         var completed = false
         var failed = false
         var failureMessage: String? = null
+        var failureScreen: ScreenDescription? = null
         override fun onStepStarted(index: Int, step: ActionStep) { started += index }
         override fun onCompleted(plan: ActionPlan) { completed = true }
-        override fun onFailed(index: Int, step: ActionStep, message: String) { failed = true; failureMessage = message }
+        override fun onFailed(
+            index: Int,
+            step: ActionStep,
+            message: String,
+            screen: ScreenDescription,
+        ) {
+            failed = true
+            failureMessage = message
+            failureScreen = screen
+        }
     }
 
     private fun node(label: String = "검색창", pkg: String = "mok.android") =
