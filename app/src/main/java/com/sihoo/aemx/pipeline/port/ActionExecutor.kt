@@ -38,15 +38,29 @@ interface ActionExecutor {
          */
         data class Tap(val label: String) : Command
 
-        /**
-         * [fieldLabel] 로 찾은 입력란에 [text] 를 넣는다.
-         * [sensitive] 가 true 면 로그에 값을 남기지 않는다(자격증명).
-         */
+        /** [fieldLabel] 로 찾은 입력란에 [text] 를 넣는다. */
         data class InputText(
             val fieldLabel: String?,
-            val text: String,
-            val sensitive: Boolean = false
+            val text: String
         ) : Command
+
+        /**
+         * 앱의 검색 결과 화면을 바로 연다(네이버/구글/유튜브).
+         * 화면에서 검색창을 찾아 누르는 것보다 안정적이라 실행모듈이 따로 제공한다.
+         */
+        data class Search(val appName: String, val query: String) : Command
+
+        /** 유튜브 검색 결과의 첫 번째 동영상을 재생한다. */
+        data object PlayFirst : Command
+
+        /**
+         * 쇼츠/릴스에서 다음 영상으로 넘긴다.
+         * [delay] 가 있으면 그만큼 기다린 뒤 넘긴다("10s", "500ms", "3").
+         *
+         * 영상이 실제로 끝나는 순간은 접근성 정보로 알 수 없어서, 시간 지연이나
+         * 즉시 넘기기만 지원한다(ACCESSIBILITY/README.md 참고).
+         */
+        data class NextVideo(val delay: String?) : Command
 
         data class Scroll(val direction: Direction) : Command
 

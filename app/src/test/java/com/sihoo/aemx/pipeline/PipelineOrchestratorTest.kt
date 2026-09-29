@@ -2,7 +2,6 @@ package com.sihoo.aemx.pipeline
 
 import com.sihoo.aemx.pipeline.fake.FakeActionExecutor
 import com.sihoo.aemx.pipeline.fake.FakeAppResolver
-import com.sihoo.aemx.pipeline.fake.FakeCredentialStore
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
@@ -93,33 +92,48 @@ class PipelineOrchestratorTest {
         assertEquals(PlanRequest.Mode.INITIAL, planner.requests.first().mode)
     }
 
-    // -------------------------------------------------------- 자격증명 치환
+    // -------------------------------------------------------- 검색·영상 액션
 
     @Test
-    fun `input_credential 은 저장된 계정 값으로 치환되고 로그에 남지 않는다`() = runTest {
+    fun `search 는 검색어를 target 에서 가져온다`() = runTest {
+        // 검색어가 value 가 아니라 target 에 온다. 실행모듈이 그 형태로 받기 때문에
+        // 여기서 잘못 읽으면 빈 검색어로 실행된다.
         val plan =
-            """{"app": "알라딘", "steps": [{"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}]}"""
+            """{"app":"유튜브","steps":[{"action":"search","target":"고양이 영상"},{"action":"play_first","target":"첫 번째 동영상"}]}"""
 
-        val observer = FakeScreenObserver(snapshot("아이디", "비밀번호"))
+        val observer = FakeScreenObserver(snapshot("유튜브", "홈"))
         val executor = ScriptedExecutor(
             observer,
-            listOf(snapshot("아이디", "입력됨"), snapshot("아이디", "비밀번호", "입력됨"))
+            listOf(snapshot("고양이 영상", "검색결과"), snapshot("재생 중", "고양이 영상"))
         )
         val orchestrator = build(FakePlanGenerator(listOf(plan)), executor, observer)
 
-        orchestrator.submit("알라딘에서 로그인하고 싶어")
+        orchestrator.submit("유튜브에서 고양이 영상 틀어줘")
         advanceUntilIdle()
 
-        val inputs = executor.performed.filterIsInstance<ActionExecutor.Command.InputText>()
-        assertEquals(2, inputs.size)
-        assertEquals("demo_user", inputs[0].text)
-        assertEquals("demo_password", inputs[1].text)
-        assertTrue("자격증명은 sensitive 로 넘겨야 한다", inputs.all { it.sensitive })
-
-        // 비밀번호가 로그 어디에도 찍히면 안 된다.
+        val search = executor.performed.filterIsInstance<ActionExecutor.Command.Search>().single()
+        assertEquals("고양이 영상", search.query)
+        assertEquals("유튜브", search.appName)
         assertTrue(
-            orchestrator.log.value.none { it.message.contains("demo_password") }
+            "첫 영상 재생 명령이 이어져야 한다",
+            executor.performed.any { it is ActionExecutor.Command.PlayFirst }
         )
+    }
+
+    @Test
+    fun `next_video 는 대기 시간을 그대로 넘긴다`() = runTest {
+        val plan =
+            """{"app":"유튜브","steps":[{"action":"next_video","target":"다음 동영상","value":"10s"}]}"""
+
+        val observer = FakeScreenObserver(snapshot("쇼츠", "첫 영상"))
+        val executor = ScriptedExecutor(observer, listOf(snapshot("쇼츠", "두 번째 영상")))
+        val orchestrator = build(FakePlanGenerator(listOf(plan)), executor, observer)
+
+        orchestrator.submit("10초 뒤 다음 영상")
+        advanceUntilIdle()
+
+        val next = executor.performed.filterIsInstance<ActionExecutor.Command.NextVideo>().single()
+        assertEquals("10s", next.delay)
     }
 
     @Test
@@ -365,7 +379,6 @@ class PipelineOrchestratorTest {
         planner = planner,
         executor = executor,
         screenObserver = observer,
-        credentials = FakeCredentialStore(),
         appResolver = FakeAppResolver(),
         scope = this,
         config = config,

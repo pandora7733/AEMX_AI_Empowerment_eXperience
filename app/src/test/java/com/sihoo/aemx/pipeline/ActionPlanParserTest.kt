@@ -17,22 +17,24 @@ import org.junit.Test
 class ActionPlanParserTest {
 
     @Test
-    fun `프롬프트 예시 그대로의 로그인 계획을 읽는다`() {
+    fun `프롬프트 예시 그대로의 유튜브 계획을 읽는다`() {
         val raw = """
-            {"app": "알라딘", "steps": [{"action": "open_app", "target": "알라딘"}, {"action": "tap", "target": "로그인"}, {"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}, {"action": "tap", "target": "로그인"}]}
+            {"app":"유튜브","steps":[{"action":"open_app","target":"유튜브"},{"action":"search","target":"고양이 영상"},{"action":"play_first","target":"첫 번째 동영상"}]}
         """.trimIndent()
 
         val result = ActionPlanParser.parse(raw)
         assertTrue(result is ParseResult.Success)
 
         val plan = (result as ParseResult.Success).plan
-        assertEquals("알라딘", plan.app)
-        assertEquals(5, plan.steps.size)
+        assertEquals("유튜브", plan.app)
+        assertEquals(3, plan.steps.size)
         assertEquals(ActionType.OPEN_APP, plan.steps[0].action)
-        assertEquals(ActionType.INPUT_CREDENTIAL, plan.steps[2].action)
-        assertEquals("password", plan.steps[3].target)
+        // 검색어는 value 가 아니라 target 에 온다.
+        assertEquals(ActionType.SEARCH, plan.steps[1].action)
+        assertEquals("고양이 영상", plan.steps[1].target)
+        assertEquals(ActionType.PLAY_FIRST, plan.steps[2].action)
         // 모델은 id 를 주지 않으므로 파서가 0부터 순번을 붙인다.
-        assertEquals(listOf(0, 1, 2, 3, 4), plan.steps.map { it.index })
+        assertEquals(listOf(0, 1, 2), plan.steps.map { it.index })
     }
 
     @Test

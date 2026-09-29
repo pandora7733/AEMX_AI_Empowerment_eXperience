@@ -27,11 +27,15 @@ data class ActionStep(
     val index: Int,
     val action: ActionType,
     /**
-     * 조작 대상. viewId 가 아니라 사람이 읽는 이름이다("로그인", "검색창", "검색결과 첫번째 항목").
-     * [ActionType.INPUT_CREDENTIAL] 일 때만 예외적으로 "id" / "password" 가 들어온다.
+     * 조작 대상. viewId 가 아니라 사람이 읽는 이름이다("검색창", "Shorts", "첫 번째 동영상").
+     * [ActionType.SEARCH] 는 예외적으로 검색어가 여기에 온다 — 실행모듈이 그렇게 받는다.
+     * [ActionType.SCROLL] 은 up/down/forward/backward 중 하나다.
      */
     val target: String?,
-    /** [ActionType.INPUT_TEXT] 에서 입력할 내용. 그 외에는 보통 null. */
+    /**
+     * [ActionType.INPUT_TEXT] 에서 입력할 내용.
+     * [ActionType.NEXT_VIDEO] 와 [ActionType.WAIT] 에서는 대기 시간("10s", "500ms", "3").
+     */
     val value: String? = null,
     /** 이 step 이 끝났을 때 화면이 어떠해야 하는지. 추론되거나 모델이 직접 준 값. */
     val expect: Expectation = Expectation.NONE,
@@ -58,23 +62,29 @@ data class ActionStep(
 }
 
 /**
- * 시스템 프롬프트가 정의한 action 6종.
+ * 실행모듈이 받아들이는 action 목록.
  *
- * 값을 늘리려면 LLM 파트(프롬프트)와 실행모듈 양쪽을 함께 고쳐야 한다.
- * 여기서 마음대로 추가하면 모델은 그 action 을 영영 만들지 않는다.
+ * **세 곳이 같아야 한다**: 시스템 프롬프트(`LLM/system_prompt.txt`), 이 enum,
+ * 실행모듈의 `accessibility/ActionPlan.kt`. 여기만 늘리면 모델은 그 action 을 영영
+ * 만들지 않고, 프롬프트만 늘리면 실행모듈이 계획 전체를 거부한다.
+ *
+ * 로그인/자격증명 입력은 지원하지 않는다. 실기기에서 앱마다 로그인 화면 구조가
+ * 너무 달라 안정적으로 동작하지 않아 범위에서 뺐다(ACCESSIBILITY/README.md 참고).
  */
 enum class ActionType(val wire: String, val label: String) {
     OPEN_APP("open_app", "앱 실행"),
     TAP("tap", "누르기"),
-
-    /**
-     * 저장된 아이디/비밀번호를 입력한다. target 은 "id" 또는 "password".
-     * 실제 값은 LLM 이 아니라 앱이 들고 있는 계정 저장소에서 가져온다
-     * ([com.sihoo.aemx.pipeline.port.CredentialStore]).
-     */
-    INPUT_CREDENTIAL("input_credential", "자격증명 입력"),
-
     INPUT_TEXT("input_text", "텍스트 입력"),
+
+    /** 앱의 검색 결과 화면을 바로 연다. 검색어는 value 가 아니라 target 에 온다. */
+    SEARCH("search", "검색"),
+
+    /** 유튜브 검색 결과의 첫 번째 동영상을 재생한다. */
+    PLAY_FIRST("play_first", "첫 영상 재생"),
+
+    /** 쇼츠/릴스에서 다음 영상으로 넘긴다. value 가 있으면 그만큼 기다린 뒤 넘긴다. */
+    NEXT_VIDEO("next_video", "다음 영상"),
+
     SCROLL("scroll", "스크롤"),
     WAIT("wait", "대기"),
 

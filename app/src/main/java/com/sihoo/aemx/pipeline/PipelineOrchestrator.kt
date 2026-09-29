@@ -8,7 +8,7 @@ import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.model.StepOutcome
 import com.sihoo.aemx.pipeline.port.ActionExecutor
 import com.sihoo.aemx.pipeline.port.AppResolver
-import com.sihoo.aemx.pipeline.port.CredentialStore
+
 import com.sihoo.aemx.pipeline.port.ExecutionResult
 import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
@@ -49,7 +49,6 @@ class PipelineOrchestrator(
     private val planner: PlanGenerator,
     private val executor: ActionExecutor,
     private val screenObserver: ScreenObserver,
-    private val credentials: CredentialStore,
     private val appResolver: AppResolver,
     private val scope: CoroutineScope,
     private val speech: SpeechSource? = null,
@@ -362,37 +361,23 @@ class PipelineOrchestrator(
                     )
                 )
 
-            ActionType.INPUT_CREDENTIAL -> {
-                val account = credentials.lookup(appName)
-                if (account == null) {
-                    // 계정이 없으면 재분석해도 풀리지 않는다. 사용자에게 등록을 요청한다.
+            // 검색어는 value 가 아니라 target 에 온다 (실행모듈이 그렇게 받는다).
+            ActionType.SEARCH -> {
+                val query = step.target
+                if (query.isNullOrBlank()) {
                     CommandMapping.Rejected { screen ->
-                        StepOutcome.NeedsUser(screen, "$appName 계정이 등록돼 있지 않다")
+                        StepOutcome.Mismatch(screen, "검색어가 비어 있다")
                     }
                 } else {
-                    val secret = when (step.target?.trim()?.lowercase()) {
-                        "id", "아이디" -> account.loginId
-                        "password", "pw", "비밀번호" -> account.password
-                        else -> null
-                    }
-                    if (secret == null) {
-                        CommandMapping.Rejected { screen ->
-                            StepOutcome.Mismatch(
-                                screen,
-                                "자격증명 종류를 알 수 없다(target=\"${step.target}\")"
-                            )
-                        }
-                    } else {
-                        CommandMapping.Ready(
-                            ActionExecutor.Command.InputText(
-                                fieldLabel = step.target,
-                                text = secret,
-                                sensitive = true
-                            )
-                        )
-                    }
+                    CommandMapping.Ready(ActionExecutor.Command.Search(appName, query))
                 }
             }
+
+            ActionType.PLAY_FIRST ->
+                CommandMapping.Ready(ActionExecutor.Command.PlayFirst)
+
+            ActionType.NEXT_VIDEO ->
+                CommandMapping.Ready(ActionExecutor.Command.NextVideo(step.value))
 
             ActionType.SCROLL ->
                 CommandMapping.Ready(

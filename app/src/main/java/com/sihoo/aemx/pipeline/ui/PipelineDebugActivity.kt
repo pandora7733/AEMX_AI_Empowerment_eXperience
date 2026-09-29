@@ -19,7 +19,6 @@ import com.sihoo.aemx.pipeline.PipelineLogEntry
 import com.sihoo.aemx.pipeline.PipelineOrchestrator
 import com.sihoo.aemx.pipeline.PipelineState
 import com.sihoo.aemx.pipeline.fake.FakeAppResolver
-import com.sihoo.aemx.pipeline.fake.FakeCredentialStore
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
 import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
@@ -162,7 +161,6 @@ class PipelineDebugActivity : AppCompatActivity() {
             planner = effectivePlanner,
             executor = executor,
             screenObserver = observer,
-            credentials = FakeCredentialStore(),
             appResolver = FakeAppResolver(),
             scope = lifecycleScope,
             config = PipelineConfig(quietPeriodMs = 300)

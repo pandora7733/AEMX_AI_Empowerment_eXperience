@@ -5,8 +5,6 @@ import com.sihoo.aemx.pipeline.json.ParseResult
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.ActionExecutor
 import com.sihoo.aemx.pipeline.port.AppResolver
-import com.sihoo.aemx.pipeline.port.Credential
-import com.sihoo.aemx.pipeline.port.CredentialStore
 import com.sihoo.aemx.pipeline.port.ExecutionResult
 import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
@@ -139,15 +137,6 @@ class FakeScreenObserver(
         current = snapshot
         _changes.emit(ScreenChange(kind, snapshot))
     }
-}
-
-/** 계정 하나만 들고 있는 가짜 저장소. */
-class FakeCredentialStore(
-    private val accounts: Map<String, Credential> = mapOf(
-        "알라딘" to Credential(loginId = "demo_user", password = "demo_password")
-    )
-) : CredentialStore {
-    override fun lookup(appName: String): Credential? = accounts[appName]
 }
 
 /** 앱 이름 앞에 고정 접두사를 붙여 패키지명을 흉내 내는 가짜 해석기. */

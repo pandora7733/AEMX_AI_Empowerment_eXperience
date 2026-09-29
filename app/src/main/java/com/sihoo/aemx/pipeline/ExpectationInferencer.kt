@@ -78,10 +78,21 @@ class ExpectationInferencer(
                 )
             }
 
-            // 자격증명은 값이 비밀이라 화면에서 확인할 수 없다(비밀번호는 점으로 가려진다).
-            // 실패 팝업 탐지는 KnownSituation 이 전역으로 처리하므로 여기서는 조건을 걸지 않는다.
-            ActionType.INPUT_CREDENTIAL -> step.copy(
-                expect = Expectation(note = "자격증명 입력은 화면으로 확인하지 않는다")
+            // 검색은 결과 화면으로 넘어가므로 화면이 반드시 바뀐다.
+            ActionType.SEARCH -> step.copy(
+                expect = Expectation(
+                    requireScreenChange = true,
+                    note = "검색하면 결과 화면으로 넘어가야 한다"
+                )
+            )
+
+            // 영상 재생과 다음 영상은 화면이 바뀌는 것 말고 확인할 방법이 마땅치 않다.
+            // 재생이 실제로 시작됐는지는 접근성 정보로 알기 어렵다(ACCESSIBILITY/README.md).
+            ActionType.PLAY_FIRST, ActionType.NEXT_VIDEO -> step.copy(
+                expect = Expectation(
+                    requireScreenChange = true,
+                    note = "영상이 바뀌면 화면 내용도 달라진다"
+                )
             )
 
             ActionType.SCROLL -> step.copy(
