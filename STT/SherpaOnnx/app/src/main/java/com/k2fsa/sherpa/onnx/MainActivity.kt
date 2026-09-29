@@ -7,6 +7,10 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
@@ -22,6 +26,45 @@ import kotlin.concurrent.thread
 
 private const val TAG = "sherpa-onnx"
 private const val REQUEST_RECORD_AUDIO_PERMISSION = 200
+
+/**
+ * AEMX: 인식 가중치를 높일 단어 목록(핫워드).
+ *
+ * **한글을 그대로 적으면 된다.** `modelingUnit = "cjkchar"` 설정 때문에 sherpa-onnx가
+ * 글자 단위로 쪼개서 처리한다. 새 앱을 지원할 때는 이 목록에 이름 한 줄만 추가하면 된다.
+ *
+ * 앱 이름·명령어처럼 **항상 똑같이 나오는 단어만** 넣는다. 책 제목은 넣지 않는다 —
+ * 넣을 수 있는 책은 몇 권뿐인데 그 책들로 인식이 쏠려서 나머지 책이 더 틀리게 된다.
+ * 책 제목은 모델 본래 성능으로 인식해야 하는 영역이다.
+ */
+private val HOTWORDS = listOf(
+    "교보문고",
+    "알라딘",
+    "로그인",
+    "로그아웃",
+    "검색",
+    "구매",
+    "주문",
+    "장바구니",
+    "회원가입",
+    "결제",
+    "취소",
+).joinToString("\n")
+
+/**
+ * AEMX: 인식 결과 텍스트를 토큰에서 직접 만든다.
+ *
+ * `OnlineRecognizerResult.text`를 그대로 쓰면 **띄어쓰기가 전부 사라진다.** sherpa-onnx가
+ * 텍스트를 합친 뒤 `RemoveSpaceBetweenCjk()`로 CJK 글자 사이의 공백을 지우는데, 이 함수의
+ * CJK 범위(`0xA840~0xD7AF`)에 한글 음절(`U+AC00~U+D7A3`)이 포함되기 때문이다. 중국어·
+ * 일본어에는 맞는 처리지만 한국어에는 틀리다.
+ *
+ * 다행히 토큰 배열에는 어절 경계가 공백으로 남아있어서(모델의 `▁` 표시를 라이브러리가
+ * 공백으로 바꿔줌), 토큰을 그대로 이어붙이면 띄어쓰기가 살아있는 문장이 나온다.
+ *
+ * 띄어쓰기가 없으면 뒤에 붙는 LLM이 명령을 해석하기 어려워지므로 중요하다.
+ */
+private fun OnlineRecognizerResult.textWithSpacing(): String = tokens.joinToString("").trim()
 
 // To enable microphone in android emulator, use
 //
@@ -83,8 +126,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recordButton: Button
     private lateinit var textView: TextView
     private var recordingThread: Thread? = null
+    private val audioEffects = mutableListOf<AudioEffect>()
 
-    private val audioSource = MediaRecorder.AudioSource.MIC
+    // AEMX: MIC(일반 녹음) 대신 VOICE_RECOGNITION 사용. 기기의 음성인식 전용 오디오
+    // 경로를 타서 잡음 억제/이득 조절이 음성인식에 맞게 적용됨. 원래 예제는 MIC였음.
+    private val audioSource = MediaRecorder.AudioSource.VOICE_RECOGNITION
     private val sampleRateInHz = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
 
@@ -155,6 +201,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             isRecording = false
             audioRecord!!.stop()
+            releaseAudioEffects()
             audioRecord!!.release()
             audioRecord = null
             recordButton.setText(R.string.start)
@@ -164,7 +211,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun processSamples() {
         Log.i(TAG, "processing samples")
-        val stream = recognizer.createStream()
+        // AEMX: 스트림마다 핫워드를 넘겨줌 (파일 대신 문자열로 전달, HOTWORDS 주석 참고)
+        val stream = recognizer.createStream(HOTWORDS)
 
         val interval = 0.1 // i.e., 100 ms
         val bufferSize = (interval * sampleRateInHz).toInt() // in samples
@@ -180,7 +228,8 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val isEndpoint = recognizer.isEndpoint(stream)
-                var text = recognizer.getResult(stream).text
+                // AEMX: .text 대신 토큰에서 재구성 (띄어쓰기가 사라지는 문제, 위 주석 참고)
+                var text = recognizer.getResult(stream).textWithSpacing()
 
                 // For streaming parformer, we need to manually add some
                 // paddings so that it has enough right context to
@@ -191,7 +240,7 @@ class MainActivity : AppCompatActivity() {
                     while (recognizer.isReady(stream)) {
                         recognizer.decode(stream)
                     }
-                    text = recognizer.getResult(stream).text
+                    text = recognizer.getResult(stream).textWithSpacing()
                 }
 
                 var textToDisplay = lastText
@@ -205,6 +254,12 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 if (isEndpoint) {
+                    if (text.isNotBlank()) {
+                        // AEMX: 모델이 실제로 뱉은 토큰. 핫워드(글자 단위)가 이 토큰 열과
+                        // 맞아야 가중치가 걸리므로, 핫워드 효과를 확인할 때 이걸 본다.
+                        val tokens = recognizer.getResult(stream).tokens
+                        Log.i(TAG, "Recognized '$text' as tokens: ${tokens.joinToString(" ")}")
+                    }
                     recognizer.reset(stream)
                     if (text.isNotBlank()) {
                         lastText = "${lastText}\n${idx}: $text"
@@ -242,7 +297,35 @@ class MainActivity : AppCompatActivity() {
             audioFormat,
             numBytes * 2 // a sample has two bytes as we are using 16-bit PCM
         )
+
+        enableAudioEffects(audioRecord!!.audioSessionId)
         return true
+    }
+
+    /**
+     * AEMX: 기기가 제공하는 오디오 전처리를 켠다. 지원 여부는 기기마다 달라서 있는 것만 켠다.
+     *
+     * - 잡음 억제: 주변 소음이 있는 환경에서의 인식률
+     * - 자동 이득 조절: 사용자가 작게 말하거나 마이크에서 멀 때의 입력 크기
+     * - 에코 제거: TTS가 말하는 소리가 마이크로 다시 들어오는 것 (STT와 TTS를 같이 쓰는
+     *   구조라 필요함 - TTS/README.md의 "녹음·재생 순서" 항목 참고)
+     */
+    private fun enableAudioEffects(sessionId: Int) {
+        if (NoiseSuppressor.isAvailable()) {
+            audioEffects += NoiseSuppressor.create(sessionId).apply { enabled = true }
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            audioEffects += AutomaticGainControl.create(sessionId).apply { enabled = true }
+        }
+        if (AcousticEchoCanceler.isAvailable()) {
+            audioEffects += AcousticEchoCanceler.create(sessionId).apply { enabled = true }
+        }
+        Log.i(TAG, "Enabled ${audioEffects.size} audio effects")
+    }
+
+    private fun releaseAudioEffects() {
+        audioEffects.forEach { it.release() }
+        audioEffects.clear()
     }
 
     private fun initModel() {
@@ -271,9 +354,34 @@ class MainActivity : AppCompatActivity() {
             featConfig = getFeatureConfig(sampleRate = sampleRateInHz, featureDim = 80),
             modelConfig = getModelConfig(type = type)!!,
             // lmConfig = getOnlineLMConfig(type = type),
-            endpointConfig = getEndpointConfig(),
+            // AEMX: 말이 끝났다고 판단하는 무음 길이를 기본값(1.4초)에서 2.0초로 늘림.
+            // 고령층/장애인 사용자가 천천히 말하거나 중간에 쉬면 한 문장이 두 개로
+            // 잘려서 "교보문고에서" / "로그인하고 싶어" 로 따로 인식되는 문제가 있음.
+            endpointConfig = EndpointConfig(
+                rule1 = EndpointRule(false, 2.4f, 0.0f),
+                rule2 = EndpointRule(true, 2.0f, 0.0f),
+                rule3 = EndpointRule(false, 0.0f, 20.0f),
+            ),
             enableEndpoint = true,
+            // AEMX: 핫워드(HOTWORDS)를 쓰려면 modified_beam_search가 필수라 greedy_search에서 변경.
+            // 후보를 여러 개 유지해서 디코딩이 조금 느려지지만, 명령어 인식률이 더 중요함.
+            decodingMethod = "modified_beam_search",
+            // AEMX: 유지할 후보 경로 수. 기본 4에서 늘려 정확도를 조금 더 확보함.
+            // 더 키우면 느려지기만 하고 정확도 이득은 거의 없어짐.
+            maxActivePaths = 8,
+            // AEMX: 핫워드 가중치. 기본 1.5는 체감이 약해서 올림. 너무 키우면 비슷한 발음을
+            // 전부 핫워드로 끌어당겨서 오히려 틀리므로, 인식 결과 보고 조절할 것.
+            hotwordsScore = 2.0f,
         )
+
+        // AEMX: 원래 예제는 1스레드 고정. 요즘 폰은 코어가 남아돌고, 디코딩이 실시간을
+        // 못 따라가면 인식이 밀리므로 늘림.
+        config.modelConfig.numThreads = 4
+
+        // AEMX: 핫워드를 글자 단위로 처리하도록 지정. 이 값이 비어 있으면 핫워드를 넘기는
+        // 순간 라이브러리가 그냥 종료해버린다(로그도 예외도 없이). "bpe"를 쓰려면 텍스트
+        // 형식 vocab이 필요한데 이 모델은 바이너리 bpe.model만 배포해서 쓸 수 없음.
+        config.modelConfig.modelingUnit = "cjkchar"
 
         if (ruleFsts != null) {
             config.ruleFsts = ruleFsts

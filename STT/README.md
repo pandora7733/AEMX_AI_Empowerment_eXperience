@@ -73,16 +73,60 @@ stream.release()
 |---|---|
 | 모델 | `sherpa-onnx-streaming-zipformer-korean-2024-06-16` (Zipformer transducer, int8 양자화) |
 | 모델 타입 코드 | `getModelConfig(type = 14)` (`OnlineRecognizer.kt` 참고) |
-| 필요 에셋 파일 | `encoder-epoch-99-avg-1.int8.onnx`, `decoder-epoch-99-avg-1.onnx`, `joiner-epoch-99-avg-1.int8.onnx`, `tokens.txt` |
+| 필요 에셋 파일 | `encoder-epoch-99-avg-1.int8.onnx`, `decoder-epoch-99-avg-1.onnx`, `joiner-epoch-99-avg-1.int8.onnx`, `tokens.txt`, `bpe.model` |
+| 디코딩 | `modified_beam_search` (핫워드 사용에 필요) |
+| 스레드 | 4 |
+| 오디오 소스 | `MediaRecorder.AudioSource.VOICE_RECOGNITION` |
+
+### 인식률 튜닝 (`MainActivity.kt`)
+
+공식 예제 기본값은 우리 용도에 맞지 않아서 아래를 조정했다. 수정 위치에는 `// AEMX:` 주석으로 이유를 남겨뒀다.
+
+| 항목 | 기본값 | 변경값 | 이유 |
+|---|---|---|---|
+| 오디오 소스 | `MIC` | `VOICE_RECOGNITION` | 기기의 음성인식 전용 오디오 경로 사용(잡음 억제·이득 조절이 인식에 맞게 적용됨) |
+| 디코딩 방식 | `greedy_search` | `modified_beam_search` | 후보를 여러 개 유지해 정확도 향상. 핫워드 사용의 전제 조건 |
+| 핫워드 | 없음 | 앱 이름·명령어 11개 | 고정 어휘에 가중치를 줘서 오인식 감소 |
+| 핫워드 가중치 | 1.5 | 2.0 | 기본값은 체감이 약함 |
+| beam 후보 수 | 4 | 8 | 후보를 더 유지해 정확도 확보 |
+| 스레드 | 1 | 4 | 디코딩이 실시간을 못 따라가면 인식이 밀림 |
+| rule2 무음 | 1.4초 | 2.0초 | 천천히 말하면 한 문장이 둘로 잘리는 문제 |
+| 오디오 전처리 | 없음 | 잡음 억제 / 자동 이득 / 에코 제거 | 소음 환경, 작게 말하는 경우, TTS 소리 되먹임 대응 |
+
+#### 핫워드 작성 규칙
+
+`MainActivity.kt`의 `HOTWORDS` 상수에 **한글 그대로** 한 줄씩 적으면 된다.
+
+```kotlin
+private val HOTWORDS = listOf(
+    "교보문고",
+    "알라딘",
+    ...
+)
+```
+
+sherpa-onnx에 핫워드를 넘길 때는 `▁교 보 문 고` 처럼 모델의 토큰으로 쪼개서 줘야 하는데, 그 변환을 앱이 실행 시점에 `encodeHotwords()`에서 처리한다(`tokens.txt`를 읽어 가장 긴 토큰부터 맞춰가며 쪼갬). 그래서 **새 앱(예: 쿠팡)을 지원할 때 이름 한 줄만 추가하면 되고, 별도 변환 작업이 필요 없다.**
+
+변환 결과는 로그에 남는다(`Hotword '교보문고' -> ▁교 보 문 고`). 쪼개지 못한 단어는 건너뛰고 경고를 남기므로, 핫워드가 안 먹는 것 같으면 로그부터 확인할 것.
+
+> 라이브러리의 `bpeVocab` 설정을 쓰면 변환을 맡길 수 있지만, **이 한국어 모델에는 적용할 수 없다.** sherpa-onnx는 텍스트 형식 vocab(`ssentencepiece`)을 기대하는데 이 모델은 바이너리 `bpe.model`만 배포한다. 실제로 지정했다가 앱이 시작과 동시에 조용히 종료되는 문제를 겪었다(아래 삽질 기록 참고).
+
+**책 제목은 넣지 않는다.** 책은 열린 집합이라 몇 권만 넣으면 그 책들로 인식이 쏠려서 나머지 책이 더 틀리게 된다. 앱 이름·명령어처럼 **항상 똑같이 등장하는 단어만** 넣고, 책 제목은 모델 본래 성능으로 인식한다.
+
+#### 오디오 전처리
+
+`enableAudioEffects()`에서 기기가 지원하는 것만 켠다(`isAvailable()` 확인 후 생성). 지원 여부는 기기마다 다르고, 켜진 개수는 로그에서 확인할 수 있다.
+
+에코 제거는 나중에 TTS와 함께 동작할 때 필요하다 — TTS가 말하는 소리가 마이크로 다시 들어가면 그걸 사용자 발화로 인식해버린다.
 
 ### Endpoint(발화 끝) 감지 규칙
 
-`getEndpointConfig()` 기준, 아래 셋 중 하나라도 만족하면 "문장이 끝났다"고 판단한다.
+아래 셋 중 하나라도 만족하면 "문장이 끝났다"고 판단한다.
 
 | 규칙 | 조건 |
 |---|---|
 | rule1 | 무음 2.4초 이상 지속 (발화 내용 유무 무관) |
-| rule2 | 발화가 있었고, 그 뒤 무음 1.4초 이상 지속 |
+| rule2 | 발화가 있었고, 그 뒤 무음 2.0초 이상 지속 |
 | rule3 | 발화 길이가 20초를 초과 |
 
 필요 시 `EndpointRule(mustContainNonSilence, minTrailingSilence, minUtteranceLength)` 값을 조정해서 문장 끊김 민감도를 바꿀 수 있다.
@@ -92,6 +136,8 @@ stream.release()
 - 완전 온디바이스 처리 — 네트워크 불필요, 인터넷 끊겨도 동작
 - 모델 로딩(최초 `OnlineRecognizer` 생성) 시 약간의 지연 있음 → 앱 시작 시 미리 초기화해두는 걸 권장
 - int8 경량화 모델이라 정확도와 속도의 균형을 맞춘 버전 (실기기 테스트에서 짧은 문장 인식 정상 확인)
+- **float32(비양자화) 모델은 쓰지 않기로 함** — 같은 릴리스에 들어있지만 인코더 파일 하나가 277MB라(int8은 약 70MB) 앱 용량이 200MB 넘게 늘어난다. 저장공간이 넉넉하지 않은 사용자를 타겟으로 하는 프로젝트라 정확도 이득보다 용량 부담이 크다고 판단함
+- **모델 교체 선택지는 없음** — sherpa-onnx가 제공하는 한국어 스트리밍 모델은 현재 이 모델 하나뿐이다(2024-06-16). 인식률 개선은 모델 교체가 아니라 디코딩 설정·핫워드·오디오 전처리로 해야 한다
 - 네이티브 라이브러리(.so)는 `arm64-v8a`(실기기), `x86_64`(에뮬레이터)만 받아둠 — 32비트 기기 지원 필요하면 `armeabi-v7a`, `x86`도 `setup_assets.sh`에서 추가로 받아야 함
 
 ## 폴더 구조
@@ -128,6 +174,10 @@ STT/
 - **한글 경로 에러**: 저장소 경로에 한글이 섞여 있으면 (`android.overridePathCheck` 관련) AGP가 빌드를 거부함 → `gradle.properties`에 `android.overridePathCheck=true` 추가로 우회 (네이티브 코드를 직접 컴파일하는 게 아니라 미리 빌드된 `.so`를 쓰기 때문에 실제로는 문제 없음)
 - **git symlink 깨짐**: sherpa-onnx 저장소의 `kotlin-api/*.kt` 파일들은 원래 심볼릭 링크인데, Windows에서 git clone하면 심볼릭 링크가 아니라 "경로 문자열이 담긴 텍스트 파일"로 받아짐 → 실제 내용으로 직접 교체함 (이미 이 저장소의 파일들은 정상 내용으로 커밋되어 있어서 다시 겪을 일은 없음)
 - **`libsherpa-onnx-jni.so` not found 크래시**: 네이티브 라이브러리는 원래 NDK로 소스 빌드하거나(`build-android-*.sh`, 시간 오래 걸림) GitHub 릴리스의 미리 빌드된 아카이브(`sherpa-onnx-v1.13.7-android.tar.bz2`)를 받아서 `jniLibs/`에 넣어야 함 — `setup_assets.sh`가 이 과정을 자동화함
+- **핫워드용 `bpeVocab` 지정 시 앱이 조용히 종료됨**: 핫워드를 한글 그대로 쓰려고 `modelingUnit = "bpe"` + `bpeVocab = ".../bpe.model"`을 지정했더니, 앱이 시작하자마자 2초 간격으로 계속 재시작됨. **예외도 크래시 덤프(tombstone)도 안 남아서** 원인 추적이 오래 걸림 — 네이티브 라이브러리가 스스로 종료(`exit`)하면 이렇게 아무 흔적이 없다. 원인은 sherpa-onnx가 `bpeVocab`으로 **텍스트 형식**(`ssentencepiece`) 파일을 기대하는데, 이 한국어 모델은 **바이너리** `bpe.model`만 배포한다는 것. 같은 릴리스에 텍스트 vocab이 아예 없어서 이 경로는 쓸 수 없음 → 토큰 변환을 앱에서 직접 하도록 바꿔서 해결(`encodeHotwords()`)
+  - 교훈: 로그에 아무것도 없는 즉시 종료는 네이티브 쪽 `exit()`를 의심할 것. 그리고 파일 이름이 그럴듯하다고 형식까지 맞는 건 아님
+- **`modelingUnit`을 비워두면 START 누르는 순간 종료됨**: 위 문제를 되돌리면서 `modelingUnit`까지 같이 지웠더니, 핫워드를 넘기는 시점(녹음 시작)에 라이브러리가 또 `exit`. 이번엔 경고 로그를 남겨줘서(`modeling_unit should be one of bpe, cjkchar or cjkchar+bpe, given`) 금방 찾음 → `cjkchar`로 지정. 핫워드를 쓴다면 이 값은 필수
+- **인식 결과에 띄어쓰기가 전부 사라짐**: `OnlineRecognizerResult.text`를 그대로 쓰면 "교보문고에서로그인하고싶어"처럼 붙어서 나옴. 원인은 sherpa-onnx가 텍스트를 합친 뒤 `RemoveSpaceBetweenCjk()`를 적용하는데, 이 함수의 CJK 범위(`0xA840~0xD7AF`)에 한글 음절(`U+AC00~U+D7A3`)이 들어가기 때문. 중국어·일본어 기준 처리라 한국어에는 틀림 → **토큰 배열에는 어절 경계가 공백으로 남아있으므로**, 토큰을 이어붙여 텍스트를 직접 만드는 방식으로 해결(`textWithSpacing()`). 띄어쓰기가 없으면 뒤에 붙는 LLM이 명령을 해석하기 어려워지므로 중요함
 
 ## 다음 할 일
 
