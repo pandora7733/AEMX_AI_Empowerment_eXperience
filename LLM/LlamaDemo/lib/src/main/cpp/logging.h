@@ -22,8 +22,15 @@
 #endif
 #endif
 
+// AEMX: __android_log_is_loggable 은 API 30 이상에서만 쓸 수 있다. 앱 minSdk 를 28까지
+// 낮추려고 이 파일을 API 28로 컴파일하면서, 낮은 API 에서는 컴파일 타임 기준(LOG_MIN_LEVEL)
+// 으로만 거르도록 했다. 30 이상에서는 기존대로 시스템 속성 기반 필터를 그대로 쓴다.
 static inline int ai_should_log(int prio) {
+#if __ANDROID_API__ >= 30
     return __android_log_is_loggable(prio, LOG_TAG, LOG_MIN_LEVEL);
+#else
+    return prio >= LOG_MIN_LEVEL;
+#endif
 }
 
 #if LOG_MIN_LEVEL <= ANDROID_LOG_VERBOSE
