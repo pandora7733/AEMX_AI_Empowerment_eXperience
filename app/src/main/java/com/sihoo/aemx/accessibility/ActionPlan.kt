@@ -8,6 +8,18 @@ data class ActionPlan(
     val steps: List<ActionStep>,
 )
 
+/** 계획 하나를 끝까지 실행한 결과. 실패하면 그 시점 화면을 함께 돌려준다. */
+sealed interface PlanOutcome {
+    data object Completed : PlanOutcome
+
+    data class Failed(
+        val stepIndex: Int,
+        val step: ActionStep,
+        val message: String,
+        val screen: ScreenDescription,
+    ) : PlanOutcome
+}
+
 data class ActionStep(
     val action: ActionType,
     val target: String,

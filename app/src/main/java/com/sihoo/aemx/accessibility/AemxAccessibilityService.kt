@@ -57,12 +57,14 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         status = "모든 UI 명령 전달 완료 (실제 결과 확인 필요)"
         Log.i(TAG, "Action Plan dispatched")
         ttsController?.speak("화면 조작을 마쳤습니다. 결과를 확인해 주세요")
+        observer?.invoke(PlanOutcome.Completed)
     }
 
-    override fun onFailed(index: Int, step: ActionStep, message: String) {
+    override fun onFailed(index: Int, step: ActionStep, message: String, screen: ScreenDescription) {
         // target/value는 사용자 입력일 수 있으므로 로그에 포함하지 않습니다.
         Log.e(TAG, "Action step ${index + 1} (${step.action.wireName}) failed: $message")
         status = "${index + 1}단계 실패: $message"
+        observer?.invoke(PlanOutcome.Failed(index, step, message, screen))
     }
 
     internal fun swipeUp(): Boolean {
@@ -86,6 +88,18 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         @Volatile private var activeService: WeakReference<AemxAccessibilityService>? = null
         @Volatile var status: String = "접근성 서비스 연결 대기"
             private set
+
+        /**
+         * 계획 실행이 끝나면 불린다. 파이프라인이 실패를 받아 재분석을 걸기 위한 통로다.
+         *
+         * 서비스는 앱 프로세스보다 오래 살 수 있으므로, 화면이 사라질 때 반드시
+         * null 로 되돌려 놓아야 한다([setPlanObserver] 참고).
+         */
+        @Volatile private var observer: ((PlanOutcome) -> Unit)? = null
+
+        fun setPlanObserver(callback: ((PlanOutcome) -> Unit)?) {
+            observer = callback
+        }
 
         fun cancelActionPlan() {
             Handler(Looper.getMainLooper()).post { activeService?.get()?.onInterrupt() }

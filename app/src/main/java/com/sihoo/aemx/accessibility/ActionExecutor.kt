@@ -203,14 +203,24 @@ internal class ActionExecutor(
 
     private fun fail(index: Int, step: ActionStep, message: String, id: Long) {
         if (id != executionId) return
-        listener.onFailed(index, step, message)
+        // 화면은 지금 찍어야 한다. cancel() 뒤나 다음 이벤트가 오면 이미 달라져 있다.
+        val screen = NodeFinder.describeScreen(service.rootInActiveWindow)
+        listener.onFailed(index, step, message, screen)
         cancel()
     }
 
     interface Listener {
         fun onStepStarted(index: Int, step: ActionStep)
         fun onCompleted(plan: ActionPlan)
-        fun onFailed(index: Int, step: ActionStep, message: String)
+
+        /**
+         * 단계 하나가 실패해 계획이 중단됐다.
+         *
+         * [screen] 은 실패한 순간의 화면 요약이다. 이걸 원래 명령·지금까지의 기록과 함께
+         * LLM 에 넘겨 새 계획을 받는 것이 "화면 변화/오류 시 재분석"의 입력이 된다.
+         * 이 정보 없이는 모델이 무엇이 잘못됐는지 알 수 없어 아무거나 고르게 된다.
+         */
+        fun onFailed(index: Int, step: ActionStep, message: String, screen: ScreenDescription)
     }
 
     private sealed interface StepResult {
