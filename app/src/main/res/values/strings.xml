@@ -20,23 +20,10 @@
     <string name="accessibility_status_enabled">AEMX 접근성 서비스가 활성화되어 있습니다.</string>
     <string name="accessibility_status_disabled">접근성 서비스가 꺼져 있습니다. 설정에서 직접 활성화해 주세요.</string>
     <string name="action_plan_title">Action Plan 실행 테스트</string>
-    <string name="action_plan_description">LLM Action Plan JSON\n접근성 서비스를 켠 뒤 실행하세요. 입력값은 저장하지 않습니다. 실제 아이디·비밀번호를 붙여넣지 마세요.</string>
+    <string name="action_plan_description">LLM Action Plan JSON\n접근성 서비스를 켠 뒤 실행하세요. 네이버·구글 검색, 유튜브 검색·재생, Shorts·Reels 다음 영상 동작을 시험할 수 있습니다.</string>
     <string name="action_plan_hint">실행할 JSON</string>
     <string name="action_plan_execute">JSON 실행</string>
     <string name="action_plan_submitted">접수됨 — 아래 상태에서 완료 또는 실패를 확인하세요.</string>
     <string name="action_plan_failed">실행 요청 실패</string>
     <string name="action_plan_cancel">실행 중단</string>
-    <string name="credential_title">로그인 정보 관리</string>
-    <string name="credential_description">로그인 정보 관리\n선택한 앱의 아이디와 비밀번호를 이 기기에 암호화해 저장합니다. 저장 후 기존 정보는 표시하지 않습니다.</string>
-    <string name="credential_app">로그인 정보를 저장할 앱</string>
-    <string name="credential_id">아이디</string>
-    <string name="credential_password">비밀번호</string>
-    <string name="credential_save">로그인 정보 저장</string>
-    <string name="credential_delete">저장된 로그인 정보 삭제</string>
-    <string name="credential_required">아이디와 비밀번호를 모두 입력해 주세요.</string>
-    <string name="credential_saved">%1$s 로그인 정보를 저장했습니다.</string>
-    <string name="credential_deleted">%1$s 로그인 정보를 삭제했습니다.</string>
-    <string name="credential_busy">처리 중…</string>
-    <string name="credential_failed">처리하지 못했습니다. 다시 시도하거나 기존 정보를 삭제 후 등록해 주세요.</string>
-    <string name="credential_help">저장 후 로그인 화면에서 Action Plan의 input_credential(id/password)을 실행하세요. 로그인 버튼은 별도 tap 단계입니다. 추가 인증은 직접 진행해 주세요.</string>
 </resources>

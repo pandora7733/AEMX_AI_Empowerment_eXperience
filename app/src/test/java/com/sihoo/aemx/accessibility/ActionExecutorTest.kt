@@ -54,7 +54,7 @@ class ActionExecutorTest {
             true
         }
         val events = Events()
-        val executor = ActionExecutor(service, UnconfiguredCredentialProvider, events)
+        val executor = ActionExecutor(service, events)
         executor.execute(ActionPlan("교보문고", listOf(
             ActionStep(ActionType.TAP, "검색창"),
             ActionStep(ActionType.INPUT_TEXT, "검색창", "데미안"),
@@ -76,7 +76,7 @@ class ActionExecutorTest {
         var acted = false
         shadowOf(root).setOnPerformActionListener { _, _ -> acted = true; true }
         val events = Events()
-        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("교보문고", listOf(
+        ActionExecutor(service, events).execute(ActionPlan("교보문고", listOf(
             ActionStep(ActionType.TAP, "검색창"), ActionStep(ActionType.WAIT, "1"),
         )))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(9))
@@ -88,7 +88,7 @@ class ActionExecutorTest {
     @Test fun `cancel prevents delayed work and duplicate submissions are rejected`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         val events = Events()
-        val executor = ActionExecutor(service, UnconfiguredCredentialProvider, events)
+        val executor = ActionExecutor(service, events)
         val plan = ActionPlan("교보문고", listOf(ActionStep(ActionType.WAIT, "2"), ActionStep(ActionType.WAIT, "1")))
         executor.execute(plan)
         assertThrows(IllegalStateException::class.java) { executor.execute(plan) }
@@ -97,18 +97,6 @@ class ActionExecutorTest {
         assertEquals(listOf(0), events.started)
         assertFalse(events.completed)
         assertFalse(executor.isRunning)
-    }
-
-    @Test fun `missing credentials fail closed`() {
-        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
-        shadowOf(service).setRootInActiveWindow(node("id"))
-        val events = Events()
-        ActionExecutor(service, UnconfiguredCredentialProvider, events, java.util.concurrent.Executor { it.run() }).execute(ActionPlan("교보문고", listOf(
-            ActionStep(ActionType.INPUT_CREDENTIAL, "id"), ActionStep(ActionType.TAP, "검색창"),
-        )))
-        shadowOf(Looper.getMainLooper()).idle()
-        assertTrue(events.failed)
-        assertEquals(listOf(0), events.started)
     }
 
     @Test fun `missing app fails instead of advancing`() {
@@ -128,7 +116,7 @@ class ActionExecutorTest {
         }
         shadowOf(service.packageManager).addResolveInfoForIntent(launch, info)
         val events = Events()
-        val executor = ActionExecutor(service, UnconfiguredCredentialProvider, events)
+        val executor = ActionExecutor(service, events)
         executor.execute(ActionPlan("교보문고", listOf(
             ActionStep(ActionType.OPEN_APP, "교보문고"), ActionStep(ActionType.WAIT, "0"),
         )))
@@ -144,7 +132,7 @@ class ActionExecutorTest {
         assertNull(app.nextStartedActivity)
     }
 
-    @Test fun `Aladin launch reports closed app instead of login success`() {
+    @Test fun `Aladin launch reports a closed app instead of advancing`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         val appPackage = "kr.co.aladin.third_shop"
         val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(appPackage)
@@ -158,8 +146,8 @@ class ActionExecutorTest {
         shadowOf(service.packageManager).addResolveInfoForIntent(launch, info)
         shadowOf(service).setRootInActiveWindow(node("AEMX", "com.sihoo.aemx"))
         val events = Events()
-        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("알라딘", listOf(
-            ActionStep(ActionType.OPEN_APP, "알라딘"), ActionStep(ActionType.INPUT_CREDENTIAL, "id"),
+        ActionExecutor(service, events).execute(ActionPlan("알라딘", listOf(
+            ActionStep(ActionType.OPEN_APP, "알라딘"), ActionStep(ActionType.WAIT, "0"),
         )))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
         shadowOf(service).setRootInActiveWindow(node("splash", appPackage))
@@ -177,23 +165,23 @@ class ActionExecutorTest {
     @Test @Config(sdk = [24, 28])
     fun `node lookup ignores hidden and partial labels and supports parent clicks`() {
         val root = node("container")
-        val label = node("로그인").apply { isClickable = false; isEditable = false }
+        val label = node("확인").apply { isClickable = false; isEditable = false }
         shadowOf(root).addChild(label)
-        assertEquals(label, NodeFinder.find(root, "로그인"))
+        assertEquals(label, NodeFinder.find(root, "확인"))
         assertEquals(root, NodeFinder.clickableAncestor(label))
-        assertNull(NodeFinder.find(root, "로그"))
-        assertNull(NodeFinder.find(root, "로그인", editableOnly = true))
+        assertNull(NodeFinder.find(root, "확"))
+        assertNull(NodeFinder.find(root, "확인", editableOnly = true))
         label.isVisibleToUser = false
-        assertNull(NodeFinder.find(root, "로그인"))
+        assertNull(NodeFinder.find(root, "확인"))
     }
 
     @Test fun `duplicate labels require disambiguation and IDs are supported`() {
         val root = node("container")
-        val first = node("로그인").apply { viewIdResourceName = "mok.android:id/login" }
+        val first = node("검색").apply { viewIdResourceName = "mok.android:id/search" }
         shadowOf(root).addChild(first)
-        shadowOf(root).addChild(node("로그인"))
-        assertNull(NodeFinder.find(root, "로그인"))
-        assertEquals(first, NodeFinder.find(root, "mok.android:id/login"))
+        shadowOf(root).addChild(node("검색"))
+        assertNull(NodeFinder.find(root, "검색"))
+        assertEquals(first, NodeFinder.find(root, "mok.android:id/search"))
     }
 
     @Test fun `scroll uses requested direction and ignores hidden containers`() {
@@ -208,7 +196,7 @@ class ActionExecutorTest {
         val actions = mutableListOf<Int>()
         shadowOf(content).setOnPerformActionListener { action, _ -> actions += action; true }
         val events = Events()
-        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("교보문고", listOf(
+        ActionExecutor(service, events).execute(ActionPlan("교보문고", listOf(
             ActionStep(ActionType.SCROLL, "down"), ActionStep(ActionType.SCROLL, "up"),
         )))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
@@ -223,7 +211,7 @@ class ActionExecutorTest {
         var attempts = 0
         shadowOf(root).setOnPerformActionListener { _, _ -> attempts++; false }
         val events = Events()
-        ActionExecutor(service, UnconfiguredCredentialProvider, events).execute(ActionPlan("교보문고", listOf(
+        ActionExecutor(service, events).execute(ActionPlan("교보문고", listOf(
             ActionStep(ActionType.INPUT_TEXT, "검색창", "데미안"), ActionStep(ActionType.TAP, "검색창"),
         )))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(9))
@@ -233,21 +221,43 @@ class ActionExecutorTest {
         assertEquals(listOf(0), events.started)
     }
 
-    @Test fun `credential errors never disclose exception details`() {
+    @Test fun `play first selects a visible clickable video result`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
-        val provider = object : CredentialProvider {
-            override fun getCredential(app: String, field: CredentialField): CharSequence? = error("synthetic-secret")
+        val root = node("results", AppLauncher.YOUTUBE_PACKAGE).apply { isEditable = false }
+        val video = node("오늘의 날씨 영상", AppLauncher.YOUTUBE_PACKAGE).apply { isEditable = false }
+        shadowOf(root).addChild(video)
+        shadowOf(service).setRootInActiveWindow(root)
+        var clicked = false
+        shadowOf(video).setOnPerformActionListener { action, _ ->
+            clicked = action == AccessibilityNodeInfo.ACTION_CLICK
+            clicked
         }
-        var failure: String? = null
-        val listener = object : ActionExecutor.Listener {
-            override fun onStepStarted(index: Int, step: ActionStep) = Unit
-            override fun onCompleted(plan: ActionPlan) { fail("Unexpected completion") }
-            override fun onFailed(index: Int, step: ActionStep, message: String) { failure = message }
+        val events = Events()
+        ActionExecutor(service, events).execute(ActionPlan("유튜브", listOf(
+            ActionStep(ActionType.PLAY_FIRST, "첫 번째 동영상"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertTrue(clicked)
+        assertTrue(events.completed)
+    }
+
+    @Test fun `next video scrolls forward after its optional delay`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val root = node("Shorts", AppLauncher.YOUTUBE_PACKAGE).apply {
+            isEditable = false
+            isScrollable = true
         }
-        ActionExecutor(service, provider, listener, java.util.concurrent.Executor { it.run() }).execute(
-            ActionPlan("교보문고", listOf(ActionStep(ActionType.INPUT_CREDENTIAL, "password"))))
-        shadowOf(Looper.getMainLooper()).idle()
-        assertNotNull(failure)
-        assertFalse(failure!!.contains("synthetic-secret"))
+        shadowOf(service).setRootInActiveWindow(root)
+        val actions = mutableListOf<Int>()
+        shadowOf(root).setOnPerformActionListener { action, _ -> actions += action; true }
+        val events = Events()
+        ActionExecutor(service, events).execute(ActionPlan("유튜브", listOf(
+            ActionStep(ActionType.NEXT_VIDEO, "다음 동영상", "250ms"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+        assertTrue(actions.isEmpty())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertEquals(listOf(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD), actions)
+        assertTrue(events.completed)
     }
 }

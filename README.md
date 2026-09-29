@@ -1,6 +1,6 @@
 # AEMX
 
-AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하면 앱을 대신 조작해주는 접근성 도우미로, 스마트폰 사용이 어려운 고령층·장애인 사용자가 음성만으로 온라인 서점(교보문고, 알라딘)에서 로그인·검색·구매를 할 수 있게 하는 것이 목표입니다.
+AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하면 앱을 대신 조작해주는 접근성 도우미입니다. 현재 실행 계층은 온라인 서점 검색과 네이버·구글 검색, 유튜브 검색/재생, 유튜브 Shorts·인스타그램 릴스 이동을 목표로 하며 로그인·자격증명·결제 자동화는 범위에서 제외합니다.
 
 아래 "프로젝트 현황"은 각 파트의 진행 상태를, 1장부터는 개발환경 구성 및 빌드 절차를 설명합니다.
 
@@ -21,7 +21,7 @@ AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하�
 | STT (음성 인식) | 배재준 | 완료 — sherpa-onnx 한국어 스트리밍 인식, 실기기 확인 | [STT/README.md](STT/README.md) |
 | TTS (음성 출력) | 공규태 | 완료 — Android TextToSpeech 한국어 재생 | [TTS/README.md](TTS/README.md) |
 | LLM (의도 분석) | 배재준 | 완료 — 온디바이스 Qwen3 1.7B, 실기기 확인 | [LLM/README.md](LLM/README.md) |
-| AccessibilityService (화면 조작) | 공규태 | 실행 계층 구현, Android 16 에뮬레이터 검증 완료 · 서점별 실기기 검증 진행 중 | [ACCESSIBILITY/README.md](ACCESSIBILITY/README.md) |
+| AccessibilityService (화면 조작) | 공규태 | 서점·검색·영상 실행 계층 구현 · 새 앱은 Galaxy S25+ 실기기 검증 필요 | [ACCESSIBILITY/README.md](ACCESSIBILITY/README.md) |
 | 파이프라인 연결 + 오류 재분석 | 김정우 | 진행 예정 | [TASK_김정우.md](TASK_김정우.md) |
 
 STT·TTS·LLM은 각각 독립 실행형으로 동작 검증까지 끝났고, `main`에 병합되어 있습니다. 아직 세 파트를 하나로 이어붙이지는 않았습니다.
@@ -30,9 +30,7 @@ STT·TTS·LLM은 각각 독립 실행형으로 동작 검증까지 끝났고, `m
 
 | 명령 | 응답 시간 | 결과 |
 | --- | --- | --- |
-| "교보문고에서 로그인하고 싶어" | 31.5초 | 정확 |
 | "알라딘에서 데미안 검색해줘" | 34.4초 | 정확 |
-| "알라딘에서 미움받을 용기 사고싶어" | 22.8초 | 정확 |
 
 초기에는 한 명령에 93초가 걸렸으나, Qwen3 thinking 모드가 75초를 차지하는 것을 확인하고 생각 토큰을 150개로 제한하여 약 3배 단축했습니다(정확도 손실 없음). 자세한 내용은 [LLM/README.md](LLM/README.md)를 참고합니다.
 

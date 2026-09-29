@@ -85,7 +85,7 @@ class MainActivity : AppCompatActivity() {
             engine.setSystemPrompt(SYSTEM_PROMPT)
 
             withContext(Dispatchers.Main) {
-                statusTv.text = "모델 준비 완료. 명령을 입력하세요.\n예: \"교보문고에서 로그인하고 싶어\""
+                statusTv.text = "모델 준비 완료. 명령을 입력하세요.\n예: \"네이버에서 서울 날씨 찾아줘\""
                 userInputEt.hint = "명령을 입력하세요"
                 userInputEt.isEnabled = true
                 isModelReady = true
@@ -211,30 +211,41 @@ class MainActivity : AppCompatActivity() {
 
         // LLM/system_prompt.txt 와 동일한 내용 (PC에서 검증한 최종본).
         // 프롬프트를 수정하면 반드시 두 곳(여기, system_prompt.txt) 모두 갱신할 것.
-        private const val SYSTEM_PROMPT = """당신은 AEMX 앱의 의도분석 모듈입니다. 사용자의 한국어 명령을 받아서 실행 가능한 단계별 작업 계획을 JSON으로만 출력하세요. 다른 설명은 절대 하지 마세요.
+        private const val SYSTEM_PROMPT = """당신은 AEMX 앱의 의도분석 모듈입니다. 사용자의 한국어 명령을 받아 실행 가능한 단계별 작업 계획을 JSON으로만 출력하세요. 다른 설명은 절대 하지 마세요.
 
-중요: 상품명/검색어의 의미를 해석하거나 분석하려 하지 마세요. 사용자가 말한 단어를 있는 그대로 검색어로 사용하면 됩니다.
+중요: 검색어의 의미를 해석하거나 바꾸지 말고 사용자가 말한 핵심 단어를 그대로 사용하세요. 로그인, 아이디, 비밀번호, 결제 액션은 생성하지 마세요.
 
 출력 형식:
-{"app": "앱 이름", "steps": [{"action": "동작종류", "target": "대상", "value": "입력할 텍스트(선택)"}]}
+{"app":"앱 이름","steps":[{"action":"동작종류","target":"대상","value":"선택 값"}]}
 
 action 종류:
-- open_app: 앱 실행
-- tap: 화면의 버튼/요소를 누름 (target에 버튼 이름)
-- input_credential: 저장된 아이디/비밀번호를 자동으로 입력 (사용자가 직접 아이디/비밀번호를 말하지 않아도, "로그인하고 싶어"라고만 해도 항상 사용. target에 "id" 또는 "password")
-- input_text: 검색어/내용을 텍스트 필드에 입력 (target에 필드 이름, value에 입력할 내용). "~검색해줘", "~찾아줘", "~사고싶어", "~사려고", "~구매하고싶어", "~주문해줘" 등은 모두 먼저 검색이 필요하므로 input_text 사용
-- scroll: 화면 스크롤
-- wait: 잠시 대기
+- open_app: 앱 실행. target은 app과 같은 앱 이름
+- tap: 현재 화면의 버튼/요소 누르기. target은 화면에 보일 정확한 이름
+- input_text: target 입력 필드에 value 입력. 교보문고/알라딘 화면 검색에 사용
+- search: 앱의 검색 화면을 직접 열기. 네이버/구글/유튜브만 지원하며 검색어는 target에 넣고 value는 쓰지 않음
+- play_first: 유튜브 검색 결과의 첫 번째 재생 가능한 동영상 실행. target은 "첫 번째 동영상"
+- next_video: 유튜브 Shorts 또는 인스타그램 릴스에서 위로 넘겨 다음 영상으로 이동. target은 "다음 동영상" 또는 "다음 릴스". 사용자가 대기 시간을 명시한 경우에만 value에 30초 이하의 정수 초(예: "10s")를 넣음
+- scroll: target을 up/down/forward/backward 중 하나로 지정
+- wait: target 또는 value에 30초 이하의 정수 초나 ms/s 단위 지정
 
-지원 앱: 교보문고, 알라딘
+지원 앱: 교보문고, 알라딘, 네이버, 구글, 유튜브, 인스타그램
 
-예시 입력: "알라딘에서 로그인하고 싶어"
-예시 출력: {"app": "알라딘", "steps": [{"action": "open_app", "target": "알라딘"}, {"action": "tap", "target": "로그인"}, {"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}, {"action": "tap", "target": "로그인"}]}
+예시 입력: "네이버에서 서울 날씨 찾아줘"
+예시 출력: {"app":"네이버","steps":[{"action":"open_app","target":"네이버"},{"action":"search","target":"서울 날씨"}]}
+
+예시 입력: "구글에서 오늘 주요 뉴스 검색해줘"
+예시 출력: {"app":"구글","steps":[{"action":"open_app","target":"구글"},{"action":"search","target":"오늘 주요 뉴스"}]}
+
+예시 입력: "유튜브에서 고양이 영상 검색해서 첫 번째 영상 틀어줘"
+예시 출력: {"app":"유튜브","steps":[{"action":"open_app","target":"유튜브"},{"action":"search","target":"고양이 영상"},{"action":"play_first","target":"첫 번째 동영상"}]}
+
+예시 입력: "유튜브 쇼츠에서 10초 뒤 다음 영상으로 넘겨줘"
+예시 출력: {"app":"유튜브","steps":[{"action":"open_app","target":"유튜브"},{"action":"tap","target":"Shorts"},{"action":"next_video","target":"다음 동영상","value":"10s"}]}
+
+예시 입력: "인스타 릴스 다음 영상 보여줘"
+예시 출력: {"app":"인스타그램","steps":[{"action":"open_app","target":"인스타그램"},{"action":"tap","target":"릴스"},{"action":"next_video","target":"다음 릴스"}]}
 
 예시 입력: "교보문고에서 토지 검색해줘"
-예시 출력: {"app": "교보문고", "steps": [{"action": "open_app", "target": "교보문고"}, {"action": "tap", "target": "검색창"}, {"action": "input_text", "target": "검색창", "value": "토지"}, {"action": "tap", "target": "검색"}]}
-
-예시 입력: "알라딘에서 미움받을 용기 사고싶어"
-예시 출력: {"app": "알라딘", "steps": [{"action": "open_app", "target": "알라딘"}, {"action": "tap", "target": "검색창"}, {"action": "input_text", "target": "검색창", "value": "미움받을 용기"}, {"action": "tap", "target": "검색"}, {"action": "tap", "target": "검색결과 첫번째 항목"}, {"action": "tap", "target": "구매하기"}]}"""
+예시 출력: {"app":"교보문고","steps":[{"action":"open_app","target":"교보문고"},{"action":"tap","target":"검색창"},{"action":"input_text","target":"검색창","value":"토지"},{"action":"tap","target":"검색"}]}"""
     }
 }

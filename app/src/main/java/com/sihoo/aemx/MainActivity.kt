@@ -111,12 +111,6 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(this@MainActivity, com.sihoo.aemx.accessibility.ActionPlanActivity::class.java))
                 }
             }, matchWidthWrapHeight().apply { topMargin = spacing })
-            addView(Button(this@MainActivity).apply {
-                setText(R.string.credential_title)
-                setOnClickListener {
-                    startActivity(Intent(this@MainActivity, com.sihoo.aemx.accessibility.CredentialSettingsActivity::class.java))
-                }
-            }, matchWidthWrapHeight().apply { topMargin = spacing })
         }
     }
 

@@ -8,9 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 internal class ActionExecutor(
     private val service: AemxAccessibilityService,
-    private val credentialProvider: CredentialProvider,
     private val listener: Listener,
-    private val credentialWorker: java.util.concurrent.Executor = CredentialIo.executor,
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val appLauncher = AppLauncher(service)
@@ -18,7 +16,6 @@ internal class ActionExecutor(
     var isRunning = false
         private set
     private var lastTreeChange = 0L
-    private var credentialValue: CharSequence? = null
 
     fun execute(plan: ActionPlan) {
         check(!isRunning) { "이미 실행 중입니다. 먼저 중단해 주세요." }
@@ -37,7 +34,6 @@ internal class ActionExecutor(
     }
 
     fun cancel() {
-        credentialValue = null
         isRunning = false
         executionId++
         handler.removeCallbacksAndMessages(null)
@@ -48,7 +44,6 @@ internal class ActionExecutor(
 
     private fun executeStep(plan: ActionPlan, index: Int, id: Long) {
         if (id != executionId) return
-        credentialValue = null
         if (index >= plan.steps.size) {
             isRunning = false
             listener.onCompleted(plan)
@@ -57,28 +52,18 @@ internal class ActionExecutor(
         val step = plan.steps[index]
         listener.onStepStarted(index, step)
         when (step.action) {
-            ActionType.INPUT_CREDENTIAL -> credentialWorker.execute {
-                val result = runCatching {
-                    credentialProvider.getCredential(plan.app,
-                        if (step.target == "id") CredentialField.ID else CredentialField.PASSWORD)
-                }
-                handler.post {
-                    if (id != executionId) return@post
-                    val value = result.getOrNull()
-                    if (result.isFailure) {
-                        fail(index, step, "로그인 정보를 읽지 못했습니다. 앱에서 삭제 후 다시 등록해 주세요.", id)
-                    } else if (value.isNullOrEmpty()) {
-                        fail(index, step, "앱에서 로그인 정보를 먼저 등록해 주세요.", id)
-                    } else {
-                        credentialValue = value
-                        retryUntilReady(plan, index, id)
-                    }
-                }
-            }
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
                 onFailure = { fail(index, step, it.message ?: "앱 실행 실패", id) },
             )
+            ActionType.SEARCH -> appLauncher.search(plan.app, step.target).fold(
+                onSuccess = { retryUntilReady(plan, index, id) },
+                onFailure = { fail(index, step, it.message ?: "검색 실행 실패", id) },
+            )
+            ActionType.NEXT_VIDEO -> {
+                val delayMs = step.value?.let(WaitDuration::millis) ?: 0L
+                handler.postDelayed({ retryUntilReady(plan, index, id) }, delayMs)
+            }
             ActionType.WAIT -> {
                 val delayMs = WaitDuration.millis(step.value ?: step.target)
                 handler.postDelayed({ executeStep(plan, index + 1, id) }, delayMs)
@@ -90,7 +75,7 @@ internal class ActionExecutor(
     private fun retryUntilReady(plan: ActionPlan, index: Int, id: Long) {
         val step = plan.steps[index]
         val deadline = SystemClock.uptimeMillis() +
-            if (step.action == ActionType.OPEN_APP) OPEN_APP_TIMEOUT_MS else ACTION_TIMEOUT_MS
+            if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) OPEN_APP_TIMEOUT_MS else ACTION_TIMEOUT_MS
         var foregroundSince = 0L
         lateinit var attempt: Runnable
         attempt = Runnable {
@@ -101,23 +86,22 @@ internal class ActionExecutor(
             } catch (_: RuntimeException) {
                 StepResult.Fatal("화면 조작 중 오류가 발생했습니다.")
             }
-            val result = if (step.action == ActionType.OPEN_APP && observed == StepResult.Success) {
+            val result = if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH) && observed == StepResult.Success) {
                 val now = SystemClock.uptimeMillis()
                 if (foregroundSince == 0L) foregroundSince = now
                 if (now - foregroundSince >= OPEN_APP_STABLE_MS) StepResult.Success else StepResult.NotReady
             } else {
-                if (step.action == ActionType.OPEN_APP) foregroundSince = 0L
+                if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) foregroundSince = 0L
                 observed
             }
             when (result) {
                 is StepResult.Success -> {
-                    credentialValue = null
                     awaitSettled(plan, index + 1, id)
                 }
                 is StepResult.Fatal -> fail(index, step, result.message, id)
                 StepResult.NotReady -> {
                     if (SystemClock.uptimeMillis() >= deadline) {
-                        val message = if (step.action == ActionType.OPEN_APP) {
+                        val message = if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) {
                             "앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요."
                         } else {
                             "대상 화면 또는 조작 가능한 요소를 8초 안에 찾지 못했습니다."
@@ -153,7 +137,7 @@ internal class ActionExecutor(
         // Event package filters do not restrict rootInActiveWindow. Never act on another app.
         if (root.packageName?.toString() != AppLauncher.packageFor(app)) return StepResult.NotReady
         return when (step.action) {
-            ActionType.OPEN_APP -> StepResult.Success
+            ActionType.OPEN_APP, ActionType.SEARCH -> StepResult.Success
             ActionType.TAP -> {
                 val node = NodeFinder.find(root, step.target) ?: return StepResult.NotReady
                 val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
@@ -161,11 +145,19 @@ internal class ActionExecutor(
                 else StepResult.NotReady
             }
             ActionType.INPUT_TEXT -> setText(root, step.target, step.value.orEmpty())
-            ActionType.INPUT_CREDENTIAL -> {
-                val field = if (step.target == "id") CredentialField.ID else CredentialField.PASSWORD
-                val node = CredentialNodeFinder.find(root, app, field) ?: return StepResult.NotReady
-                val credential = credentialValue ?: return StepResult.Fatal("로그인 정보가 준비되지 않았습니다.")
-                setNodeText(node, credential)
+            ActionType.PLAY_FIRST -> {
+                val node = NodeFinder.findFirstPlayable(root) ?: return StepResult.NotReady
+                val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
+                if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success
+                else StepResult.NotReady
+            }
+            ActionType.NEXT_VIDEO -> {
+                val node = findScrollable(root)
+                when {
+                    node?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true -> StepResult.Success
+                    service.swipeUp() -> StepResult.Success
+                    else -> StepResult.NotReady
+                }
             }
             ActionType.SCROLL -> {
                 val backward = step.target.equals("up", true) || step.target.equals("backward", true)

@@ -1,6 +1,8 @@
 package com.sihoo.aemx.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.util.Log
 import android.os.Handler
 import android.os.Looper
@@ -16,7 +18,7 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         super.onServiceConnected()
         if (::executor.isInitialized) executor.cancel()
         ttsController?.shutdown()
-        executor = ActionExecutor(this, KeystoreCredentialProvider(applicationContext), this)
+        executor = ActionExecutor(this, this)
         activeService = WeakReference(this)
         status = "실행 준비 완료"
         ttsController = AndroidTtsController(applicationContext) { }
@@ -58,9 +60,25 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
     }
 
     override fun onFailed(index: Int, step: ActionStep, message: String) {
-        // target value나 credential은 로그에 포함하지 않습니다.
+        // target/value는 사용자 입력일 수 있으므로 로그에 포함하지 않습니다.
         Log.e(TAG, "Action step ${index + 1} (${step.action.wireName}) failed: $message")
         status = "${index + 1}단계 실패: $message"
+    }
+
+    internal fun swipeUp(): Boolean {
+        val metrics = resources.displayMetrics
+        val x = metrics.widthPixels / 2f
+        val path = Path().apply {
+            moveTo(x, metrics.heightPixels * 0.78f)
+            lineTo(x, metrics.heightPixels * 0.22f)
+        }
+        return dispatchGesture(
+            GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0L, 350L))
+                .build(),
+            null,
+            null,
+        )
     }
 
     companion object {
@@ -71,15 +89,6 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
 
         fun cancelActionPlan() {
             Handler(Looper.getMainLooper()).post { activeService?.get()?.onInterrupt() }
-        }
-
-        /** Install the team's provider on the main thread after connection, while idle. Not persisted. */
-        fun configureCredentialProvider(provider: CredentialProvider): Result<Unit> = runCatching {
-            check(Looper.myLooper() == Looper.getMainLooper()) { "메인 스레드에서 설정해 주세요." }
-            val service = activeService?.get() ?: error("접근성 서비스를 먼저 활성화해 주세요.")
-            check(!service.executor.isRunning) { "실행을 중단한 뒤 설정해 주세요." }
-            service.executor.cancel()
-            service.executor = ActionExecutor(service, provider, service)
         }
 
         /** LLM 연결부가 생성한 JSON을 현재 활성화된 서비스에 전달합니다. */

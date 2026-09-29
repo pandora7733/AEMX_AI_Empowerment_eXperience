@@ -7,6 +7,4 @@
         android:name=".DeviceChecks"
         android:targetPackage="com.sihoo.aemx.devicechecks"
         android:functionalTest="true" />
-    <instrumentation android:name=".KyoboChecks"
-        android:targetPackage="com.sihoo.aemx.devicechecks" android:functionalTest="true" />
 </manifest>

@@ -27,22 +27,6 @@ public final class DeviceChecks extends Instrumentation {
             android.util.Log.i("AemxDeviceChecks", "Starting UiAutomation connection");
             automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
             android.util.Log.i("AemxDeviceChecks", "UiAutomation connected");
-            if ("kyobo_login".equals(scenario)) {
-                AccessibilityNodeInfo root = automation.getRootInActiveWindow();
-                if (root == null || !"mok.android".contentEquals(root.getPackageName())) {
-                    throw new AssertionError("Open the Kyobo login form first");
-                }
-                int passwords = 0;
-                ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>(); queue.add(root);
-                int visited = 0;
-                while (!queue.isEmpty()) {
-                    if (++visited > 2000) throw new AssertionError("Login tree too large");
-                    AccessibilityNodeInfo node = queue.removeFirst();
-                    if (node.isVisibleToUser() && node.isEnabled() && node.isPassword()) passwords++;
-                    for (int i = 0; i < node.getChildCount(); i++) { AccessibilityNodeInfo child = node.getChild(i); if (child != null) queue.add(child); }
-                }
-                if (passwords != 1) throw new AssertionError("Expected one password field before login test");
-            }
             Intent launch = new Intent().setClassName("com.sihoo.aemx", "com.sihoo.aemx.MainActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             getTargetContext().startActivity(launch);
@@ -52,24 +36,11 @@ public final class DeviceChecks extends Instrumentation {
             pass("service_connected");
 
             if ("aladin_open".equals(scenario)) {
-                // No account or credential entry: the installed bookstore closes during startup on this emulator.
+                // No account entry: the installed bookstore closes during startup on this emulator.
                 submit("{\"app\":\"알라딘\",\"steps\":[{\"action\":\"open_app\",\"target\":\"알라딘\"}]}");
                 awaitNode("1단계 실패: 앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요.", 22_000);
                 pass("aladin_startup_failure_reported");
-                result.putString("stream", "PASS: Aladin startup failure reported without credential submission\n");
-                finish(Activity.RESULT_OK, result);
-                return;
-            }
-
-            if ("kyobo_login".equals(scenario)) {
-                // Explicit manual scenario only. Credentials stay in the AEMX process and are never arguments or logs.
-                // Do not rerun automatically after a rejected login or additional authentication challenge.
-                submit("{\"app\":\"교보문고\",\"steps\":[{\"action\":\"open_app\",\"target\":\"교보문고\"},"
-                        + "{\"action\":\"input_credential\",\"target\":\"id\"},"
-                        + "{\"action\":\"input_credential\",\"target\":\"password\"},"
-                        + "{\"action\":\"tap\",\"target\":\"loginBtn\"}]}");
-                SystemClock.sleep(20_000);
-                result.putString("stream", "DISPATCHED kyobo_login once; authenticated UI must be verified separately\n");
+                result.putString("stream", "PASS: Aladin startup failure reported\n");
                 finish(Activity.RESULT_OK, result);
                 return;
             }
@@ -83,6 +54,39 @@ public final class DeviceChecks extends Instrumentation {
                 // This is a manual inspection helper, not an assertion of search success.
                 result.putString("stream", "DISPATCHED kyobo_search; inspect the bookstore result and AEMX status\n");
                 finish(Activity.RESULT_OK, result);
+                return;
+            }
+
+            if ("naver_weather".equals(scenario)) {
+                dispatchManual(result, "{\"app\":\"네이버\",\"steps\":[{\"action\":\"open_app\",\"target\":\"네이버\"},"
+                        + "{\"action\":\"search\",\"target\":\"서울 날씨\"}]}", "naver_weather");
+                return;
+            }
+
+            if ("google_news".equals(scenario)) {
+                dispatchManual(result, "{\"app\":\"구글\",\"steps\":[{\"action\":\"open_app\",\"target\":\"구글\"},"
+                        + "{\"action\":\"search\",\"target\":\"오늘 주요 뉴스\"}]}", "google_news");
+                return;
+            }
+
+            if ("youtube_search".equals(scenario)) {
+                dispatchManual(result, "{\"app\":\"유튜브\",\"steps\":[{\"action\":\"open_app\",\"target\":\"유튜브\"},"
+                        + "{\"action\":\"search\",\"target\":\"오늘 날씨\"},"
+                        + "{\"action\":\"play_first\",\"target\":\"첫 번째 동영상\"}]}", "youtube_search");
+                return;
+            }
+
+            if ("youtube_next".equals(scenario)) {
+                dispatchManual(result, "{\"app\":\"유튜브\",\"steps\":[{\"action\":\"open_app\",\"target\":\"유튜브\"},"
+                        + "{\"action\":\"tap\",\"target\":\"Shorts\"},"
+                        + "{\"action\":\"next_video\",\"target\":\"다음 동영상\",\"value\":\"10s\"}]}", "youtube_next");
+                return;
+            }
+
+            if ("instagram_next".equals(scenario)) {
+                dispatchManual(result, "{\"app\":\"인스타그램\",\"steps\":[{\"action\":\"open_app\",\"target\":\"인스타그램\"},"
+                        + "{\"action\":\"tap\",\"target\":\"릴스\"},"
+                        + "{\"action\":\"next_video\",\"target\":\"다음 릴스\",\"value\":\"10s\"}]}", "instagram_next");
                 return;
             }
 
@@ -130,6 +134,13 @@ public final class DeviceChecks extends Instrumentation {
             throw new AssertionError("ACTION_SET_TEXT was rejected");
         }
         click("JSON 실행");
+    }
+
+    private void dispatchManual(Bundle result, String json, String name) {
+        submit(json);
+        SystemClock.sleep(20_000);
+        result.putString("stream", "DISPATCHED " + name + "; verify the target app UI and AEMX status manually\n");
+        finish(Activity.RESULT_OK, result);
     }
 
     private void click(String text) {

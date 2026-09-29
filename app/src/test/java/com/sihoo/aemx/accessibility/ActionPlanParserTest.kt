@@ -14,7 +14,10 @@ class ActionPlanParserTest {
             """{"app":"교보문고","steps":[{"action":"wait","value":"-5"}]}""",
             """{"app":"교보문고","steps":[{"action":"wait","value":"9999999999999999999s"}]}""",
             """{"app":"교보문고","steps":[{"action":"scroll","target":"left"}]}""",
-            """{"app":"교보문고","steps":[{"action":"input_credential","target":"id","value":"forbidden"}]}""",
+            """{"app":"인스타그램","steps":[{"action":"search","target":"날씨"}]}""",
+            """{"app":"네이버","steps":[{"action":"search","target":"날씨","value":"forbidden"}]}""",
+            """{"app":"구글","steps":[{"action":"play_first","target":"첫 영상"}]}""",
+            """{"app":"네이버","steps":[{"action":"next_video","target":"다음 영상"}]}""",
         )
         invalid.forEach { json ->
             assertThrows(ActionPlanParseException::class.java) { ActionPlanParser.parse(json) }
@@ -77,9 +80,21 @@ class ActionPlanParserTest {
     }
 
     @Test
-    fun `allows only known credential fields`() {
-        val json = """{"app":"알라딘","steps":[{"action":"input_credential","target":"token"}]}"""
-        assertThrows(ActionPlanParseException::class.java) { ActionPlanParser.parse(json) }
+    fun `parses search playback and next video actions`() {
+        val youtube = ActionPlanParser.parse(
+            """{"app":"유튜브","steps":[{"action":"search","target":"오늘 뉴스"},{"action":"play_first","target":"첫 번째 동영상"},{"action":"next_video","target":"다음 동영상","value":"5s"}]}""",
+        )
+        assertEquals(
+            listOf(ActionType.SEARCH, ActionType.PLAY_FIRST, ActionType.NEXT_VIDEO),
+            youtube.steps.map { it.action },
+        )
+        assertEquals("오늘 뉴스", youtube.steps.first().target)
+        assertEquals("5s", youtube.steps.last().value)
+
+        val instagram = ActionPlanParser.parse(
+            """{"app":"인스타","steps":[{"action":"next_video","target":"다음 릴스"}]}""",
+        )
+        assertEquals(ActionType.NEXT_VIDEO, instagram.steps.single().action)
     }
 
     @Test

@@ -2,114 +2,124 @@
 
 담당자: 공규태
 
-## 상태
+## 상태와 목적
 
-기본 실행 경로와 수동 JSON 실행 화면 구현. JSON 파싱 및 Robolectric 회귀 테스트를 포함한다. 교보문고·알라딘의 실제 UI 동작은 **실기기 검증 필요**. 빌드 결과는 `VALIDATION.md` 참고.
-
-## 목적과 파이프라인 위치
+LLM Action Plan을 받아 Android 앱을 실행하고 접근성 노드를 클릭·입력·스크롤하는 실행 계층이다. 교보문고·알라딘의 로그인 기능은 제거했다. 네이버/구글 검색, 유튜브 검색·첫 영상 재생, 유튜브 Shorts·인스타그램 릴스의 다음 영상 이동을 추가했다. 단위 테스트와 APK 빌드는 개발 환경에서 확인하며, 앱별 UI 구조는 **Galaxy S25+ 실기기 검증 필요**다.
 
 ```text
 사용자 음성 → STT → 텍스트 → LLM → 실행계획 JSON
-→ [AccessibilityService, 이 모듈] → 실제 Android 화면 조작
+→ [AccessibilityService, 이 모듈] → 실제 Android 화면 조작 → TTS 상태 안내
 ```
-
-LLM이 생성한 Action Plan을 순서대로 해석해 앱 실행, 노드 탐색, 클릭, 텍스트 입력, 스크롤과 비동기 대기를 수행한다. STT·LLM·TTS 자체는 재구현하지 않는다.
 
 ## 사용 기술
 
-- Android `AccessibilityService`, `AccessibilityNodeInfo`
+- Android `AccessibilityService`, `AccessibilityNodeInfo`, `GestureDescription`
 - `ACTION_CLICK`, `ACTION_SET_TEXT`, `ACTION_SCROLL_FORWARD/BACKWARD`
-- `Handler` 기반 비동기 retry/timeout (긴 `Thread.sleep()` 미사용)
-- Android `org.json` 기반 엄격한 Action Plan 파싱
-- 접근성 이벤트 수집 범위와 실제 root 패키지를 교보문고·알라딘으로 제한
-- 기존 `AndroidTtsController`를 통한 UI 명령 전달 완료 음성 피드백
+- `Intent.ACTION_VIEW` 기반 네이버·구글·유튜브 직접 검색
+- `Handler` 기반 비동기 retry/timeout; 앱 메인 스레드에서 긴 `Thread.sleep()` 미사용
+- `org.json` 기반 엄격한 JSON 검증
+- 기존 `AndroidTtsController` 기반 실행 상태 음성 안내
 
-## 지원 Action
+## 지원 앱과 Action
 
-| Action | 상태 | 동작 |
+| Action | 지원 앱 | 동작 |
 | --- | --- | --- |
-| `open_app` | 구현 | 앱 이름을 패키지명으로 변환해 실행 |
-| `tap` | 구현 | text/contentDescription/hint/resource-id의 유일한 정확 일치, 클릭 가능한 부모까지 검사 |
-| `input_text` | 구현 | 대상 입력 필드에 `ACTION_SET_TEXT` 수행 |
-| `input_credential` | 연결점 구현 | `CredentialProvider`가 값을 제공할 때 입력. 현재 저장 구현 없음 |
-| `scroll` | 로컬 확장 | 첫 scrollable 노드를 up/down/forward/backward 방향으로 스크롤 |
-| `wait` | 구현 | 기본 1초, 최대 30초의 비동기 대기 |
+| `open_app` | 전체 | 확인된 패키지의 실행 Activity 시작 |
+| `search` | 네이버, 구글, 유튜브 | `target` 검색어로 해당 앱의 검색 URI 열기 |
+| `tap` | 전체 | text/contentDescription/hint/resource-id의 유일한 정확 일치 요소 클릭 |
+| `input_text` | 전체 | 대상 입력 필드에 `value`를 `ACTION_SET_TEXT`로 입력 |
+| `play_first` | 유튜브 | 검색 결과에서 첫 번째 재생 가능 후보 클릭 |
+| `next_video` | 유튜브, 인스타그램 | 선택적 지연 후 scroll-forward 또는 위쪽 swipe 수행 |
+| `scroll` | 전체 | `up/down/forward/backward` 방향 기본 스크롤 |
+| `wait` | 전체 | 0~30초 비동기 대기 |
 
-각 UI Action은 250ms 간격, 최대 8초 동안 재시도하며 접근성 이벤트가 발생하면 다음 시도를 앞당긴다. 실패 시 뒤 단계는 실행하지 않는다.
+패키지 매핑은 다음과 같다.
 
-성공한 UI 명령을 반복하지 않고, 이벤트가 300ms 동안 잠잠해지기를 최대 1.5초 기다린 뒤 다음 단계를 진행한다. 앱 실행도 실제 root의 패키지가 준비될 때까지 기다린다. 이 안정화 대기는 서버 응답이나 로그인 성공을 보장하지 않는다. 사용자가 다른 앱으로 이동하면 해당 화면은 조작하지 않고 timeout 처리한다. 실행 중 새 계획은 거부하며, 중단 시 예약 콜백을 제거한다.
+| 앱 | package name |
+| --- | --- |
+| 교보문고 | `mok.android` |
+| 알라딘 | `kr.co.aladin.third_shop` |
+| 네이버 | `com.nhn.android.search` |
+| 구글 | `com.google.android.googlequicksearchbox` |
+| 유튜브 | `com.google.android.youtube` |
+| 인스타그램 | `com.instagram.android` |
+
+로그인, 자격증명 저장·입력, 결제는 지원하지 않는다. 아이디·비밀번호·API Key를 JSON, 코드, 로그, 문서에 넣지 않는다.
+
+## 실행 안정성
+
+각 UI 액션은 250ms 간격으로 최대 8초 재시도하며 접근성 이벤트가 오면 즉시 다시 확인한다. 앱 실행과 직접 검색은 최대 15초 동안 올바른 전면 패키지가 3초간 유지되는지 확인한다. 성공 후 화면 이벤트가 300ms 동안 안정되기를 최대 1.5초 기다린 뒤 다음 단계로 진행한다. 다른 앱의 root는 절대 조작하지 않으며, 실패하면 뒤 단계는 실행하지 않는다.
+
+`next_video.value`는 사용자가 명시한 지연 시간이다. Accessibility API는 유튜브/인스타그램의 정확한 재생 종료 이벤트를 일반적으로 제공하지 않으므로 “영상이 실제로 끝난 순간” 자동 전환은 현재 보장하지 않는다. 앱별 재생 상태 노드 또는 MediaSession 연동이 확인되기 전까지는 명시적 시간 지연 또는 즉시 넘기기만 지원한다.
 
 ## 폴더 구조
 
 ```text
-ACCESSIBILITY/README.md
+ACCESSIBILITY/
+├── README.md
+├── VALIDATION.md
+└── device-tests/                  개발용 외부 기기 검사 앱
 app/src/main/
 ├── AndroidManifest.xml
-├── java/com/sihoo/aemx/
-│   ├── MainActivity.kt
-│   └── accessibility/
-│       ├── AemxAccessibilityService.kt
-│       ├── ActionExecutor.kt
-│       ├── ActionPlanActivity.kt
-│       ├── ActionPlan.kt
-│       ├── AppLauncher.kt
-│       ├── CredentialProvider.kt
-│       └── NodeFinder.kt
+├── java/com/sihoo/aemx/accessibility/
+│   ├── AemxAccessibilityService.kt
+│   ├── ActionExecutor.kt
+│   ├── ActionPlan.kt
+│   ├── ActionPlanActivity.kt
+│   ├── AppLauncher.kt
+│   └── NodeFinder.kt
 └── res/xml/accessibility_service_config.xml
 ```
 
 ## AccessibilityService 활성화
 
-1. AEMX 앱을 실행한다.
-2. **접근성 서비스 설정 열기**를 누른다.
-3. 설치된 앱/AEMX 화면 실행 서비스를 찾아 사용자가 직접 활성화한다.
-4. 앱으로 돌아와 활성화 상태 문구를 확인한다.
-5. **Action Plan 실행 테스트**에서 JSON을 입력하고 **JSON 실행**을 누른다. 대상 앱으로 이동한 뒤 AEMX로 돌아오면 단계/완료/실패 상태를 확인할 수 있다.
-6. 중단하려면 AEMX로 돌아와 **실행 중단**을 누른다. 회전 시 입력 JSON은 저장/복원하지 않는다.
+1. AEMX를 실행하고 **접근성 서비스 설정 열기**를 누른다.
+2. 설치된 앱에서 AEMX 화면 실행 서비스를 선택한다.
+3. 사용자가 직접 서비스를 활성화한다. 앱은 권한을 강제로 켜지 않는다.
+4. AEMX로 돌아와 활성화 상태를 확인한다.
+5. **Action Plan 실행 테스트**에서 JSON을 실행한다.
 
-Android 보안 정책상 앱이 접근성 서비스를 코드로 강제 활성화하지 않는다.
-
-## LLM 연결 방법과 JSON 예시
-
-LLM이 JSON 생성을 끝낸 뒤 같은 `app` 프로세스의 **메인 스레드**에서 다음 진입점을 호출한다. 별도 `LLM/LlamaDemo` 앱에서는 직접 호출할 수 없으며 메인 app 통합은 팀의 후속 작업이다.
+LLM 통합 시 메인 앱 프로세스의 메인 스레드에서 다음 진입점을 호출한다.
 
 ```kotlin
-val result = AemxAccessibilityService.submitActionPlan(actionPlanJson)
-result.onFailure { error -> /* UI에 안전한 오류 표시 */ }
+AemxAccessibilityService.submitActionPlan(actionPlanJson)
 ```
 
-반환 `Result<Unit>`는 접수 여부다. 비동기 실행 완료는 `AemxAccessibilityService.status`로 구분한다. 완료는 UI 명령 전달 완료이며 로그인/구매의 비즈니스 성공 판정이 아니다.
+## JSON 예시
+
+네이버 날씨:
 
 ```json
-{
-  "app": "교보문고",
-  "steps": [
-    {"action": "open_app", "target": "교보문고"},
-    {"action": "tap", "target": "검색창"},
-    {"action": "input_text", "target": "검색창", "value": "데미안"},
-    {"action": "tap", "target": "검색"}
-  ]
-}
+{"app":"네이버","steps":[{"action":"open_app","target":"네이버"},{"action":"search","target":"서울 날씨"}]}
 ```
 
-`input_text`에는 `value`가 필수이고 `input_credential.target`은 `id` 또는 `password`만 허용한다. 알 수 없는 Action과 잘못된 JSON은 실행 전에 거부한다.
-비정상적으로 큰 입력을 막기 위해 한 계획은 최대 50단계, 각 target/value는 최대 2,000자로 제한한다.
-전체 JSON은 100,000자 이하이며 필드는 문자열이어야 한다. `open_app.target`은 `app`과 같은 앱이어야 한다. credential의 value는 거부한다.
-
-LLM README는 wait/scroll의 상세 스키마를 정의하지 않았다. 아래는 **실행기 로컬 확장**이며 팀 합의 전 LLM 공통 스키마로 간주하지 않는다.
+구글 뉴스:
 
 ```json
-{"app":"알라딘","steps":[{"action":"open_app","target":"알라딘"},{"action":"wait","value":"500ms"},{"action":"scroll","target":"down"}]}
+{"app":"구글","steps":[{"action":"open_app","target":"구글"},{"action":"search","target":"오늘 주요 뉴스"}]}
 ```
 
-wait는 value, 없으면 target을 사용한다. 생략/빈 문자열은 1초, 정수는 초, `500ms`/`2s`는 명시 단위다. 범위는 0~30초이며 음수·소수·범위 초과는 실행 전에 거부한다. 상태 대기는 후속 UI 액션의 준비 확인으로 처리한다. scroll은 기본 방향만 지원하고 거리/컨테이너 지정은 TODO다.
+유튜브 검색 후 첫 영상 재생:
 
-## 테스트 방법
+```json
+{"app":"유튜브","steps":[{"action":"open_app","target":"유튜브"},{"action":"search","target":"오늘 날씨"},{"action":"play_first","target":"첫 번째 동영상"}]}
+```
 
-현재 구현 전체의 2026-09-26 검수 결과와 통과 범위·미검증 항목은 [FULL_AUDIT.md](FULL_AUDIT.md)를 참고한다.
+쇼츠 10초 뒤 다음 영상:
 
-에뮬레이터 실제 실행 결과와 서비스 프로세스를 유지하는 테스트 방법은
-[`EMULATOR_TESTS.md`](EMULATOR_TESTS.md)를 참고한다. `device-tests/`는 메인 APK에 포함되지 않는 개발용 테스트 앱이다.
+```json
+{"app":"유튜브","steps":[{"action":"open_app","target":"유튜브"},{"action":"tap","target":"Shorts"},{"action":"next_video","target":"다음 동영상","value":"10s"}]}
+```
+
+인스타 릴스 즉시 다음 영상:
+
+```json
+{"app":"인스타그램","steps":[{"action":"open_app","target":"인스타그램"},{"action":"tap","target":"릴스"},{"action":"next_video","target":"다음 릴스"}]}
+```
+
+`search` 검색어는 `target`에 둔다. `input_text`만 `value`가 필수다. `wait`와 `next_video.value`는 정수 초 또는 `ms`/`s` 단위이며 최대 30초다. 한 계획은 최대 50단계, JSON은 100,000자, target/value는 각 2,000자로 제한한다.
+
+## 테스트
 
 ```bash
 ./gradlew test
@@ -117,73 +127,38 @@ wait는 value, 없으면 target을 사용한다. 생략/빈 문자열은 1초, �
 ./gradlew lint
 ```
 
-설치 후 등록 여부 확인:
-
-```bash
-adb shell dumpsys accessibility | grep -i aemx
-```
+개발용 기기 검사 시나리오는 `naver_weather`, `google_news`, `youtube_search`, `youtube_next`, `instagram_next`, `kyobo_search`, `aladin_open`을 제공한다. 실행법과 현 검증 결과는 [VALIDATION.md](VALIDATION.md)를 참고한다.
 
 ## UI 노드 확인 (`uiautomator dump`)
 
-교보문고 또는 알라딘에서 검사할 화면을 연 뒤 실행한다.
+검사할 화면을 실기기에 연 뒤 실행한다.
 
 ```bash
 adb shell uiautomator dump /sdcard/window.xml
 adb pull /sdcard/window.xml
-```
-
-`window.xml`에서 `text`, `content-desc`, `resource-id`, `class`, `clickable`, `scrollable`을 확인하고 LLM target 및 노드 탐색 규칙과 맞춘다. 비밀번호 등 민감 정보가 포함될 수 있으므로 덤프 파일을 Git에 커밋하거나 공유하지 않는다.
-
-패키지명도 실기기에서 확인한다.
-
-```bash
-adb shell pm list packages | grep -Ei 'kyobo|aladin'
 adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'
 ```
 
-2026-09-25 Google Play 등록 페이지로 확인한 매핑은 다음과 같다. 설치된 앱의 실제 ID는 실기기에서도 재확인한다.
+`window.xml`에서 `text`, `content-desc`, `resource-id`, `class`, `clickable`, `scrollable`을 확인한다. 계정 정보나 개인 콘텐츠가 포함될 수 있으므로 덤프는 Git에 커밋하거나 공유하지 않는다. Windows에서는 `grep` 대신 `findstr`를 사용할 수 있다.
 
-- [교보문고](https://play.google.com/store/apps/details?id=mok.android): `mok.android`
-- [알라딘](https://play.google.com/store/apps/details?id=kr.co.aladin.third_shop): `kr.co.aladin.third_shop`
+## 알려진 제한사항과 실기기 검증 항목
 
-앱 추가 시 `AppLauncher` 매핑, Manifest의 queries, 접근성 설정 XML의 packageNames를 함께 갱신한다. 패키지명이 확인되지 않으면 추측하지 말고 TODO로 남긴다. Windows에서는 `grep` 대신 `findstr /i "kyobo aladin"` 등을 사용할 수 있다.
-
-## Credential 보안
-
-사용자 요청에 따라 Android Keystore AES-256-GCM 저장 방식을 구현했다. 메인 화면의 **로그인 정보 관리**에서 교보문고 또는 알라딘을 선택하고 실제 계정 정보를 직접 등록한다. 아이디·비밀번호는 JSON/LLM/로그에 넣지 않는다. 입력 화면은 캡처를 차단하고 입력값을 화면 상태에 저장하지 않으며, 저장 후 또는 화면을 떠나면 비운다. 기본 서비스는 재연결 후에도 저장소에 자동 연결된다.
-
-암호문은 앱의 `noBackupFilesDir/credentials-v1`에 AtomicFile로 기록하며 백업 대상에서 제외된다. 앱별 키와 인증된 패키지 식별자(AAD), 매번 새 IV를 사용한다. 삭제 시 키도 삭제한다. 키 손실·변조 시 평문으로 대체하지 않고 재등록을 안내한다. 저장·복호화는 작업 스레드에서 수행하며 취소된 작업은 UI에 입력하지 않는다. 복호화된 값은 입력 단계 동안만 참조하지만 JVM 문자열과 입력 대상 앱의 메모리를 완전히 지울 수 있다는 보장은 하지 않는다. 키 사용에 매번 생체 인증을 요구하지 않는 기기 로컬 자동입력 방식이다.
-
-로그인 화면을 연 상태에서 다음 단계를 기존 Action Plan에 사용한다. 입력 후 로그인 버튼 클릭은 별도 `tap` 단계이며 버튼 target은 실제 고유 라벨/ID여야 한다.
-
-```json
-{"app":"교보문고","steps":[{"action":"open_app","target":"교보문고"},{"action":"input_credential","target":"id"},{"action":"input_credential","target":"password"},{"action":"tap","target":"로그인"}]}
-```
-
-현재 패키지의 표시·활성 입력 필드만 검사하며, 고유한 아이디 라벨/ID와 `isPassword` 필드가 각각 하나여야 한다. 검색창, 복수 아이디, 비밀번호 확인 필드가 있는 화면에서는 입력하지 않는다. 앱별 UI 변경으로 필드를 못 찾으면 8초 후 중단한다. 로그인 화면의 실제 노드 호환성 및 실제 계정 로그인 성공 여부는 별도 기기 검증이 필요하다. CAPTCHA/OTP/추가 인증과 로그인 성공 판정은 자동화하지 않는다.
-
-기존 `AEMX_upload`의 더미 데이터는 사용하지 않는다. 팀 provider는 유휴 상태에서 메인 스레드로 `configureCredentialProvider(provider)`를 호출해 교체할 수 있으며, `getCredential`은 이제 작업 스레드에서 호출된다.
-
-참고: [Android Keystore](https://developer.android.com/privacy-and-security/keystore), [암호화 권장사항](https://developer.android.com/privacy-and-security/cryptography).
-
-## 알려진 제한사항 / 실기기 검증 항목
-
-- 교보문고·알라딘의 설치 기기 패키지명 및 실제 실행 여부 재검증 필요
-- 로그인/검색 화면의 노드 text, contentDescription, hint, resource-id 검증 필요
-- WebView/Compose/custom view가 접근성 노드를 충분히 노출하지 않는 화면 검증 필요
-- 검색 결과 첫 항목처럼 동일 문구가 여러 개인 경우 선택 규칙 보강 필요
-- 복수 일치/부분 일치는 오조작 방지를 위해 거부하며 고유 resource-id를 사용한다. 최대 2,000개 노드까지만 탐색한다.
-- 화면 회전, 팝업, 네트워크 지연, 앱 업데이트 후 재검증 필요
-- 서비스가 꺼졌거나 프로세스가 분리된 경우 현재의 직접 호출 진입점은 사용할 수 없음
-- `scroll`은 LLM 스키마에 상세 거리·컨테이너가 없어 기본 방향만 지원
-- TTS 성공 안내는 엔진 준비 상태에 따라 재생되지 않을 수 있으며 실행 성공 판정과 분리됨
-- Action API의 true 반환은 요청 수락이며 실제 로그인·검색 완료 검증은 별도로 필요하다.
+- Galaxy S25+에서 여섯 앱의 설치 패키지와 실행 URI 재확인
+- 네이버 날씨, 구글 뉴스 검색 결과 화면 도달 확인
+- 유튜브 검색 결과의 첫 재생 후보 resource-id/설명 확인
+- YouTube UI 언어에 따른 `Shorts`, 인스타 UI 언어에 따른 `릴스` target 확인
+- 쇼츠/릴스 화면에서 scroll-forward 또는 swipe-up 동작 확인
+- 영상 종료 시점은 현재 감지하지 않음; 정확한 자동 전환에는 앱별 노드/MediaSession 추가 조사 필요
+- 광고, 로그인 유도, 개인정보 동의, 팝업, 네트워크 지연, 앱 업데이트로 UI가 달라질 수 있음
+- Compose/WebView/custom view가 노드를 충분히 노출하지 않으면 앱별 selector 보강 필요
+- `play_first`는 휴리스틱이므로 실제 YouTube 버전에서 고유 resource-id 기반 규칙으로 보강 필요
+- TTS는 UI 명령 전달 상태를 안내할 뿐 검색·재생의 비즈니스 결과 성공을 보증하지 않음
 
 ## 다음 작업
 
-- [ ] 교보문고·알라딘 실기기에서 패키지명과 UI 덤프 확정
-- [ ] 앱별 target 별칭 또는 resource-id 우선 탐색 규칙 추가
-- [x] 사용자 승인에 따른 Keystore `CredentialProvider` 및 등록·삭제 UI 구현
-- [ ] LLM Android 실행부에서 `submitActionPlan` 연결
-- [ ] 로그인·검색 시나리오 계측 테스트와 실패 UI 추가
-- [ ] 팀 공통 기기에서 전체 STT → LLM → Accessibility → TTS 통합 검증
+- [ ] Galaxy S25+에서 위 기기 검사 시나리오 실행 및 UI dump 저장(민감정보 제거)
+- [ ] YouTube 첫 영상 selector를 실제 resource-id 기준으로 고정
+- [ ] Shorts/릴스 재생 종료 감지 가능 여부 조사 및 MediaSession 대안 검증
+- [ ] 광고·팝업·UI 언어별 실패 처리 추가
+- [ ] LLM Android 출력과 `submitActionPlan` 직접 연결
+- [ ] STT → LLM → Accessibility → TTS 전체 실기기 통합 테스트

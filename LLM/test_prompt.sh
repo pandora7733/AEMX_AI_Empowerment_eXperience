@@ -3,7 +3,7 @@
 #
 # 사용법:
 #   1) setup_llm.sh 로 llama-cli와 모델을 먼저 받는다
-#   2) bash test_prompt.sh "교보문고에서 로그인하고 싶어"
+#   2) bash test_prompt.sh "네이버에서 서울 날씨 찾아줘"
 #      (인자를 안 주면 아래 기본 테스트 케이스들을 전부 돌림)
 
 set -e
@@ -29,8 +29,8 @@ run_case() {
 if [ $# -gt 0 ]; then
   run_case "$1"
 else
-  run_case "교보문고에서 로그인하고 싶어"
-  run_case "알라딘 켜서 토지 찾아줘"
-  run_case "알라딘에서 미움받을 용기 사고싶어"
-  run_case "교보문고에서 해리포터 주문해줘"
+  run_case "네이버에서 서울 날씨 찾아줘"
+  run_case "구글에서 오늘 주요 뉴스 검색해줘"
+  run_case "유튜브에서 고양이 영상 검색해서 첫 번째 영상 틀어줘"
+  run_case "인스타 릴스 다음 영상 보여줘"
 fi

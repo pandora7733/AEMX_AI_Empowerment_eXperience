@@ -1,1 +1,1 @@
-{"app":"교보문고","steps":[{"action":"open_app","target":"교보문고"}]}
+{"app":"네이버","steps":[{"action":"open_app","target":"네이버"},{"action":"search","target":"부산 날씨"}]}

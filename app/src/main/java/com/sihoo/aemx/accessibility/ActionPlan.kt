@@ -17,8 +17,10 @@ data class ActionStep(
 enum class ActionType(val wireName: String) {
     OPEN_APP("open_app"),
     TAP("tap"),
-    INPUT_CREDENTIAL("input_credential"),
     INPUT_TEXT("input_text"),
+    SEARCH("search"),
+    PLAY_FIRST("play_first"),
+    NEXT_VIDEO("next_video"),
     SCROLL("scroll"),
     WAIT("wait");
 
@@ -54,6 +56,15 @@ object ActionPlanParser {
                     require(action != ActionType.OPEN_APP || AppLauncher.packageFor(target) == AppLauncher.packageFor(app)) {
                         "open_app target은 plan.app과 같아야 합니다."
                     }
+                    require(action != ActionType.SEARCH || AppLauncher.supportsDirectSearch(app)) {
+                        "search는 네이버, 구글, 유튜브에서만 지원합니다."
+                    }
+                    require(action != ActionType.PLAY_FIRST || AppLauncher.packageFor(app) == AppLauncher.YOUTUBE_PACKAGE) {
+                        "play_first는 유튜브에서만 지원합니다."
+                    }
+                    require(action != ActionType.NEXT_VIDEO || AppLauncher.packageFor(app) in setOf(
+                        AppLauncher.YOUTUBE_PACKAGE, AppLauncher.INSTAGRAM_PACKAGE,
+                    )) { "next_video는 유튜브와 인스타그램에서만 지원합니다." }
                     add(ActionStep(action, target, value))
                 }
             }
@@ -80,10 +91,9 @@ object ActionPlanParser {
         if (target.length > MAX_FIELD_LENGTH || (value?.length ?: 0) > MAX_FIELD_LENGTH) {
             throw ActionPlanParseException("steps[$index]의 target/value가 너무 깁니다.")
         }
-        if (action == ActionType.INPUT_CREDENTIAL && target !in setOf("id", "password")) {
-            throw ActionPlanParseException("steps[$index].input_credential target은 id 또는 password여야 합니다.")
-        }
-        require(action != ActionType.INPUT_CREDENTIAL || value == null) { "credential value는 JSON으로 받지 않습니다." }
+        require(action != ActionType.SEARCH || value == null) { "search 검색어는 target에 넣어 주세요." }
+        require(action != ActionType.PLAY_FIRST || value == null) { "play_first에는 value를 사용하지 않습니다." }
+        if (action == ActionType.NEXT_VIDEO && value != null) WaitDuration.millis(value)
         require(action != ActionType.SCROLL || target in setOf("up", "down", "forward", "backward")) {
             "scroll target은 up/down/forward/backward만 지원합니다."
         }

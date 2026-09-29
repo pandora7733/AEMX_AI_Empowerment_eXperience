@@ -8,6 +8,10 @@
         </intent>
         <package android:name="mok.android" />
         <package android:name="kr.co.aladin.third_shop" />
+        <package android:name="com.nhn.android.search" />
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.instagram.android" />
     </queries>
 
     <application
@@ -32,9 +36,6 @@
         </activity>
 
         <activity android:name=".accessibility.ActionPlanActivity" android:exported="false" />
-        <activity android:name=".accessibility.CredentialSettingsActivity" android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
-
         <service
             android:name=".accessibility.AemxAccessibilityService"
             android:exported="false"
