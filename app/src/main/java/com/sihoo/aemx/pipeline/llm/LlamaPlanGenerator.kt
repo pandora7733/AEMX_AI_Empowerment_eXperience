@@ -82,8 +82,13 @@ class LlamaPlanGenerator(
     /**
      * 모드에 따라 모델에게 넘길 문장을 만든다.
      *
-     * 시스템 프롬프트는 "명령 하나 -> 계획 하나" 만 가르쳐 뒀으므로, 재분석·복구 요청은
-     * 여기서 상황을 덧붙여 설명한다.
+     * 시스템 프롬프트는 "명령 하나 -> 계획 하나" 만 가르친다. 재분석 규칙은 **반드시
+     * 여기서** 요청과 함께 붙여야 하고, 시스템 프롬프트로 옮기면 안 된다.
+     *
+     * 한 번 시스템 프롬프트에 재분석 설명과 예시를 넣어 봤다가, 1.7B 모델이 명령의 앱이
+     * 아니라 형식으로 매칭하는 바람에 "유튜브에서 고양이 영상 틀어줘"에 재분석 예시의
+     * 답을 그대로 뱉었다. 예시의 앱을 바꿔도 같은 증상이 재현됐고, 일반 명령만 있던
+     * 프롬프트는 3/3 정확했다. 작은 모델에 한 프롬프트로 두 가지 답 형식을 가르치지 않는다.
      */
     private fun buildPrompt(request: PlanRequest): String = when (request.mode) {
         PlanRequest.Mode.INITIAL -> request.utterance
@@ -97,7 +102,11 @@ class LlamaPlanGenerator(
             request.reason?.let { appendLine("문제: $it") }
             request.screen?.let { appendLine(describeScreen(it)) }
             appendLine()
-            append("현재 화면에서 이어서 할 일을 새 계획으로 만들어 주세요. 이미 끝낸 단계는 넣지 마세요.")
+            appendLine("현재 화면에서 이어서 할 일을 새 계획으로 만들어 주세요.")
+            appendLine("- 이미 성공한 단계는 넣지 마세요.")
+            appendLine("- 누르려던 것이 없으면 위에 보이는 것 중 같은 역할을 하는 것을 고르세요.")
+            appendLine("- 목적과 관계없는 것은 누르지 마세요.")
+            append("- 쓸 만한 것이 없으면 scroll 로 더 찾아보세요.")
         }
 
         PlanRequest.Mode.REPAIR_JSON -> buildString {
