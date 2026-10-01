@@ -62,33 +62,64 @@ internal object NodeFinder {
         return null
     }
 
-    /** Best-effort YouTube result selection. Real-device resource IDs must be revalidated after app updates. */
+    /**
+     * 유튜브 검색 결과에서 맨 처음 나오는 진짜 영상을 고른다.
+     *
+     * 예전에는 트리 전체에서 id 에 video/thumbnail 이 들어간 노드를 찾았는데, 실기기에서
+     * 보니 유튜브 검색 결과 항목에는 resource-id 가 아예 없다. 그래서 늘 "라벨이 4자
+     * 이상인 첫 노드"로 떨어졌고, 그게 검색창이나 미리보기 플레이어 컨트롤이라 영상이
+     * 열리지 않았다.
+     *
+     * 믿을 만한 단서는 항목의 content-desc 꼬리말이다. 실기기에서 확인한 형태:
+     * - 영상      `제목 - 19분 44초 - 채널 채널로 이동 - … - 동영상 재생`
+     * - Shorts    `제목, 조회수 2.2억회, 채널, 1년 전 - Shorts 동영상 재생`
+     * - 채널 버튼  `채널 채널로 이동`
+     *
+     * 그래서 결과 목록 안에서 "재생" 꼬리말이 붙은 것만 후보로 본다. Shorts 는 몇 초짜리
+     * 클립이라 "영상 틀어줘"가 기대하는 결과가 아니므로 다른 영상이 없을 때만 쓴다.
+     *
+     * 유튜브 앱이 업데이트돼 문구가 바뀌면 [PLAY_MARKERS] 를 고쳐야 한다.
+     */
     fun findFirstPlayable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (root == null) return null
-        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        // 결과 목록 밖(검색창·재생 중인 미리보기·하단 탭)을 후보에서 아예 빼기 위해
+        // 목록 컨테이너부터 찾는다.
+        val container = resultList(root) ?: root
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(container) }
         var visited = 0
-        var firstLabelCandidate: AccessibilityNodeInfo? = null
+        var shortsFallback: AccessibilityNodeInfo? = null
+
         while (queue.isNotEmpty()) {
-            if (++visited > 2_000) return null
+            if (++visited > 2_000) break
             val node = queue.removeFirst()
-            val label = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
-                .joinToString(" ").trim()
-            val id = node.viewIdResourceName.orEmpty()
-            val excluded = NAVIGATION_LABELS.any { normalize(label) == normalize(it) }
-            val hasVideoId = id.contains("video", true) || id.contains("thumbnail", true)
-            val container = clickableAncestor(node)
-            if (node.isVisibleToUser && node.isEnabled && !excluded && container != null &&
-                !isSponsored(container)
-            ) {
-                if (hasVideoId) return node
-                // The window root often has a long aggregate description; never treat it as a result.
-                if (node !== root && label.length >= 4 && firstLabelCandidate == null) {
-                    firstLabelCandidate = node
-                }
+            if (isPlayableItem(node) && !isSponsored(node)) {
+                val description = node.contentDescription?.toString().orEmpty()
+                if (!SHORTS_MARKERS.any { description.contains(it, ignoreCase = true) }) return node
+                if (shortsFallback == null) shortsFallback = node
             }
             for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
-        return firstLabelCandidate
+        return shortsFallback
+    }
+
+    /** 검색 결과가 담기는 목록. 못 찾으면 호출한 쪽이 화면 전체를 쓰게 null 을 준다. */
+    private fun resultList(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        while (queue.isNotEmpty()) {
+            if (++visited > 2_000) return null
+            val node = queue.removeFirst()
+            if (node.viewIdResourceName?.endsWith(RESULT_LIST_ID_SUFFIX) == true) return node
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
+        }
+        return null
+    }
+
+    private fun isPlayableItem(node: AccessibilityNodeInfo): Boolean {
+        if (!node.isVisibleToUser || !node.isEnabled) return false
+        if (!node.isClickable && node.actionList.none { it.id == AccessibilityNodeInfo.ACTION_CLICK }) return false
+        val description = node.contentDescription?.toString() ?: return false
+        return PLAY_MARKERS.any { description.contains(it, ignoreCase = true) }
     }
 
     /**
@@ -172,7 +203,12 @@ internal object NodeFinder {
     /** 유튜브가 광고 항목에 붙이는 표시. 앱 업데이트로 문구가 바뀌면 여기를 고친다. */
     private val AD_MARKERS = listOf("스폰서", "sponsored", "광고", "프로모션")
 
-    private val NAVIGATION_LABELS = setOf(
-        "홈", "Shorts", "구독", "보관함", "내 페이지", "검색", "만들기", "알림", "더보기",
-    )
+    /** 검색 결과 목록의 resource-id. 유튜브는 `com.google.android.youtube:id/results` 를 쓴다. */
+    private const val RESULT_LIST_ID_SUFFIX = "/results"
+
+    /** 누르면 영상이 열리는 항목의 content-desc 꼬리말. 기기 언어에 따라 달라진다. */
+    private val PLAY_MARKERS = listOf("동영상 재생", "play video")
+
+    /** 짧은 클립이라 "영상 틀어줘"의 답으로는 뒤로 미루는 항목. */
+    private val SHORTS_MARKERS = listOf("shorts")
 }
