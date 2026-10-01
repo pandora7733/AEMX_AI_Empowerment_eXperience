@@ -76,7 +76,10 @@ internal object NodeFinder {
             val id = node.viewIdResourceName.orEmpty()
             val excluded = NAVIGATION_LABELS.any { normalize(label) == normalize(it) }
             val hasVideoId = id.contains("video", true) || id.contains("thumbnail", true)
-            if (node.isVisibleToUser && node.isEnabled && !excluded && clickableAncestor(node) != null) {
+            val container = clickableAncestor(node)
+            if (node.isVisibleToUser && node.isEnabled && !excluded && container != null &&
+                !isSponsored(container)
+            ) {
                 if (hasVideoId) return node
                 // The window root often has a long aggregate description; never treat it as a result.
                 if (node !== root && label.length >= 4 && firstLabelCandidate == null) {
@@ -131,12 +134,43 @@ internal object NodeFinder {
         )
     }
 
+    /**
+     * 검색 결과의 광고 항목인지 본다.
+     *
+     * 유튜브 검색 결과는 맨 위가 광고인 경우가 많아서, 거르지 않으면 "첫 번째 영상"이
+     * 사용자가 찾던 영상이 아니라 광고가 된다(실기기에서 실제로 그렇게 재생됐다).
+     *
+     * 광고 표시는 항목을 감싸는 컨테이너 안에 "스폰서" 같은 라벨로 들어 있으므로,
+     * 누를 수 있는 조상까지 올라간 뒤 그 아래만 훑는다. 전체 목록이 하나의 컨테이너로
+     * 잡히는 경우를 대비해 훑는 개수를 제한한다 — 그러면 광고 하나 때문에 결과 전체를
+     * 광고로 판정하는 일이 생긴다.
+     */
+    private fun isSponsored(container: AccessibilityNodeInfo): Boolean {
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(container) }
+        var visited = 0
+        while (queue.isNotEmpty()) {
+            if (++visited > AD_SCAN_LIMIT) return false
+            val node = queue.removeFirst()
+            val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+            if (labels.any { label -> AD_MARKERS.any { label.contains(it, ignoreCase = true) } }) {
+                return true
+            }
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
+        }
+        return false
+    }
+
     private fun normalize(value: String): String = value
         .lowercase(java.util.Locale.ROOT)
         .replace(Regex("\\s+"), "")
 
     private const val MAX_LABELS = 40
     private const val MAX_LABEL_LENGTH = 60
+
+    private const val AD_SCAN_LIMIT = 60
+
+    /** 유튜브가 광고 항목에 붙이는 표시. 앱 업데이트로 문구가 바뀌면 여기를 고친다. */
+    private val AD_MARKERS = listOf("스폰서", "sponsored", "광고", "프로모션")
 
     private val NAVIGATION_LABELS = setOf(
         "홈", "Shorts", "구독", "보관함", "내 페이지", "검색", "만들기", "알림", "더보기",
