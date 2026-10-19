@@ -5,7 +5,7 @@
 # 이 프로젝트는 llama.cpp를 NDK로 소스 빌드하지 않고(이 PC에서 CMake가
 # 크래시하는 문제가 있었음 - LLM/README.md 참고), GitHub 릴리스의 미리 빌드된
 # .so를 그대로 링크한다. 대신 헤더 파일들(common.h, llama.h 등)은 소스에서
-# 참조해야 해서 llama.cpp 저장소를 정확히 같은 빌드(b11067)로 clone 받는다.
+# 참조해야 해서 llama.cpp 저장소를 정확히 같은 빌드(b11100)로 clone 받는다.
 # 버전이 안 맞으면 헤더와 .so의 ABI가 어긋나서 이상하게 동작하거나
 # 크래시할 수 있으니 반드시 이 태그를 유지할 것.
 #
@@ -16,7 +16,10 @@
 
 set -e
 
-LLAMA_CPP_TAG="b11067"
+# b11100 은 NPU(Hexagon) 백엔드가 들어간 Snapdragon 빌드가 처음 올라온 릴리스 중
+# 우리 코드와 API 가 같은 버전이다. 더 올리면 batch API 가 common_batch 구조체로
+# 바뀌어서 ai_chat.cpp 를 함께 고쳐야 한다.
+LLAMA_CPP_TAG="b11100"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DEST="$SCRIPT_DIR/LlamaDemo/.llama.cpp-src"
@@ -37,15 +40,14 @@ else
   mkdir -p "$TMP_DIR" "$JNILIBS_DEST"
   cd "$TMP_DIR"
   curl -L -C - -o "llama-android-arm64.tar.gz" \
-    "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_TAG}/llama-${LLAMA_CPP_TAG}-bin-android-arm64.tar.gz"
+    "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_TAG}/llama-${LLAMA_CPP_TAG}-bin-android-arm64-snapdragon.tar.gz"
   tar -xzf "llama-android-arm64.tar.gz"
-  cp "${LLAMA_CPP_TAG}"/libggml-base.so \
-     "${LLAMA_CPP_TAG}"/libggml.so \
-     "${LLAMA_CPP_TAG}"/libggml-cpu-android_*.so \
-     "${LLAMA_CPP_TAG}"/libggml-rpc.so \
-     "${LLAMA_CPP_TAG}"/libllama.so \
-     "${LLAMA_CPP_TAG}"/libllama-common.so \
-     "${LLAMA_CPP_TAG}"/libmtmd.so \
+  # snapdragon 빌드에는 NPU(libggml-hexagon + libggml-htp-vNN)와 GPU(libggml-opencl)
+  # 백엔드가 함께 들어 있다. CLI 도구(libllama-*-impl)와 멀티모달(libmtmd)은 앱에서
+  # 쓰지 않고 용량만 차지해서 가져오지 않는다.
+  cp "llama-${LLAMA_CPP_TAG}"/lib/libggml*.so \
+     "llama-${LLAMA_CPP_TAG}"/lib/libllama.so \
+     "llama-${LLAMA_CPP_TAG}"/lib/libllama-common.so \
      "$JNILIBS_DEST/"
 fi
 

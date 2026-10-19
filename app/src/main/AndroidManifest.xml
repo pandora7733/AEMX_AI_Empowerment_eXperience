@@ -27,6 +27,17 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AEMX">
 
+        <!--
+            NPU(Hexagon)와 GPU(OpenCL) 백엔드는 제조사가 /vendor 에 넣어 둔 라이브러리를
+            연다. 앱은 기본적으로 그쪽을 못 보기 때문에 여기서 쓰겠다고 밝혀야 하고,
+            빠뜨리면 모델을 올리는 순간 dlopen 실패로 앱이 죽는다(실기기에서 확인).
+
+            required="false" 인 이유는 이 라이브러리가 없는 기기에서도 설치는 되게
+            하려는 것이다. 그런 기기에서는 CPU 로 떨어진다.
+        -->
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

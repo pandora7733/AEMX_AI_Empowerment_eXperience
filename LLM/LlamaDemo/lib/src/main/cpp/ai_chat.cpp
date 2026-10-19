@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 #include <unistd.h>
+#include <cstring>
 #include <sampling.h>
 
 #include "logging.h"
@@ -51,6 +52,9 @@ constexpr llama_token THINK_START_TOKEN = 151667;
 constexpr llama_token THINK_END_TOKEN   = 151668;
 constexpr int   MAX_THINK_TOKENS        = 150;
 
+// AEMX: 가속기(NPU/GPU)로 넘길 레이어 수. 모델 레이어 수보다 크면 전부 넘어간다.
+constexpr int   N_GPU_LAYERS            = 99;
+
 static llama_model                      * g_model;
 static llama_context                    * g_context;
 static llama_batch                        g_batch;
@@ -66,6 +70,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_init(JNIEnv *env, jobject /*unu
     // Loading all CPU backend variants
     const auto *path_to_backend = env->GetStringUTFChars(nativeLibDir, 0);
     LOGi("Loading backends from %s", path_to_backend);
+
+    // AEMX: NPU(Hexagon) 백엔드는 DSP 쪽에서 도는 libggml-htp-vNN.so 를 따로 연다.
+    // 그 탐색 경로는 LD_LIBRARY_PATH 가 아니라 ADSP_LIBRARY_PATH 로 정해지고,
+    // 안 잡히면 세션 열기가 error 0x80000406 으로 실패한다(실기기에서 확인).
+    setenv("ADSP_LIBRARY_PATH", path_to_backend, 1);
+
     ggml_backend_load_all_from_path(path_to_backend);
     env->ReleaseStringUTFChars(nativeLibDir, path_to_backend);
 
@@ -74,10 +84,60 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_init(JNIEnv *env, jobject /*unu
     LOGi("Backend initiated; Log handler set.");
 }
 
+/**
+ * 레이어를 넘길 가속기 하나를 고른다.
+ *
+ * 장치를 지정하지 않으면 llama.cpp 가 등록된 가속기 전부에 레이어를 나눠 준다.
+ * 실기기에서는 NPU 와 GPU 에 절반씩 흩어졌는데, 그러면 두 장치 사이로 텐서가
+ * 오가고 OpenCL 커널 컴파일까지 끼어들어 오히려 느려진다.
+ *
+ * NPU 를 먼저 찾고, 없으면 GPU, 그것도 없으면 nullptr 을 돌려줘서 llama.cpp 가
+ * 원래대로 CPU 를 쓰게 한다.
+ */
+static ggml_backend_dev_t select_offload_device() {
+    ggml_backend_dev_t gpu = nullptr;
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        auto *dev = ggml_backend_dev_get(i);
+        const char *name = ggml_backend_dev_name(dev);
+        if (ggml_backend_dev_type(dev) != GGML_BACKEND_DEVICE_TYPE_GPU) {
+            continue;
+        }
+        // Hexagon 백엔드는 장치 이름을 HTP0, HTP1 ... 로 올린다.
+        if (name != nullptr && strncmp(name, "HTP", 3) == 0) {
+            LOGi("%s: offloading to NPU %s", __func__, name);
+            return dev;
+        }
+        if (gpu == nullptr) {
+            gpu = dev;
+        }
+    }
+    if (gpu != nullptr) {
+        LOGi("%s: NPU not found, offloading to %s", __func__, ggml_backend_dev_name(gpu));
+    } else {
+        LOGw("%s: no accelerator found, running on CPU", __func__);
+    }
+    return gpu;
+}
+
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstring jmodel_path) {
     llama_model_params model_params = llama_model_default_params();
+
+    // AEMX: 모델 레이어를 NPU(Hexagon)로 넘긴다. 기본값 0 은 전부 CPU 라는 뜻이다.
+    // S25+(Hexagon v79)에서 재 보니 프롬프트 처리가 109 -> 2354 tok/s 로 21배 빨라졌다.
+    // 토큰 생성은 32 -> 40 tok/s 로 비슷하지만, 우리는 시스템 프롬프트가 길어서
+    // 프롬프트 처리 쪽 이득이 그대로 응답 시간 단축으로 온다.
+    //
+    // 쓸 수 있는 가속기가 없으면 llama.cpp 가 알아서 CPU 로 떨어뜨리므로, 이 값을
+    // 올려 두는 것만으로 구형 기기가 못 쓰게 되지는 않는다.
+    model_params.n_gpu_layers = N_GPU_LAYERS;
+
+    // 고른 장치 하나만 넘긴다. 목록은 NULL 로 끝나야 한다.
+    ggml_backend_dev_t devices[2] = { select_offload_device(), nullptr };
+    if (devices[0] != nullptr) {
+        model_params.devices = devices;
+    }
 
     const auto *model_path = env->GetStringUTFChars(jmodel_path, 0);
     LOGd("%s: Loading model from: \n%s\n", __func__, model_path);
