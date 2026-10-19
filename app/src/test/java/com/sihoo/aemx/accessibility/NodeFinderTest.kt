@@ -35,11 +35,17 @@ class NodeFinderTest {
         children.forEach { shadowOf(this).addChild(it) }
     }
 
+    /**
+     * 실기기에서 "노트북 추천"을 검색했을 때의 광고 모양. 광고 표시는 항목이 아니라
+     * 항목을 감싸는 컨테이너에 붙는다.
+     */
+    private fun sponsoredBlock(item: AccessibilityNodeInfo) = node(
+        description = "스폰서 - 지금 놓치면 후회 | 지금까지 이런 혜택은 없었다 | Temu",
+    ).with(item)
+
     @Test
     fun `첫 영상으로 광고를 고르지 않는다`() {
-        // 유튜브 검색 결과는 맨 위가 광고인 경우가 많다. 실기기에서 "고양이 영상"을
-        // 검색했을 때 실제로 스폰서 영상이 재생돼서 걸러내게 됐다.
-        val advert = videoItem("고양이 낚시대 장난감").with(node("스폰서"))
+        val advert = sponsoredBlock(videoItem("노트북 특가 모음"))
         val video = videoItem("귀여운 고양이 모음")
         val root = node().with(advert, video)
 
@@ -50,10 +56,33 @@ class NodeFinderTest {
 
     @Test
     fun `광고뿐이면 아무것도 고르지 않는다`() {
-        val advert = videoItem("고양이 장난감").with(node("스폰서"))
-        val root = node().with(advert)
+        val root = node().with(sponsoredBlock(videoItem("노트북 특가 모음")))
 
         assertNull(NodeFinder.findFirstPlayable(root))
+    }
+
+    @Test
+    fun `제목에 광고가 들어간 일반 영상은 거르지 않는다`() {
+        // 이슈 #13. 광고 판정이 항목 자신의 제목까지 훑어서, 멀쩡한 영상이 걸러졌다.
+        val video = videoItem("추억의 TV 광고 모음")
+        val root = node().with(video)
+
+        val found = NodeFinder.findFirstPlayable(root)
+
+        assertEquals("추억의 TV 광고 모음 - 3분 12초 - 동영상 재생", found?.contentDescription)
+    }
+
+    @Test
+    fun `제목에 shorts가 들어가도 일반 영상으로 본다`() {
+        // 같은 이슈. Shorts 판정도 제목이 아니라 꼬리말로 해야 한다.
+        val root = node().with(
+            videoItem("고양이 짤", shorts = true),
+            videoItem("shorts 찍는 법"),
+        )
+
+        val found = NodeFinder.findFirstPlayable(root)
+
+        assertEquals("shorts 찍는 법 - 3분 12초 - 동영상 재생", found?.contentDescription)
     }
 
     @Test

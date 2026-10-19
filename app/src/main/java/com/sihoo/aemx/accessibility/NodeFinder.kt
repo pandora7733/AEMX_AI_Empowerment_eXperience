@@ -93,8 +93,7 @@ internal object NodeFinder {
             if (++visited > 2_000) break
             val node = queue.removeFirst()
             if (isPlayableItem(node) && !isSponsored(node)) {
-                val description = node.contentDescription?.toString().orEmpty()
-                if (!SHORTS_MARKERS.any { description.contains(it, ignoreCase = true) }) return node
+                if (!isShorts(node)) return node
                 if (shortsFallback == null) shortsFallback = node
             }
             for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
@@ -120,6 +119,17 @@ internal object NodeFinder {
         if (!node.isClickable && node.actionList.none { it.id == AccessibilityNodeInfo.ACTION_CLICK }) return false
         val description = node.contentDescription?.toString() ?: return false
         return PLAY_MARKERS.any { description.contains(it, ignoreCase = true) }
+    }
+
+    /**
+     * Shorts 항목인지 본다.
+     *
+     * 제목에 "shorts" 가 들어간 일반 영상까지 Shorts 로 밀리지 않도록, 제목이 아니라
+     * 꼬리말을 본다. 실기기에서 Shorts 는 `… - Shorts 동영상 재생` 으로 끝난다.
+     */
+    private fun isShorts(node: AccessibilityNodeInfo): Boolean {
+        val description = node.contentDescription?.toString()?.trimEnd() ?: return false
+        return SHORTS_MARKERS.any { description.endsWith(it, ignoreCase = true) }
     }
 
     /**
@@ -168,27 +178,47 @@ internal object NodeFinder {
     /**
      * 검색 결과의 광고 항목인지 본다.
      *
-     * 유튜브 검색 결과는 맨 위가 광고인 경우가 많아서, 거르지 않으면 "첫 번째 영상"이
-     * 사용자가 찾던 영상이 아니라 광고가 된다(실기기에서 실제로 그렇게 재생됐다).
+     * 거르지 않으면 "첫 번째 영상"이 사용자가 찾던 영상이 아니라 광고가 된다.
      *
-     * 광고 표시는 항목을 감싸는 컨테이너 안에 "스폰서" 같은 라벨로 들어 있으므로,
-     * 누를 수 있는 조상까지 올라간 뒤 그 아래만 훑는다. 전체 목록이 하나의 컨테이너로
-     * 잡히는 경우를 대비해 훑는 개수를 제한한다 — 그러면 광고 하나 때문에 결과 전체를
-     * 광고로 판정하는 일이 생긴다.
+     * 실기기에서 "노트북 추천"을 검색해 광고 항목의 트리를 떠 보면 이렇게 생겼다.
+     *
+     *     ViewGroup  cd="스폰서 - 지금 놓치면 후회 | … | Temu"   ← 항목을 감싸는 컨테이너
+     *       ViewGroup  cd="사이트 방문"  (누를 수 있음)
+     *
+     * 즉 광고 표시는 **항목을 감싸는 조상**에 붙고, 항목 자신의 설명에는 제목만 들어 있다.
+     * 그래서 조상만 본다. 예전에는 항목 자신과 그 아래를 전부 훑었는데, 제목에 "광고"가
+     * 들어간 멀쩡한 영상("추억의 TV 광고 모음")까지 광고로 걸러졌다(이슈 #13).
+     *
+     * 조상을 끝까지 올라가지 않고 몇 단계로 끊는 이유는, 더 올라가면 결과 목록이나 창
+     * 전체가 나오고 그쪽 설명에 광고 문구가 한 번이라도 섞이면 결과를 통째로 버리기
+     * 때문이다.
      */
-    private fun isSponsored(container: AccessibilityNodeInfo): Boolean {
-        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(container) }
-        var visited = 0
-        while (queue.isNotEmpty()) {
-            if (++visited > AD_SCAN_LIMIT) return false
-            val node = queue.removeFirst()
-            val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
-            if (labels.any { label -> AD_MARKERS.any { label.contains(it, ignoreCase = true) } }) {
-                return true
-            }
-            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
+    private fun isSponsored(item: AccessibilityNodeInfo): Boolean {
+        var ancestor = item.parent
+        var hops = 0
+        while (ancestor != null && hops++ < AD_ANCESTOR_HOPS) {
+            if (hasAdLabel(ancestor)) return true
+            ancestor = ancestor.parent
         }
         return false
+    }
+
+    /**
+     * 광고 표시 라벨인지 본다.
+     *
+     * 라벨 전체가 표시 문구이거나(배지), 표시 문구로 시작하는 경우만 인정한다. 문자열
+     * 어디에든 들어 있으면 광고로 보던 방식은 제목을 광고로 만든다.
+     */
+    private fun hasAdLabel(node: AccessibilityNodeInfo): Boolean {
+        val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+        return labels.any { raw ->
+            val label = raw.trim()
+            AD_MARKERS.any { marker ->
+                label.equals(marker, ignoreCase = true) ||
+                    label.startsWith("$marker ", ignoreCase = true) ||
+                    label.startsWith("$marker·", ignoreCase = true)
+            }
+        }
     }
 
     private fun normalize(value: String): String = value
@@ -198,7 +228,8 @@ internal object NodeFinder {
     private const val MAX_LABELS = 40
     private const val MAX_LABEL_LENGTH = 60
 
-    private const val AD_SCAN_LIMIT = 60
+    /** 광고 표시를 찾아 조상을 몇 단계까지 올라갈지. 실기기에서는 한 단계면 닿는다. */
+    private const val AD_ANCESTOR_HOPS = 4
 
     /** 유튜브가 광고 항목에 붙이는 표시. 앱 업데이트로 문구가 바뀌면 여기를 고친다. */
     private val AD_MARKERS = listOf("스폰서", "sponsored", "광고", "프로모션")
@@ -209,6 +240,9 @@ internal object NodeFinder {
     /** 누르면 영상이 열리는 항목의 content-desc 꼬리말. 기기 언어에 따라 달라진다. */
     private val PLAY_MARKERS = listOf("동영상 재생", "play video")
 
-    /** 짧은 클립이라 "영상 틀어줘"의 답으로는 뒤로 미루는 항목. */
-    private val SHORTS_MARKERS = listOf("shorts")
+    /**
+     * 짧은 클립이라 "영상 틀어줘"의 답으로는 뒤로 미루는 항목의 꼬리말.
+     * 제목에 "shorts" 가 들어간 일반 영상과 섞이지 않게 꼬리말 전체로 본다.
+     */
+    private val SHORTS_MARKERS = listOf("Shorts 동영상 재생", "Shorts video")
 }
