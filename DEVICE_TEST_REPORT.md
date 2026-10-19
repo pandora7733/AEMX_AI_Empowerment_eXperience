@@ -180,3 +180,62 @@ S25+ 에서 확인할 것:
 adb shell "run-as com.sihoo.aemx cat files/models/Qwen_Qwen3-1.7B-Q4_K_M.gguf \
   > /data/local/tmp/llamacpp/qwen3-1.7b-q4km.gguf"
 ```
+
+## S25+ 측정 (2026-10-19)
+
+기준 기기를 바꾼 뒤 같은 방법으로 다시 쟀다.
+
+| 항목 | 값 |
+|---|---|
+| 모델 | 갤럭시 S25+ (SM-S936N) |
+| SoC | Qualcomm SM8750 (Snapdragon 8 Elite), 플랫폼 코드 `sun` |
+| Hexagon | v79 |
+| GPU | Adreno 830 |
+| RAM | 12GB, 측정 당시 여유 3.0GB |
+| Android | 17 (API 37) |
+
+짧은 작업량 (pp128 / tg32):
+
+| 장치 | 프롬프트 처리 | 토큰 생성 |
+|---|---|---|
+| CPU 4스레드 | 135.7 t/s | 45.4 t/s |
+| GPU (Adreno 830) | 532.7 t/s | 37.2 t/s |
+| NPU (Hexagon v79) | 1785.0 t/s | 41.1 t/s |
+
+실제 명령에 가까운 작업량 (pp1024 / tg192):
+
+| 장치 | 프롬프트 처리 | 토큰 생성 |
+|---|---|---|
+| CPU 4스레드 | 109.5 t/s | 32.4 t/s |
+| NPU (Hexagon v79) | 2354.0 t/s | 39.9 t/s |
+
+명령 한 건으로 환산하면 이렇다.
+
+| 장치 | 프롬프트 처리 | 생성 | 합계 |
+|---|---|---|---|
+| CPU | 9.35초 | 5.92초 | 15.3초 |
+| NPU | 0.44초 | 4.82초 | 5.3초 |
+
+프롬프트 처리가 21배 빨라진다. 생성은 비슷하다. 전체로는 2.9배다.
+
+모델은 지금 쓰는 Q4_K_M 을 그대로 썼다. 재양자화할 필요가 없다.
+
+### 0x80000406 은 아키텍처 문제가 아니었다
+
+S22 Ultra 에서 `HTP0 failed to open session : error 0x80000406` 이 나서 v69 라 안 되는
+것으로 적었는데, S25+(v79)에서도 똑같이 실패했다. 원인은 `ADSP_LIBRARY_PATH` 가
+설정되지 않아 DSP 가 skel 라이브러리를 못 찾은 것이었다.
+
+```bash
+cd /data/local/tmp/llamacpp
+LD_LIBRARY_PATH=./lib ADSP_LIBRARY_PATH=./lib \
+  ./llama-bench -m qwen3-1.7b-q4km.gguf -dev HTP0 -ngl 99 -p 1024 -n 192 -r 2
+```
+
+`ADSP_LIBRARY_PATH` 를 주면 바로 열린다. 앱에 붙일 때도 이 경로를 넣어야 한다.
+sherpa-onnx 가 QNN 을 쓸 때 `prependAdspLibraryPath()` 를 부르는 것이 같은 이유다.
+
+v69(S22 Ultra)가 지원 범위 밖인 것은 그대로다. 백엔드가 v73 이상만 빌드하고, 로그에도
+`Hexagon arch v69 is under supported range, capping at v73` 이 찍힌다. 다만 그때 세션이
+열리지 않은 직접적인 원인은 경로였으므로, 경로를 준 상태에서 v69 를 다시 확인해 볼
+여지는 남아 있다.
