@@ -18,6 +18,8 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.sihoo.aemx.R
+import com.sihoo.aemx.accessibility.AemxAccessibilityService
+import com.sihoo.aemx.accessibility.PlanOutcome
 import com.sihoo.aemx.pipeline.PipelineConfig
 import com.sihoo.aemx.pipeline.PipelineLogEntry
 import com.sihoo.aemx.pipeline.PipelineOrchestrator
@@ -29,12 +31,17 @@ import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
+import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.PlanGenerator
+import com.sihoo.aemx.pipeline.port.PlanRequest
+import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import com.google.android.material.R as MaterialR
 
 /**
@@ -52,6 +59,7 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var commandInput: TextInputEditText
     private lateinit var runButton: Button
     private lateinit var realLlmSwitch: CheckBox
+    private lateinit var realExecutorSwitch: CheckBox
     private var llmPlanner: LlamaPlanGenerator? = null
     private lateinit var listenButton: Button
     private var speech: SherpaSpeechSource? = null
@@ -182,6 +190,54 @@ class PipelineDebugActivity : AppCompatActivity() {
     }
 
     /**
+     * 말한 명령을 LLM 에 넣고, 나온 계획을 접근성 서비스에 넘겨 실제로 기기를 조작한다.
+     *
+     * 오케스트레이터를 거치지 않는다. 오케스트레이터의 실행모듈 경계는 step 을 하나씩
+     * 수행하는 모양인데 접근성 서비스는 계획 하나를 통째로 받아 돌려서, 둘을 맞추는 일은
+     * 이슈 #11 에서 따로 한다. 그때까지 음성부터 실제 조작까지를 실기기에서 보려면
+     * 이 길이 필요하다. 화면 검증과 재분석은 이 길에서는 돌지 않는다.
+     */
+    private fun runOnDevice(command: String) {
+        val planner = llmPlanner
+        if (planner == null || !planner.isReady()) {
+            stateView.setText(R.string.pipeline_device_needs_llm)
+            return
+        }
+        if (!AemxAccessibilityService.isConnected()) {
+            stateView.setText(R.string.pipeline_device_needs_service)
+            return
+        }
+
+        runButton.isEnabled = false
+        stateView.setText(R.string.pipeline_device_planning)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                planner.generate(PlanRequest(utterance = command, mode = PlanRequest.Mode.INITIAL))
+            }
+            when (result) {
+                is PlanResult.Success -> {
+                    val json = result.plan.toWireJson()
+                    Log.i(TAG, "실기기 실행 계획: $json")
+                    logView.text = json
+                    AemxAccessibilityService.submitActionPlan(json).fold(
+                        onSuccess = { stateView.setText(R.string.pipeline_device_running) },
+                        onFailure = {
+                            stateView.text = getString(R.string.pipeline_device_failed, it.message ?: "")
+                        },
+                    )
+                }
+                is PlanResult.Malformed -> {
+                    logView.text = result.raw
+                    stateView.text = getString(R.string.pipeline_device_failed, result.reason)
+                }
+                is PlanResult.EngineError ->
+                    stateView.text = getString(R.string.pipeline_device_failed, result.message)
+            }
+            runButton.isEnabled = true
+        }
+    }
+
+    /**
      * 가짜 파트로 파이프라인을 조립한다.
      *
      * 가짜 LLM 은 시스템 프롬프트의 예시 출력을 그대로 돌려주고, 가짜 실행모듈은
@@ -307,10 +363,20 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             addView(realLlmSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
+            // AEMX: 켜면 가짜 실행모듈 대신 접근성 서비스가 실제로 화면을 조작한다.
+            realExecutorSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_use_real_executor)
+            }
+            addView(realExecutorSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
             runButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_run)
                 setOnClickListener {
                     val command = commandInput.text?.toString().orEmpty()
+                    if (realExecutorSwitch.isChecked) {
+                        runOnDevice(command)
+                        return@setOnClickListener
+                    }
                     // 진짜 LLM 은 준비 비용이 커서 매번 다시 만들지 않고 계속 쓴다.
                     if (!realLlmSwitch.isChecked) resetPipeline()
                     orchestrator.submit(command)
@@ -368,6 +434,33 @@ class PipelineDebugActivity : AppCompatActivity() {
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 
+    /**
+     * 실행 결과를 받아 보는 통로를 연다.
+     *
+     * 접근성 서비스는 이 화면보다 오래 살아 있다. 떼어 내지 않으면 화면이 사라진 뒤에도
+     * 콜백이 남아 죽은 뷰를 건드린다.
+     */
+    override fun onStart() {
+        super.onStart()
+        AemxAccessibilityService.setPlanObserver { outcome ->
+            runOnUiThread {
+                stateView.text = when (outcome) {
+                    is PlanOutcome.Completed -> getString(R.string.pipeline_device_done)
+                    is PlanOutcome.Failed -> getString(
+                        R.string.pipeline_device_step_failed,
+                        outcome.stepIndex + 1,
+                        outcome.message,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onStop() {
+        AemxAccessibilityService.setPlanObserver(null)
+        super.onStop()
+    }
+
     override fun onDestroy() {
         speech?.release()
         speech = null
@@ -377,4 +470,27 @@ class PipelineDebugActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "PipelineDebug"
     }
+}
+
+/**
+ * 접근성 서비스가 받는 형식으로 다시 직렬화한다.
+ *
+ * 모델 원문을 그대로 넘기지 않는 이유는 설명이나 코드블록이 섞여 오기 때문이다.
+ * 파서가 읽어 낸 계획만 다시 JSON 으로 만들어 넘긴다.
+ */
+private fun ActionPlan.toWireJson(): String {
+    val array = JSONArray()
+    steps.forEach { step ->
+        array.put(
+            JSONObject().apply {
+                put("action", step.action.wire)
+                put("target", step.target ?: "")
+                step.value?.let { put("value", it) }
+            }
+        )
+    }
+    return JSONObject().apply {
+        put("app", app)
+        put("steps", array)
+    }.toString()
 }

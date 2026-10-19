@@ -42,4 +42,12 @@
     <string name="pipeline_stt_failed">음성인식 준비 실패: %1$s</string>
     <string name="pipeline_stt_denied">마이크 권한이 없어 음성으로 말할 수 없습니다.</string>
     <string name="pipeline_stt_stopped">듣기를 멈췄습니다.</string>
+    <string name="pipeline_use_real_executor">실제 기기 조작 사용 (접근성 서비스를 켜야 함)</string>
+    <string name="pipeline_device_needs_llm">진짜 LLM 을 먼저 켜 주세요.</string>
+    <string name="pipeline_device_needs_service">접근성 서비스가 꺼져 있습니다.</string>
+    <string name="pipeline_device_planning">실행계획을 만드는 중...</string>
+    <string name="pipeline_device_running">기기를 조작하는 중...</string>
+    <string name="pipeline_device_done">조작을 마쳤습니다. 결과를 확인해 주세요.</string>
+    <string name="pipeline_device_failed">실행 실패: %1$s</string>
+    <string name="pipeline_device_step_failed">%1$d단계에서 실패: %2$s</string>
 </resources>
