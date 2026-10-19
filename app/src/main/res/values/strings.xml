@@ -35,4 +35,11 @@
     <string name="pipeline_use_real_llm">진짜 LLM 사용 (최초 1회 모델 1.2GB 다운로드, Wi-Fi 권장)</string>
     <string name="pipeline_llm_ready">LLM 준비 완료. 명령을 실행하세요.</string>
     <string name="pipeline_llm_failed">LLM 준비 실패: %1$s</string>
+    <string name="pipeline_listen_start">음성으로 말하기</string>
+    <string name="pipeline_listen_stop">듣기 중단</string>
+    <string name="pipeline_stt_preparing">음성인식 준비 중…</string>
+    <string name="pipeline_stt_ready">음성인식 준비 완료. 말하면 명령칸에 들어갑니다.</string>
+    <string name="pipeline_stt_failed">음성인식 준비 실패: %1$s</string>
+    <string name="pipeline_stt_denied">마이크 권한이 없어 음성으로 말할 수 없습니다.</string>
+    <string name="pipeline_stt_stopped">듣기를 멈췄습니다.</string>
 </resources>

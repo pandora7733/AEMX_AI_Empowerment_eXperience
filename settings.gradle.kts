@@ -31,3 +31,4 @@ project(":accessibility-device-tests").projectDir = file("ACCESSIBILITY/device-t
 // llm/ 을 만들면 기존 LLM/ 폴더와 같은 것으로 취급된다. 팀원 환경(리눅스/맥)에서만
 // 깨지는 종류의 문제라 아예 겹치지 않는 이름을 쓴다.
 include(":llm-engine")
+include(":stt-engine")

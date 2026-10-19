@@ -1,5 +1,7 @@
 package com.sihoo.aemx.pipeline.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -9,7 +11,9 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -23,6 +27,8 @@ import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
 import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
+import com.sihoo.aemx.pipeline.port.SpeechResult
+import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.PlanGenerator
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +53,9 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var runButton: Button
     private lateinit var realLlmSwitch: CheckBox
     private var llmPlanner: LlamaPlanGenerator? = null
+    private lateinit var listenButton: Button
+    private var speech: SherpaSpeechSource? = null
+    private var listening = false
     private lateinit var stateView: TextView
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
@@ -58,6 +67,66 @@ class PipelineDebugActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(createContentView())
         resetPipeline()
+    }
+
+    private val micPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) startListening() else stateView.setText(R.string.pipeline_stt_denied)
+    }
+
+    /**
+     * 음성인식을 켠다.
+     *
+     * 모델이 120MB 라 처음 켤 때 몇 초가 걸린다. 그 동안 버튼을 막고 상태줄로 알린다.
+     * 인식 결과는 명령칸에 넣기만 하고 바로 실행하지는 않는다 — 잘못 들었을 때
+     * 고칠 수 있어야 하기 때문이다.
+     */
+    private fun startListening() {
+        val source = speech ?: SherpaSpeechSource(applicationContext, lifecycleScope).also {
+            speech = it
+            lifecycleScope.launch {
+                it.results.collect { result -> render(result) }
+            }
+        }
+
+        // 준비하는 동안 다시 눌리면 녹음이 두 번 열린다. 버튼을 막아 둔다.
+        listenButton.isEnabled = false
+        stateView.setText(R.string.pipeline_stt_preparing)
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { source.prepare() }
+                source.start()
+                listening = true
+                listenButton.setText(R.string.pipeline_listen_stop)
+                stateView.setText(R.string.pipeline_stt_ready)
+            } catch (e: Exception) {
+                Log.e(TAG, "음성인식 준비 실패", e)
+                stateView.text = getString(R.string.pipeline_stt_failed, e.message ?: "")
+            } finally {
+                listenButton.isEnabled = true
+            }
+        }
+    }
+
+    private fun stopListening() {
+        speech?.stop()
+        listening = false
+        listenButton.setText(R.string.pipeline_listen_start)
+        // 멈춘 것을 상태줄에도 적는다. 버튼만 바뀌면 아직 듣는 줄 알고 계속 말하게 된다.
+        stateView.setText(R.string.pipeline_stt_stopped)
+    }
+
+    private fun render(result: SpeechResult) {
+        when (result) {
+            // 중간 결과는 보여 주기만 한다. 아직 말이 끝나지 않았다.
+            is SpeechResult.Partial -> stateView.text = "듣는 중... ${result.text}"
+            is SpeechResult.Final -> {
+                commandInput.setText(result.text)
+                stateView.text = "들은 말: ${result.text}"
+            }
+            is SpeechResult.Error -> stateView.text = result.message
+        }
     }
 
     /**
@@ -249,6 +318,23 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             addView(runButton, matchWidthWrapHeight().apply { topMargin = spacing })
 
+            listenButton = Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_listen_start)
+                setOnClickListener {
+                    if (listening) {
+                        stopListening()
+                    } else if (ContextCompat.checkSelfPermission(
+                            this@PipelineDebugActivity, Manifest.permission.RECORD_AUDIO,
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        startListening()
+                    } else {
+                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            }
+            addView(listenButton, matchWidthWrapHeight().apply { topMargin = spacing })
+
             stateView = TextView(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_state_idle)
                 setTextAppearance(MaterialR.style.TextAppearance_MaterialComponents_Subtitle2)
@@ -281,6 +367,12 @@ class PipelineDebugActivity : AppCompatActivity() {
     )
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
+    override fun onDestroy() {
+        speech?.release()
+        speech = null
+        super.onDestroy()
+    }
 
     companion object {
         private const val TAG = "PipelineDebug"

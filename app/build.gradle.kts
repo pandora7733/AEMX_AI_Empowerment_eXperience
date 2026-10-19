@@ -73,6 +73,7 @@ tasks.named("preBuild") {
 
 dependencies {
     implementation(project(":llm-engine"))
+    implementation(project(":stt-engine"))
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
