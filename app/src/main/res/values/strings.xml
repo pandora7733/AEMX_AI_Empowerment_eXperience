@@ -50,4 +50,7 @@
     <string name="pipeline_device_done">조작을 마쳤습니다. 결과를 확인해 주세요.</string>
     <string name="pipeline_device_failed">실행 실패: %1$s</string>
     <string name="pipeline_device_step_failed">%1$d단계에서 실패: %2$s</string>
+    <string name="pipeline_use_wake_word">호출어 필요 ("하이 에이맥스")</string>
+    <string name="pipeline_wake_detected">호출어를 들었습니다. 명령을 말해 주세요.</string>
+    <string name="pipeline_wake_ignored">호출어가 없어 무시함: %1$s</string>
 </resources>

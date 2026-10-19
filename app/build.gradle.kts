@@ -42,6 +42,11 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // 저장소 경로에 한글이 있으면(예: "AI 대회") Windows 기본 인코딩(MS949)으로는
+            // 테스트 클래스 경로를 읽지 못해 ClassNotFoundException 이 난다(이슈 #7).
+            it.jvmArgs("-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
+        }
     }
 
     packaging {

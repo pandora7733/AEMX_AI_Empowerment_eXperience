@@ -36,15 +36,22 @@ internal class AndroidTtsController(
 
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
+                TtsSilence.begin()
                 onStateChanged(State.SPEAKING)
             }
 
             override fun onDone(utteranceId: String?) {
+                TtsSilence.end()
                 onStateChanged(State.DONE)
+            }
+
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                TtsSilence.end()
             }
 
             @Deprecated("Deprecated by the Android framework")
             override fun onError(utteranceId: String?) {
+                TtsSilence.end()
                 onStateChanged(State.SPEAK_FAILED)
             }
         })
@@ -66,13 +73,18 @@ internal class AndroidTtsController(
             return
         }
 
+        // onStart 는 엔진이 소리를 내기 직전에야 온다. 그 사이에 들어오는 소리까지 막으려고
+        // 말하라고 시킨 시점에 먼저 표시한다.
+        TtsSilence.begin()
         val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
         if (result == TextToSpeech.ERROR) {
+            TtsSilence.end()
             onStateChanged(State.SPEAK_FAILED)
         }
     }
 
     fun shutdown() {
+        TtsSilence.end()
         isReady = false
         textToSpeech?.run {
             stop()

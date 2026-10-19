@@ -31,6 +31,7 @@ import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
+import com.sihoo.aemx.pipeline.stt.WakeWordSpeechSource
 import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.PlanGenerator
@@ -62,7 +63,9 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var realExecutorSwitch: CheckBox
     private var llmPlanner: LlamaPlanGenerator? = null
     private lateinit var listenButton: Button
+    private lateinit var wakeWordSwitch: CheckBox
     private var speech: SherpaSpeechSource? = null
+    private var gate: WakeWordSpeechSource? = null
     private var listening = false
     private lateinit var stateView: TextView
     private lateinit var logView: TextView
@@ -93,10 +96,21 @@ class PipelineDebugActivity : AppCompatActivity() {
     private fun startListening() {
         val source = speech ?: SherpaSpeechSource(applicationContext, lifecycleScope).also {
             speech = it
+            // 호출어 문을 한 겹 씌워서 화면은 문을 통과한 결과만 받는다.
+            val wakeGate = WakeWordSpeechSource(it, lifecycleScope)
+            gate = wakeGate
+            lifecycleScope.launch { wakeGate.results.collect { result -> render(result) } }
             lifecycleScope.launch {
-                it.results.collect { result -> render(result) }
+                wakeGate.ignored.collect { text -> stateView.text = getString(R.string.pipeline_wake_ignored, text) }
+            }
+            lifecycleScope.launch {
+                wakeGate.awake.collect { awake -> if (awake) stateView.setText(R.string.pipeline_wake_detected) }
             }
         }
+        // 호출어를 쓸 때만 VAD 로 인식기를 쉬게 한다. 끄면 예전처럼 항상 듣는다.
+        val needWake = wakeWordSwitch.isChecked
+        gate?.required = needWake
+        source.useVad = needWake
 
         // 준비하는 동안 다시 눌리면 녹음이 두 번 열린다. 버튼을 막아 둔다.
         listenButton.isEnabled = false
@@ -383,6 +397,15 @@ class PipelineDebugActivity : AppCompatActivity() {
                 }
             }
             addView(runButton, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            wakeWordSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_use_wake_word)
+                setOnCheckedChangeListener { _, checked ->
+                    gate?.required = checked
+                    speech?.useVad = checked
+                }
+            }
+            addView(wakeWordSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
             listenButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_listen_start)

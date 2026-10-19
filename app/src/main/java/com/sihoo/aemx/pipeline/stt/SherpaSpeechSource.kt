@@ -19,6 +19,7 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizerResult
 import com.k2fsa.sherpa.onnx.getFeatureConfig
 import com.k2fsa.sherpa.onnx.getModelConfig
+import com.sihoo.aemx.TtsSilence
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.port.SpeechSource
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +48,11 @@ class SherpaSpeechSource(
     private var audioRecord: AudioRecord? = null
     private val audioEffects = mutableListOf<AudioEffect>()
     private var listenJob: Job? = null
+    private val vad = EnergyVad(threshold = VAD_THRESHOLD)
+
+    /** 켜면 말소리가 있는 구간만 인식기에 넣는다. 조용할 때 CPU 를 쓰지 않는다. */
+    @Volatile
+    var useVad: Boolean = false
 
     @Volatile
     private var listening = false
@@ -104,13 +110,50 @@ class SherpaSpeechSource(
         // 핫워드는 스트림을 만들 때 넘긴다. 파일이 아니라 문자열로 준다.
         val stream = engine.createStream(HOTWORDS)
         val buffer = ShortArray((READ_INTERVAL_SECONDS * SAMPLE_RATE).toInt())
+        // 말소리가 시작된 프레임은 이미 소리가 올라온 뒤라 첫 음절이 잘린다. 직전 프레임들을
+        // 들고 있다가 문이 열릴 때 같이 넣는다.
+        val preRoll = ArrayDeque<FloatArray>()
+        var wasOpen = false
+        vad.reset()
+        var frames = 0
+        var peakRms = 0.0
 
         try {
             while (listening) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: break
                 if (read <= 0) continue
 
+                // 앱이 말하는 소리가 마이크로 되돌아 들어온 것이다. 인식기에 넣지 않고, 말끝이
+                // 이어 붙지 않게 지금까지 쌓인 것도 비운다.
+                if (TtsSilence.isMuted()) {
+                    engine.reset(stream)
+                    vad.reset()
+                    preRoll.clear()
+                    wasOpen = false
+                    continue
+                }
+
                 val samples = FloatArray(read) { buffer[it] / 32768.0f }
+                if (useVad) {
+                    val open = vad.accept(buffer, read)
+                    peakRms = maxOf(peakRms, vad.lastRms)
+                    // 1초마다 그 사이 가장 컸던 소리를 남긴다. 문턱값이 맞는지 보는 용도다.
+                    if (++frames % 10 == 0) {
+                        Log.d(TAG, "소리 크기 최대 %.4f (문턱 %.4f) 문=%s".format(peakRms, VAD_THRESHOLD, open))
+                        peakRms = 0.0
+                    }
+                    if (!open) {
+                        wasOpen = false
+                        preRoll.addLast(samples)
+                        if (preRoll.size > PRE_ROLL_FRAMES) preRoll.removeFirst()
+                        continue
+                    }
+                    if (!wasOpen) {
+                        preRoll.forEach { stream.acceptWaveform(it, sampleRate = SAMPLE_RATE) }
+                        preRoll.clear()
+                        wasOpen = true
+                    }
+                }
                 stream.acceptWaveform(samples, sampleRate = SAMPLE_RATE)
                 while (engine.isReady(stream)) {
                     engine.decode(stream)
@@ -223,6 +266,11 @@ class SherpaSpeechSource(
         const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
 
+        const val VAD_THRESHOLD = 0.015
+
+        /** 문이 열리기 전 몇 프레임을 들고 있을지. 100ms 단위라 0.3초다. */
+        const val PRE_ROLL_FRAMES = 3
+
         /** 한 번에 읽어 들이는 길이. 100ms 마다 인식기에 넣는다. */
         const val READ_INTERVAL_SECONDS = 0.1
 
@@ -239,6 +287,8 @@ class SherpaSpeechSource(
             "교보문고", "알라딘", "유튜브", "네이버", "인스타그램",
             "로그인", "로그아웃", "검색", "구매", "주문",
             "장바구니", "회원가입", "결제", "취소", "재생",
+            // 호출어는 학습 데이터에 없는 단어라 가중치를 따로 높게 준다(": 점수").
+            "하이에이맥스 :3.5", "에이맥스 :3.0", "하이 :1.5",
         ).joinToString("\n")
     }
 }
