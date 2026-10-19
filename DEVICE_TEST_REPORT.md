@@ -116,3 +116,47 @@ adb logcat -d -s AemxAccessibility:V
 
 LLM 시간은 `PipelineDebug`, `LlamaPlanGenerator` 태그로 본다. 스레드 설정은 모델 올릴 때
 `ai_chat.cpp`가 코어 수랑 같이 로그로 찍는다.
+
+## 연산 장치별 속도 (2026-10-19)
+
+llama.cpp 공식 Snapdragon 프리빌드(b11724)를 폰에 올려서 CPU, GPU, NPU를 같은 모델로
+재봤다. 모델은 앱이 받아둔 Qwen3 1.7B Q4_K_M 그대로다.
+
+| 장치 | 프롬프트 처리 (pp128) | 토큰 생성 (tg32) |
+|---|---|---|
+| CPU 4스레드 | 81.6 t/s | 18.4 t/s |
+| GPU (Adreno 730, OpenCL) | 97.9 t/s | 14.0 t/s |
+| NPU (Hexagon) | 실패 | 실패 |
+
+NPU는 세션이 안 열린다.
+
+```
+ggml-hex: Hexagon arch v69 is under supported range, capping at v73
+ggml-hex: HTP0 failed to open session : ... error 0x80000406
+llama_model_load: error loading model
+```
+
+이 기기의 Hexagon은 v69다. 폰에서 직접 확인했다.
+
+```
+/vendor/lib/rfsa/adsp/libSnpeHtpV69Skel.so
+```
+
+llama.cpp의 Hexagon 백엔드는 v73, v75, v79, v81만 빌드한다
+(`ggml/src/ggml-hexagon/CMakeLists.txt`). v69는 범위 밖이라 v73으로 올려서 시도하지만
+스켈 라이브러리가 안 올라간다. NPU 측정은 v79인 기기(스냅드래곤 8 Elite, 갤럭시 S25
+계열)가 있어야 가능하다.
+
+GPU는 프롬프트 처리가 20% 빠르고 토큰 생성이 24% 느리다. 의도분석은 생성이 병목이라
+이 기기에서는 CPU가 제일 빠르다.
+
+재현:
+
+```bash
+adb push llama-b11724/lib /data/local/tmp/llamacpp/
+adb push llama-b11724/bin/llama-bench /data/local/tmp/llamacpp/
+adb shell "cd /data/local/tmp/llamacpp && LD_LIBRARY_PATH=\$PWD/lib \
+  ./llama-bench -m qwen3-1.7b-q4km.gguf -dev GPUOpenCL -ngl 99 -p 128 -n 32 -r 2"
+```
+
+`-dev` 는 `none`(CPU), `GPUOpenCL`, `HTP0` 중에 고른다.
