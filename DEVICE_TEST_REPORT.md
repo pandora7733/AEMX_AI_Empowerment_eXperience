@@ -160,3 +160,23 @@ adb shell "cd /data/local/tmp/llamacpp && LD_LIBRARY_PATH=\$PWD/lib \
 ```
 
 `-dev` 는 `none`(CPU), `GPUOpenCL`, `HTP0` 중에 고른다.
+
+## 기준 기기 변경 (2026-10-19)
+
+위 측정은 전부 S22 Ultra 에서 한 것이다. 이 기기는 Hexagon 이 v69 라 NPU 를 못 쓰므로,
+기준 기기를 갤럭시 S25+ (스냅드래곤 8 Elite, SM8750, Hexagon v79) 로 바꾼다. 앞으로의
+측정은 그 기기에서 다시 한다.
+
+S25+ 에서 확인할 것:
+
+- `llama-bench -dev HTP0` 가 세션을 여는지
+- Q4_K_M 을 그대로 쓸 수 있는지, Q4_0 으로 다시 만들어야 하는지
+- CPU / GPU / NPU 세 장치의 토큰 생성 속도
+- 같은 명령을 연속으로 돌렸을 때 발열과 속도 변화
+
+위의 재현 명령을 그대로 쓰면 된다. 모델은 앱이 받아둔 것을 꺼내 쓴다.
+
+```bash
+adb shell "run-as com.sihoo.aemx cat files/models/Qwen_Qwen3-1.7B-Q4_K_M.gguf \
+  > /data/local/tmp/llamacpp/qwen3-1.7b-q4km.gguf"
+```
