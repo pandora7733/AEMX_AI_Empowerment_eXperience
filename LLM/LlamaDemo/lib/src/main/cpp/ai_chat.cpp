@@ -43,14 +43,20 @@ constexpr int   BATCH_SIZE              = 512;
 // (틀린) 결과가 나오는 걸 PC 테스트에서 확인함 (LLM/README.md 참고).
 constexpr float DEFAULT_SAMPLER_TEMP    = 0.0f;
 
-// AEMX: Qwen3의 thinking 모드(<think>...</think>)는 복잡한 문장의 정확도를
-// 높여주지만, 실기기 로그 확인 결과 한 번 생각하는 데 75초 넘게 걸리는 경우가
-// 있었음(의도분석처럼 즉시 응답이 필요한 AI 도우미 용도로는 너무 느림). 정확도
-// 이점은 유지하되 최악의 지연을 막기 위해, 생각이 이 토큰 수를 넘으면 강제로
-// </think>를 삽입해서 답변으로 넘어가게 함.
+// AEMX: Qwen3의 thinking 모드(<think>...</think>)를 쓰지 않는다. 생각이 시작되면
+// 바로 </think>를 넣어 답변으로 넘긴다.
+//
+// 처음에는 정확도 때문에 150토큰까지 허용했는데, S25+에서 재 보니 생각을 끄든
+// 켜든 나오는 실행계획이 같았다. "유튜브에서 고양이 영상 틀어줘", "네이버에서
+// 서울 날씨 검색해줘", "인스타 릴스 다음 영상 보여줘" 모두 결과가 일치했다.
+// 대신 시간은 11.7초에서 7.3초로 4.4초 줄었다. 생각 150토큰이 그대로 지연이
+// 되기 때문이다.
+//
+// 의도분석은 "어떤 앱에서 무엇을 한다"를 고르는 일이라 단계를 밟아 생각할 거리가
+// 없다. 더 복잡한 명령을 다루게 되면 이 값을 올려서 다시 비교해 볼 것.
 constexpr llama_token THINK_START_TOKEN = 151667;
 constexpr llama_token THINK_END_TOKEN   = 151668;
-constexpr int   MAX_THINK_TOKENS        = 150;
+constexpr int   MAX_THINK_TOKENS        = 0;
 
 // AEMX: 가속기(NPU/GPU)로 넘길 레이어 수. 모델 레이어 수보다 크면 전부 넘어간다.
 constexpr int   N_GPU_LAYERS            = 99;
