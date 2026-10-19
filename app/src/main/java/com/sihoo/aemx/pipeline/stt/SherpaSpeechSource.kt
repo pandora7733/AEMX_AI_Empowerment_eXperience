@@ -57,6 +57,25 @@ class SherpaSpeechSource(
     @Volatile
     private var listening = false
 
+    /** 등록된 목소리와 대조할 때 쓴다. null 이면 화자 확인을 하지 않는다. */
+    var speakerVerifier: SpeakerVerifier? = null
+
+    /** 켜면 등록된 목소리가 아닌 말은 결과로 내보내지 않는다. */
+    @Volatile
+    var requireOwnerVoice: Boolean = false
+
+    /**
+     * 설정되어 있으면 한 문장이 끝날 때마다 그 소리를 여기로 넘기고 결과는 내보내지 않는다.
+     * 목소리를 등록할 때 쓴다.
+     */
+    @Volatile
+    var enrollmentSink: ((FloatArray) -> Unit)? = null
+
+    private val _rejections = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    /** 다른 사람 목소리로 판단해 버린 말. 화면에서 "들리긴 했다"를 보여 주기 위한 것이다. */
+    val rejections: Flow<String> = _rejections.asSharedFlow()
+
     override fun isReady(): Boolean = recognizer != null && hasMicPermission()
 
     /**
@@ -117,6 +136,9 @@ class SherpaSpeechSource(
         vad.reset()
         var frames = 0
         var peakRms = 0.0
+        // 지금 말하고 있는 한 문장의 소리. 끝났을 때 누구 목소리인지 보려고 모아 둔다.
+        val utterance = ArrayList<FloatArray>()
+        val loud = ArrayList<Boolean>()
 
         try {
             while (listening) {
@@ -130,6 +152,8 @@ class SherpaSpeechSource(
                     vad.reset()
                     preRoll.clear()
                     wasOpen = false
+                    utterance.clear()
+                    loud.clear()
                     continue
                 }
 
@@ -155,6 +179,13 @@ class SherpaSpeechSource(
                     }
                 }
                 stream.acceptWaveform(samples, sampleRate = SAMPLE_RATE)
+                utterance += samples
+                loud += EnergyVad.rms(buffer, read) >= VAD_THRESHOLD
+                // 끝나지 않는 소음에 메모리가 무한히 늘지 않게 한다. 30초를 넘으면 앞을 버린다.
+                if (utterance.size > MAX_UTTERANCE_FRAMES) {
+                    utterance.removeAt(0)
+                    loud.removeAt(0)
+                }
                 while (engine.isReady(stream)) {
                     engine.decode(stream)
                 }
@@ -162,8 +193,16 @@ class SherpaSpeechSource(
                 val text = engine.getResult(stream).textWithSpacing()
                 if (engine.isEndpoint(stream)) {
                     engine.reset(stream)
+                    val voice = speechOnly(utterance, loud)
+                    utterance.clear()
+                    loud.clear()
                     // 한 발화가 끝났다. 이 값이 파이프라인을 돌리는 방아쇠다.
-                    if (text.isNotBlank()) emit(SpeechResult.Final(text))
+                    val sink = enrollmentSink
+                    if (sink != null) {
+                        sink(voice)
+                    } else if (text.isNotBlank() && isOwner(voice, text)) {
+                        emit(SpeechResult.Final(text))
+                    }
                 } else if (text.isNotBlank()) {
                     emit(SpeechResult.Partial(text))
                 }
@@ -174,6 +213,45 @@ class SherpaSpeechSource(
         } finally {
             stream.release()
         }
+    }
+
+    /**
+     * 모아 둔 소리에서 말소리 구간만 이어 붙인다.
+     *
+     * 문장이 끝났다고 판정되려면 뒤에 2초쯤 무음이 붙는데, 그것까지 넣으면 목소리 특징이
+     * 흐려져 같은 사람인데도 점수가 낮게 나온다. 앞뒤의 조용한 프레임은 잘라 낸다.
+     */
+    private fun speechOnly(frames: List<FloatArray>, loud: List<Boolean>): FloatArray {
+        val first = loud.indexOfFirst { it }
+        val last = loud.indexOfLast { it }
+        if (first < 0) return FloatArray(0)
+        val from = maxOf(0, first - 1)
+        val to = minOf(frames.size - 1, last + 1)
+        val out = FloatArray((from..to).sumOf { frames[it].size })
+        var offset = 0
+        for (i in from..to) {
+            frames[i].copyInto(out, offset)
+            offset += frames[i].size
+        }
+        return out
+    }
+
+    /** 등록된 목소리인지. 확인이 꺼져 있거나 등록이 없으면 항상 통과시킨다. */
+    private fun isOwner(voice: FloatArray, text: String): Boolean {
+        val verifier = speakerVerifier
+        if (!requireOwnerVoice || verifier == null || !verifier.isEnrolled) return true
+
+        val score = verifier.score(voice)
+        val pass = score != null && score >= verifier.threshold
+        Log.d(TAG, "화자 점수 %s (기준 %.2f) %s: %s".format(
+            score?.let { "%.3f".format(it) } ?: "측정불가", verifier.threshold,
+            if (pass) "통과" else "거절", text,
+        ))
+        if (!pass) {
+            val shown = score?.let { "%.2f".format(it) } ?: "너무 짧음"
+            scope.launch { _rejections.emit("$text ($shown)") }
+        }
+        return pass
     }
 
     private fun emit(result: SpeechResult) {
@@ -267,6 +345,9 @@ class SherpaSpeechSource(
         const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
 
         const val VAD_THRESHOLD = 0.015
+
+        /** 한 문장으로 모아 둘 수 있는 최대 길이. 100ms 프레임 300개, 30초. */
+        const val MAX_UTTERANCE_FRAMES = 300
 
         /** 문이 열리기 전 몇 프레임을 들고 있을지. 100ms 단위라 0.3초다. */
         const val PRE_ROLL_FRAMES = 3

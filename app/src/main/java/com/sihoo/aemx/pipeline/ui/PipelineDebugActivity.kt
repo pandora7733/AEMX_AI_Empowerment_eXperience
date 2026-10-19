@@ -31,6 +31,7 @@ import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
+import com.sihoo.aemx.pipeline.stt.SpeakerVerifier
 import com.sihoo.aemx.pipeline.stt.WakeWordSpeechSource
 import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
@@ -64,6 +65,10 @@ class PipelineDebugActivity : AppCompatActivity() {
     private var llmPlanner: LlamaPlanGenerator? = null
     private lateinit var listenButton: Button
     private lateinit var wakeWordSwitch: CheckBox
+    private lateinit var ownerOnlySwitch: CheckBox
+    private lateinit var enrollButton: Button
+    private val verifier by lazy { SpeakerVerifier(applicationContext) }
+    private val enrolledVoices = ArrayList<FloatArray>()
     private var speech: SherpaSpeechSource? = null
     private var gate: WakeWordSpeechSource? = null
     private var listening = false
@@ -101,12 +106,16 @@ class PipelineDebugActivity : AppCompatActivity() {
             gate = wakeGate
             lifecycleScope.launch { wakeGate.results.collect { result -> render(result) } }
             lifecycleScope.launch {
+                it.rejections.collect { text -> stateView.text = getString(R.string.pipeline_owner_rejected, text) }
+            }
+            lifecycleScope.launch {
                 wakeGate.ignored.collect { text -> stateView.text = getString(R.string.pipeline_wake_ignored, text) }
             }
             lifecycleScope.launch {
                 wakeGate.awake.collect { awake -> if (awake) stateView.setText(R.string.pipeline_wake_detected) }
             }
         }
+        source.speakerVerifier = verifier
         // 호출어를 쓸 때만 VAD 로 인식기를 쉬게 한다. 끄면 예전처럼 항상 듣는다.
         val needWake = wakeWordSwitch.isChecked
         gate?.required = needWake
@@ -117,7 +126,11 @@ class PipelineDebugActivity : AppCompatActivity() {
         stateView.setText(R.string.pipeline_stt_preparing)
         lifecycleScope.launch {
             try {
-                withContext(Dispatchers.IO) { source.prepare() }
+                withContext(Dispatchers.IO) {
+                    source.prepare()
+                    // 등록된 목소리가 있을 때만 화자 모델(28MB)을 올린다.
+                    if (verifier.isEnrolled) verifier.prepare()
+                }
                 source.start()
                 listening = true
                 listenButton.setText(R.string.pipeline_listen_stop)
@@ -137,6 +150,49 @@ class PipelineDebugActivity : AppCompatActivity() {
         listenButton.setText(R.string.pipeline_listen_start)
         // 멈춘 것을 상태줄에도 적는다. 버튼만 바뀌면 아직 듣는 줄 알고 계속 말하게 된다.
         stateView.setText(R.string.pipeline_stt_stopped)
+    }
+
+    /**
+     * 목소리를 등록한다. 같은 문장을 세 번 말하게 해서 평균을 낸다.
+     *
+     * 한 번만 듣고 등록하면 그때 컨디션이나 마이크 거리에 점수가 크게 흔들린다.
+     * 듣기가 켜져 있어야 하고, 이 동안 인식 결과는 명령으로 나가지 않는다.
+     */
+    private fun beginEnrollment() {
+        if (!listening) {
+            stateView.setText(R.string.pipeline_enroll_need_listening)
+            return
+        }
+        enrolledVoices.clear()
+        enrollButton.isEnabled = false
+        stateView.text = getString(R.string.pipeline_enroll_prompt, 1, SpeakerVerifier.MIN_ENROLL_COUNT)
+
+        lifecycleScope.launch(Dispatchers.IO) { verifier.prepare() }
+        speech?.enrollmentSink = { voice ->
+            runOnUiThread { onEnrollmentUtterance(voice) }
+        }
+    }
+
+    private fun onEnrollmentUtterance(voice: FloatArray) {
+        // 0.8초 미만은 목소리 특징을 뽑기에 짧다.
+        if (voice.size < MIN_ENROLL_SAMPLES) {
+            stateView.setText(R.string.pipeline_enroll_too_short)
+            return
+        }
+        enrolledVoices += voice
+        val done = enrolledVoices.size
+        if (done < SpeakerVerifier.MIN_ENROLL_COUNT) {
+            stateView.text = getString(R.string.pipeline_enroll_prompt, done + 1, SpeakerVerifier.MIN_ENROLL_COUNT)
+            return
+        }
+
+        speech?.enrollmentSink = null
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) { verifier.enroll(enrolledVoices.toList()) }
+            enrolledVoices.clear()
+            enrollButton.isEnabled = true
+            stateView.setText(if (ok) R.string.pipeline_enroll_done else R.string.pipeline_enroll_failed)
+        }
     }
 
     private fun render(result: SpeechResult) {
@@ -407,6 +463,26 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             addView(wakeWordSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
+            ownerOnlySwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_owner_only)
+                setOnCheckedChangeListener { button, checked ->
+                    if (checked && !verifier.isEnrolled) {
+                        button.isChecked = false
+                        stateView.setText(R.string.pipeline_owner_not_enrolled)
+                        return@setOnCheckedChangeListener
+                    }
+                    speech?.requireOwnerVoice = checked
+                    if (checked) lifecycleScope.launch(Dispatchers.IO) { verifier.prepare() }
+                }
+            }
+            addView(ownerOnlySwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            enrollButton = Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_enroll)
+                setOnClickListener { beginEnrollment() }
+            }
+            addView(enrollButton, matchWidthWrapHeight().apply { topMargin = spacing })
+
             listenButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_listen_start)
                 setOnClickListener {
@@ -485,6 +561,7 @@ class PipelineDebugActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        verifier.release()
         speech?.release()
         speech = null
         super.onDestroy()
@@ -492,6 +569,9 @@ class PipelineDebugActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "PipelineDebug"
+
+        /** 등록에 쓸 수 있는 최소 길이. 0.8초(16kHz). */
+        private const val MIN_ENROLL_SAMPLES = 12_800
     }
 }
 

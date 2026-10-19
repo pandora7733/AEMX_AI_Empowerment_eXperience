@@ -47,6 +47,14 @@ mkdir -p "$JNI_DEST/x86_64" "$JNI_DEST/arm64-v8a"
 cp jniLibs/x86_64/*.so "$JNI_DEST/x86_64/"
 cp jniLibs/arm64-v8a/*.so "$JNI_DEST/arm64-v8a/"
 
+echo "=== [추가] 화자 확인 모델 다운로드 (내 목소리만 듣기용, 28MB) ==="
+SPEAKER_DEST="$PROJECT_DIR/app/src/main/assets/speaker"
+SPEAKER_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
+mkdir -p "$SPEAKER_DEST"
+if [ ! -f "$SPEAKER_DEST/campplus_zh_en.onnx" ]; then
+  curl -L -C - -o "$SPEAKER_DEST/campplus_zh_en.onnx" "$SPEAKER_URL"
+fi
+
 echo ""
 echo "완료. Android Studio에서 STT/SherpaOnnx 프로젝트를 열고 빌드하세요."
 echo "임시 다운로드 파일은 $TMP_DIR 에 남아있습니다 (삭제해도 무방)."

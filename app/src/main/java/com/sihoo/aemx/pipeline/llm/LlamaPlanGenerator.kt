@@ -74,7 +74,15 @@ class LlamaPlanGenerator(
         Log.i(TAG, "응답: $raw")
 
         return when (val parsed = ActionPlanParser.parse(raw)) {
-            is ParseResult.Success -> PlanResult.Success(parsed.plan, raw, parsed.warnings)
+            is ParseResult.Success -> {
+                // 처음 명령에서만 바로잡는다. 재분석은 화면을 보고 앱을 바꿀 수 있어서 그대로 둔다.
+                val plan = if (request.mode == PlanRequest.Mode.INITIAL) {
+                    AppMentionGuard.apply(request.utterance, parsed.plan)
+                } else {
+                    parsed.plan
+                }
+                PlanResult.Success(plan, raw, parsed.warnings)
+            }
             is ParseResult.Failure -> PlanResult.Malformed(raw, parsed.reason)
         }
     }

@@ -53,4 +53,13 @@
     <string name="pipeline_use_wake_word">호출어 필요 ("하이 에이맥스")</string>
     <string name="pipeline_wake_detected">호출어를 들었습니다. 명령을 말해 주세요.</string>
     <string name="pipeline_wake_ignored">호출어가 없어 무시함: %1$s</string>
+    <string name="pipeline_owner_only">내 목소리만 듣기 (먼저 등록 필요)</string>
+    <string name="pipeline_enroll">내 목소리 등록</string>
+    <string name="pipeline_enroll_need_listening">먼저 "음성으로 말하기"를 눌러 듣기를 켜 주세요.</string>
+    <string name="pipeline_enroll_prompt">등록 %1$d/%2$d: "하이 에이맥스, 오늘 날씨 알려줘"를 평소 목소리로 말해 주세요.</string>
+    <string name="pipeline_enroll_too_short">너무 짧습니다. 조금 더 길게 말해 주세요.</string>
+    <string name="pipeline_enroll_done">목소리 등록 완료. "내 목소리만 듣기"를 켜 보세요.</string>
+    <string name="pipeline_enroll_failed">등록하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="pipeline_owner_not_enrolled">등록된 목소리가 없습니다.</string>
+    <string name="pipeline_owner_rejected">다른 목소리로 판단해 무시함: %1$s</string>
 </resources>

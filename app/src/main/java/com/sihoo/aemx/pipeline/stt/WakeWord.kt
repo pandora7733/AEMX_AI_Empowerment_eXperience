@@ -122,6 +122,19 @@ class EnergyVad(
     fun reset() {
         remaining = 0
     }
+
+    companion object {
+        /** 한 프레임의 소리 크기(RMS). */
+        fun rms(frame: ShortArray, length: Int): Double {
+            if (length <= 0) return 0.0
+            var sum = 0.0
+            for (i in 0 until length) {
+                val sample = frame[i] / 32768.0
+                sum += sample * sample
+            }
+            return Math.sqrt(sum / length)
+        }
+    }
 }
 
 /**
