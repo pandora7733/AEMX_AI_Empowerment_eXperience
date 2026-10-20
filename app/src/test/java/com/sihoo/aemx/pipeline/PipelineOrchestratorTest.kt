@@ -136,23 +136,6 @@ class PipelineOrchestratorTest {
         assertEquals("10s", next.delay)
     }
 
-    @Test
-    fun `계정이 없으면 사용자에게 등록을 요청하고 멈춘다`() = runTest {
-        val plan =
-            """{"app": "교보문고", "steps": [{"action": "input_credential", "target": "id"}]}"""
-        val observer = FakeScreenObserver(snapshot("아이디"))
-        val executor = ScriptedExecutor(observer, emptyList())
-
-        val orchestrator = build(FakePlanGenerator(listOf(plan)), executor, observer)
-        orchestrator.submit("교보문고 로그인")
-        advanceUntilIdle()
-
-        val state = orchestrator.state.value
-        assertTrue(state is PipelineState.NeedsUser)
-        assertTrue((state as PipelineState.NeedsUser).reason.contains("교보문고"))
-        assertTrue("실행모듈을 부르면 안 된다", executor.performed.isEmpty())
-    }
-
     // ------------------------------------------------------------- 재분석
 
     @Test

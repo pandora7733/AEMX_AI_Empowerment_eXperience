@@ -37,7 +37,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 이 클래스가 하는 일은 다섯 가지다.
  *  1. 발화(또는 입력한 텍스트)를 받아 LLM 에 실행계획을 요청한다.
  *  2. 계획의 step 을 실행모듈이 이해하는 명령으로 바꾼다.
- *     `input_credential` 은 여기서 계정 저장소의 실제 값으로 치환된다.
+ *     `open_app` 은 앱 이름을 기기의 패키지명으로 바꾼다.
  *  3. 명령을 하나씩 실행모듈에 넘긴다. **루프는 여기가 돈다.**
  *  4. step 마다 화면이 안정될 때까지 기다렸다가 기대대로 바뀌었는지 검사한다.
  *  5. 기대와 다르면 현재 화면 + 원래 명령 + 지금까지의 기록을 묶어 다시 LLM 에 물어본다.
@@ -325,8 +325,8 @@ class PipelineOrchestrator(
     /**
      * 계획의 step 을 실행모듈이 이해하는 명령으로 바꾼다.
      *
-     * `open_app` 은 앱 이름을 패키지명으로, `input_credential` 은 계정 저장소의
-     * 실제 값으로 치환한다. 둘 다 LLM 이 알 수 없는 정보라 이쪽에서 채워야 한다.
+     * `open_app` 은 앱 이름을 패키지명으로 치환한다. 패키지명은 LLM 이 알 수 없는
+     * 정보라 이쪽에서 채워야 한다.
      */
     private fun toCommand(step: ActionStep, appName: String): CommandMapping =
         when (step.action) {

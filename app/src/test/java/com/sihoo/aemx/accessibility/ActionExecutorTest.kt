@@ -172,7 +172,7 @@ class ActionExecutorTest {
         assertEquals(appPackage, shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity.component?.packageName)
     }
 
-    @Test @Config(sdk = [24, 28])
+    @Test
     fun `node lookup ignores hidden and partial labels and supports parent clicks`() {
         val root = node("container")
         val label = node("확인").apply { isClickable = false; isEditable = false }
@@ -234,7 +234,11 @@ class ActionExecutorTest {
     @Test fun `play first selects a visible clickable video result`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         val root = node("results", AppLauncher.YOUTUBE_PACKAGE).apply { isEditable = false }
-        val video = node("오늘의 날씨 영상", AppLauncher.YOUTUBE_PACKAGE).apply { isEditable = false }
+        // 실기기의 검색 결과 항목은 resource-id 없이 content-desc 꼬리말("동영상 재생")로만 구분된다.
+        val video = node("오늘의 날씨 영상", AppLauncher.YOUTUBE_PACKAGE).apply {
+            isEditable = false
+            contentDescription = "오늘의 날씨 영상 - 3분 12초 - 채널 채널로 이동 - 동영상 재생"
+        }
         shadowOf(root).addChild(video)
         shadowOf(service).setRootInActiveWindow(root)
         var clicked = false
