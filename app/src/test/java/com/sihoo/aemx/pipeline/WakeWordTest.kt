@@ -46,6 +46,24 @@ class WakeWordTest {
     }
 
     @Test
+    fun `맥스를 영단어로 적어도 잡는다`() {
+        // 2026-10-20 실기기에서 "하이 에이맥스" 를 "아이 MAX?" 로 적었다.
+        assertEquals("", WakeWordMatcher.match("아이 MAX?"))
+        assertEquals("날씨 알려줘", WakeWordMatcher.match("아이 max 날씨 알려줘"))
+        assertEquals("유튜브 틀어줘", WakeWordMatcher.match("하이 Max, 유튜브 틀어줘"))
+        assertEquals("", WakeWordMatcher.match("a max"))
+        assertEquals("", WakeWordMatcher.match("에이 max"))
+        assertEquals("날씨 알려줘", WakeWordMatcher.match("AMAX 날씨 알려줘"))
+        assertEquals("", WakeWordMatcher.match("하이 맥스"))
+    }
+
+    @Test
+    fun `인사 없이 맥스만 있으면 호출로 보지 않는다`() {
+        assertNull(WakeWordMatcher.match("맥스 틀어줘"))
+        assertNull(WakeWordMatcher.match("max 틀어줘"))
+    }
+
+    @Test
     fun `호출어가 없으면 null 이다`() {
         assertNull(WakeWordMatcher.match("유튜브에서 고양이 영상 틀어줘"))
         assertNull(WakeWordMatcher.match("하이 그랜저"))

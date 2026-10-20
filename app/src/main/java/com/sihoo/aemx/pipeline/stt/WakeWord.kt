@@ -52,10 +52,29 @@ object WakeWordMatcher {
 
     private fun toUnits(text: String): List<Unit> {
         val units = ArrayList<Unit>()
-        for ((index, raw) in text.withIndex()) {
-            if (raw.isWhitespace() || raw in SEPARATORS) continue
-            val spoken = LATIN_SOUNDS[raw.lowercaseChar()] ?: raw.toString()
-            for (char in spoken) units += Unit(SIMILAR[char] ?: char, index + 1)
+        var index = 0
+        while (index < text.length) {
+            val raw = text[index]
+            if (raw.isWhitespace() || raw in SEPARATORS) {
+                index++
+                continue
+            }
+            if (raw in 'a'..'z' || raw in 'A'..'Z') {
+                // 영문은 단어째로 먼저 본다. "max" 를 m·a·x 로 쪼개면 "엠에이엑스" 가 되어 놓친다.
+                var wordEnd = index
+                while (wordEnd < text.length && (text[wordEnd] in 'a'..'z' || text[wordEnd] in 'A'..'Z')) wordEnd++
+                val whole = WORD_SOUNDS[text.substring(index, wordEnd).lowercase()]
+                for (i in index until wordEnd) {
+                    // 단어째로 바꿨으면 글자마다 끝 위치를 단어 끝에 둔다. 명령이 중간에서 잘리지 않게 하려는 것이다.
+                    val spoken = whole ?: LATIN_SOUNDS[text[i].lowercaseChar()] ?: text[i].toString()
+                    if (whole != null && i > index) continue
+                    for (char in spoken) units += Unit(SIMILAR[char] ?: char, if (whole != null) wordEnd else i + 1)
+                }
+                index = wordEnd
+                continue
+            }
+            units += Unit(SIMILAR[raw] ?: raw, index + 1)
+            index++
         }
         return units
     }
@@ -69,6 +88,11 @@ object WakeWordMatcher {
 
     /** 이름 앞에서 건너뛸 수 있는 글자 수. "하이야" 까지 들어간다. */
     private const val MAX_GREETING_UNITS = 3
+
+    /** STT 가 "맥스" 를 영단어로 적은 것. 단어째로 바꾸고, 여기 없는 영문만 글자별로 바꾼다. */
+    private val WORD_SOUNDS = mapOf(
+        "max" to "맥스", "macs" to "맥스", "mex" to "맥스", "maks" to "맥스", "amax" to "에이맥스",
+    )
 
     /** 영문으로 적힌 것을 한글 발음으로 바꾼다. */
     private val LATIN_SOUNDS = mapOf('a' to "에이", 'x' to "엑스", 'm' to "엠")
