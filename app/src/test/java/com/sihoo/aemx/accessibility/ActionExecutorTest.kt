@@ -197,8 +197,16 @@ class ActionExecutorTest {
     @Test fun `scroll uses requested direction and ignores hidden containers`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         val root = node("root").apply { isEditable = false }
-        val hidden = node("hidden").apply { isScrollable = true; isVisibleToUser = false }
-        val content = node("content").apply { isScrollable = true }
+        val hidden = node("hidden").apply {
+            isScrollable = true; isVisibleToUser = false
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP)
+        }
+        val content = node("content").apply {
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP)
+        }
         shadowOf(root).addChild(hidden)
         shadowOf(root).addChild(content)
         shadowOf(service).setRootInActiveWindow(root)
@@ -210,7 +218,62 @@ class ActionExecutorTest {
             ActionStep(ActionType.SCROLL, "down"), ActionStep(ActionType.SCROLL, "up"),
         )))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
-        assertEquals(listOf(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD), actions)
+        assertEquals(
+            listOf(
+                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
+                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
+            ),
+            actions,
+        )
+        assertTrue(events.completed)
+    }
+
+    @Test fun `scroll skips a horizontal pager and uses the vertical list inside it`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val pager = node("pager", "com.instagram.android").apply {
+            isEditable = false
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT)
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT)
+        }
+        val list = node("list", "com.instagram.android").apply {
+            isEditable = false
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
+        }
+        shadowOf(pager).addChild(list)
+        shadowOf(service).setRootInActiveWindow(pager)
+        val pagerActions = mutableListOf<Int>()
+        shadowOf(pager).setOnPerformActionListener { action, _ -> pagerActions += action; true }
+        val listActions = mutableListOf<Int>()
+        shadowOf(list).setOnPerformActionListener { action, _ -> listActions += action; true }
+        val events = Events()
+        ActionExecutor(service, events).execute(ActionPlan("인스타그램", listOf(
+            ActionStep(ActionType.SCROLL, "down"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertTrue("가로 페이저에는 아무것도 보내지 않는다", pagerActions.isEmpty())
+        assertEquals(listOf(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id), listActions)
+        assertTrue(events.completed)
+    }
+
+    @Test fun `scroll swipes in the requested direction when no vertical node exists`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val root = node("pager", "com.instagram.android").apply {
+            isEditable = false
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT)
+        }
+        shadowOf(service).setRootInActiveWindow(root)
+        val actions = mutableListOf<Int>()
+        shadowOf(root).setOnPerformActionListener { action, _ -> actions += action; true }
+        val events = Events()
+        ActionExecutor(service, events).execute(ActionPlan("인스타그램", listOf(
+            ActionStep(ActionType.SCROLL, "down"), ActionStep(ActionType.SCROLL, "up"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        assertTrue("방향 없는 FORWARD/BACKWARD 를 보내면 안 된다", actions.isEmpty())
+        assertEquals(2, shadowOf(service).gesturesDispatched.size)
         assertTrue(events.completed)
     }
 
@@ -255,11 +318,12 @@ class ActionExecutorTest {
         assertTrue(events.completed)
     }
 
-    @Test fun `next video scrolls forward after its optional delay`() {
+    @Test fun `next video scrolls down after its optional delay`() {
         val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
         val root = node("Shorts", AppLauncher.YOUTUBE_PACKAGE).apply {
             isEditable = false
             isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
         }
         shadowOf(service).setRootInActiveWindow(root)
         val actions = mutableListOf<Int>()
@@ -271,7 +335,58 @@ class ActionExecutorTest {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
         assertTrue(actions.isEmpty())
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
-        assertEquals(listOf(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD), actions)
+        assertEquals(listOf(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id), actions)
+        assertTrue(events.completed)
+    }
+
+    @Test fun `next video skips a horizontal pager and uses the vertical list`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        // 인스타그램처럼 바깥에 홈/메시지를 좌우로 넘기는 페이저가 먼저 잡히는 모양.
+        val root = node("pager", "com.instagram.android").apply {
+            isEditable = false
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT)
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT)
+        }
+        val reels = node("reels", "com.instagram.android").apply {
+            isEditable = false
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
+        }
+        shadowOf(root).addChild(reels)
+        shadowOf(service).setRootInActiveWindow(root)
+        val pagerActions = mutableListOf<Int>()
+        shadowOf(root).setOnPerformActionListener { action, _ -> pagerActions += action; true }
+        val reelsActions = mutableListOf<Int>()
+        shadowOf(reels).setOnPerformActionListener { action, _ -> reelsActions += action; true }
+        val events = Events()
+        ActionExecutor(service, events).execute(ActionPlan("인스타그램", listOf(
+            ActionStep(ActionType.NEXT_VIDEO, "다음 동영상"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertTrue("가로 페이저에는 아무것도 보내지 않는다", pagerActions.isEmpty())
+        assertEquals(listOf(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id), reelsActions)
+        assertTrue(events.completed)
+    }
+
+    @Test fun `next video swipes when only a horizontal pager scrolls`() {
+        val service = Robolectric.buildService(AemxAccessibilityService::class.java).create().get()
+        val root = node("pager", "com.instagram.android").apply {
+            isEditable = false
+            isScrollable = true
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT)
+            addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT)
+        }
+        shadowOf(service).setRootInActiveWindow(root)
+        val actions = mutableListOf<Int>()
+        shadowOf(root).setOnPerformActionListener { action, _ -> actions += action; true }
+        val events = Events()
+        ActionExecutor(service, events).execute(ActionPlan("인스타그램", listOf(
+            ActionStep(ActionType.NEXT_VIDEO, "다음 동영상"),
+        )))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertTrue("방향 없는 SCROLL_FORWARD 를 보내면 안 된다", actions.isEmpty())
+        assertEquals(1, shadowOf(service).gesturesDispatched.size)
         assertTrue(events.completed)
     }
 }

@@ -23,6 +23,7 @@ import com.sihoo.aemx.accessibility.PlanOutcome
 import com.sihoo.aemx.pipeline.PipelineConfig
 import com.sihoo.aemx.pipeline.PipelineLogEntry
 import com.sihoo.aemx.pipeline.PipelineOrchestrator
+import com.sihoo.aemx.AndroidTtsController
 import com.sihoo.aemx.pipeline.PipelineState
 import com.sihoo.aemx.pipeline.fake.FakeAppResolver
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
@@ -31,6 +32,8 @@ import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
 import com.sihoo.aemx.pipeline.device.AccessibilityAppResolver
 import com.sihoo.aemx.pipeline.device.AccessibilityScreenObserver
 import com.sihoo.aemx.pipeline.device.AccessibilityStepExecutor
+import com.sihoo.aemx.pipeline.device.AnnouncementTexts
+import com.sihoo.aemx.pipeline.device.announcementFor
 import com.sihoo.aemx.pipeline.device.ServicePlanBridge
 import com.sihoo.aemx.pipeline.device.ServiceScreenSource
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
@@ -46,6 +49,7 @@ import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -73,6 +77,13 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var orchestratorSwitch: CheckBox
     private var deviceOrchestrator: PipelineOrchestrator? = null
     private var deviceExecutor: AccessibilityStepExecutor? = null
+
+    /**
+     * 오케스트레이터 경로에서 명령 하나가 끝났을 때 말하는 TTS. 접근성 서비스가 쓰는 것과 같은
+     * [AndroidTtsController] 라 말하는 동안 TtsSilence 로 마이크가 막힌다. 엔진 초기화가 비동기라
+     * 명령을 내보내기 전에 미리 만들어 둔다(준비 전에 speak 하면 소리가 버려진다).
+     */
+    private var announcer: AndroidTtsController? = null
 
     /** 화면이 보이는 동안만 true. 어댑터가 끝나고 콜백을 되돌릴지 정하는 데 쓴다. */
     @Volatile
@@ -379,17 +390,34 @@ class PipelineDebugActivity : AppCompatActivity() {
             return
         }
 
+        if (announcer == null) announcer = AndroidTtsController(applicationContext) { }
         val device = deviceOrchestrator ?: buildDeviceOrchestrator(planner).also { deviceOrchestrator = it }
         // 다른 경로가 orchestrator 를 갈아 끼웠을 수 있으니, 이쪽이 아니면 화면 구독을 옮긴다.
         if (orchestrator !== device) {
             collectJob?.cancel()
             orchestrator = device
             collectJob = lifecycleScope.launch {
-                launch { device.state.collect { render(it) } }
+                launch {
+                    device.state.collect { render(it) }
+                }
+                // StateFlow 는 구독하자마자 마지막 값을 준다. 지난 명령의 끝 상태를 다시 말하지 않게 건너뛴다.
+                launch { device.state.drop(1).collect { announce(it) } }
                 launch { device.log.collect { entries -> renderLog(entries) } }
             }
         }
         device.submit(command)
+    }
+
+    /** 명령이 끝나 최종 상태가 되면 한 번 말한다. 오케스트레이터 경로에서만 불린다(가짜 경로는 말하지 않는다). */
+    private fun announce(state: PipelineState) {
+        val texts = AnnouncementTexts(
+            finished = getString(R.string.pipeline_announce_finished),
+            failed = getString(R.string.pipeline_announce_failed),
+            needsUser = getString(R.string.pipeline_announce_needs_user),
+            needsSetup = getString(R.string.pipeline_announce_needs_setup),
+        )
+        val text = announcementFor(state, texts) ?: return
+        announcer?.speak(text)
     }
 
     /** 진짜 LLM + 접근성 서비스 어댑터로 오케스트레이터를 조립한다. */
@@ -685,6 +713,8 @@ class PipelineDebugActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         deviceOrchestrator?.cancel()
+        announcer?.shutdown()
+        announcer = null
         deviceScope.cancel()
         verifier.release()
         speech?.release()

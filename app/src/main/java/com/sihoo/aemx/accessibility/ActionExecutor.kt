@@ -154,22 +154,31 @@ internal class ActionExecutor(
                 else StepResult.NotReady
             }
             ActionType.NEXT_VIDEO -> {
-                val node = findScrollable(root)
+                // ACTION_SCROLL_FORWARD 는 방향이 없다. 인스타그램처럼 바깥에 좌우 페이저(홈/메시지)가 있는
+                // 앱에서는 그게 먼저 잡혀 메시지 화면으로 넘어간다. 세로 스크롤(SCROLL_DOWN)을 지원하는
+                // 노드에만 보내고, 없으면 위로 쓸어 올리는 제스처로 넘긴다.
+                val node = findVerticallyScrollable(root, AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
                 when {
-                    node?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true -> StepResult.Success
+                    node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id) == true -> StepResult.Success
                     service.swipeUp() -> StepResult.Success
                     else -> StepResult.NotReady
                 }
             }
             ActionType.SCROLL -> {
                 val backward = step.target.equals("up", true) || step.target.equals("backward", true)
+                // NEXT_VIDEO 와 같은 이유로 방향 없는 FORWARD/BACKWARD 를 쓰지 않는다. 가로 페이저가 먼저
+                // 잡히면 "아래로"가 옆으로 간다. 방향 있는 액션을 지원하는 노드가 없으면 쓸기 제스처로 넘긴다.
                 val action = if (backward) {
-                    AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP
                 } else {
-                    AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
                 }
-                val node = findScrollable(root) ?: return StepResult.NotReady
-                if (node.performAction(action)) StepResult.Success else StepResult.NotReady
+                val node = findVerticallyScrollable(root, action)
+                when {
+                    node?.performAction(action.id) == true -> StepResult.Success
+                    (if (backward) service.swipeDown() else service.swipeUp()) -> StepResult.Success
+                    else -> StepResult.NotReady
+                }
             }
             else -> StepResult.Fatal("UI Action이 아닌 단계입니다: ${step.action.wireName}")
         }
@@ -191,13 +200,21 @@ internal class ActionExecutor(
         }
     }
 
-    private fun findScrollable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+    /** [action](SCROLL_DOWN/UP)을 지원하는, 즉 세로로 움직이는 노드. 가로 페이저는 이 액션을 내놓지 않아 걸러진다. */
+    private fun findVerticallyScrollable(
+        root: AccessibilityNodeInfo,
+        action: AccessibilityNodeInfo.AccessibilityAction
+    ): AccessibilityNodeInfo? {
         val queue = java.util.ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0
         while (queue.isNotEmpty()) {
             if (++visited > 2_000) return null
             val node = queue.removeFirst()
-            if (node.isScrollable && node.isEnabled && node.isVisibleToUser) return node
+            if (node.isScrollable && node.isEnabled && node.isVisibleToUser &&
+                node.actionList.any { it.id == action.id }
+            ) {
+                return node
+            }
             for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
         return null

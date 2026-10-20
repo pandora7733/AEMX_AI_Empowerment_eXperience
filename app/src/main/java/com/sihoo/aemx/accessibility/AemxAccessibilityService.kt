@@ -81,12 +81,17 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         observer?.invoke(PlanOutcome.Failed(index, step, message, screen))
     }
 
-    internal fun swipeUp(): Boolean {
+    internal fun swipeUp(): Boolean = swipeVertically(fromY = 0.78f, toY = 0.22f)
+
+    /** 손가락을 아래로 쓸어 내린다(내용은 위로, 즉 이전 쪽으로 간다). */
+    internal fun swipeDown(): Boolean = swipeVertically(fromY = 0.22f, toY = 0.78f)
+
+    private fun swipeVertically(fromY: Float, toY: Float): Boolean {
         val metrics = resources.displayMetrics
         val x = metrics.widthPixels / 2f
         val path = Path().apply {
-            moveTo(x, metrics.heightPixels * 0.78f)
-            lineTo(x, metrics.heightPixels * 0.22f)
+            moveTo(x, metrics.heightPixels * fromY)
+            lineTo(x, metrics.heightPixels * toY)
         }
         return dispatchGesture(
             GestureDescription.Builder()
