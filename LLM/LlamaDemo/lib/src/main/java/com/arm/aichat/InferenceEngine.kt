@@ -31,6 +31,14 @@ interface InferenceEngine {
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>
 
     /**
+     * AEMX: 시스템 프롬프트는 그대로 두고 그 뒤의 대화 기록만 비운다.
+     *
+     * 시스템 프롬프트를 다시 처리하지 않아서 거의 공짜다. 모델이 준비된 상태([State.ModelReady])
+     * 에서만 부를 수 있고, 생성 중이거나 시스템 프롬프트 처리 전이면 [IllegalStateException].
+     */
+    suspend fun resetConversation()
+
+    /**
      * Runs a benchmark with the specified parameters.
      */
     suspend fun bench(pp: Int, tg: Int, pl: Int, nr: Int = 1): String

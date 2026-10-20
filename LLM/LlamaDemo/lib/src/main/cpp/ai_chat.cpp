@@ -647,6 +647,27 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
 
 
 extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_resetConversationNative(JNIEnv * /*unused*/, jobject /*unused*/) {
+    // AEMX: 시스템 프롬프트가 처리되기 전에는 되돌릴 기준 위치가 없다.
+    if (system_prompt_position <= 0) {
+        LOGw("%s: System prompt not processed yet, nothing to reset", __func__);
+        return 1;
+    }
+
+    // 시스템 프롬프트 뒤의 KV 만 지워서, 시스템 프롬프트를 다시 처리하지 않고 대화를 처음으로 되돌린다.
+    llama_memory_seq_rm(llama_get_memory(g_context), 0, system_prompt_position, -1);
+    current_position = system_prompt_position;
+
+    // 첫 메시지(system)만 남긴다. 남겨 두면 다음 포맷이 이전 대화까지 함께 만든다.
+    if (chat_msgs.size() > 1) {
+        chat_msgs.erase(chat_msgs.begin() + 1, chat_msgs.end());
+    }
+    reset_short_term_states();
+    return 0;
+}
+
+extern "C"
 JNIEXPORT void JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_unload(JNIEnv * /*unused*/, jobject /*unused*/) {
     // Reset long-term & short-term states

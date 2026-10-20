@@ -101,6 +101,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int
 
     @FastNative
+    private external fun resetConversationNative(): Int
+
+    @FastNative
     private external fun generateNextToken(): String?
 
     @FastNative
@@ -209,6 +212,23 @@ internal class InferenceEngineImpl private constructor(
             }
             Log.i(TAG, "System prompt processed! Awaiting user prompt...")
             _state.value = InferenceEngine.State.ModelReady
+        }
+
+    /**
+     * AEMX: 시스템 프롬프트 뒤의 대화 기록만 비운다. 시스템 프롬프트는 다시 처리하지 않는다.
+     *
+     * 생성 중에 부르면 토큰을 뽑는 도중에 기록이 지워져 위치가 어긋나므로 거부한다.
+     * 호출하는 쪽이 이전 생성이 끝난 뒤([State.ModelReady])에 불러야 한다.
+     */
+    override suspend fun resetConversation(): Unit =
+        withContext(llamaDispatcher) {
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Cannot reset conversation in ${_state.value.javaClass.simpleName}!"
+            }
+            resetConversationNative().let { result ->
+                check(result == 0) { "Cannot reset conversation before the system prompt is processed ($result)" }
+            }
+            Log.i(TAG, "Conversation reset (system prompt kept)")
         }
 
     /**

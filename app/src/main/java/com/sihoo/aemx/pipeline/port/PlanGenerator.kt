@@ -26,16 +26,13 @@ interface PlanGenerator {
  *
  * ## 대화 히스토리에 관하여
  *
- * 현재 `InferenceEngine` 에는 히스토리를 비우는 API 가 없다.
- * `setSystemPrompt()` 는 `check(_readyForSystemPrompt)` 때문에 **모델 로드 직후 한 번만**
- * 호출할 수 있고, 이후 모든 `sendUserPrompt()` 는 네이티브 KV 캐시에 계속 쌓인다.
+ * `InferenceEngine.resetConversation()` 이 시스템 프롬프트는 두고 그 뒤의 대화 기록(KV 캐시와
+ * 채팅 목록)만 비운다. 시스템 프롬프트를 다시 처리하지 않아 비용이 거의 없다.
  *
- * 그래서 [Mode.INITIAL] 은 "히스토리를 비웠다"를 보장하지 못하고,
- * "이 요청은 앞선 명령과 무관하다"는 **의도 표시**일 뿐이다.
- * 어댑터는 엔진이 리셋을 지원하면 리셋하고, 아니면 프롬프트를 자기완결적으로 구성해
- * 앞 대화의 영향을 줄이는 식으로 최선을 다한다.
- *
- * 근본 해결은 LLM 파트에 `resetContext()` 를 추가하는 것이다(팀 확인 필요).
+ * 어댑터(`LlamaPlanGenerator`)는 [Mode.INITIAL] 과 [Mode.REPLAN] 요청 전에 이를 부른다.
+ * REPLAN 프롬프트는 원래 명령, 지금까지 한 것, 현재 화면을 모두 담은 자기완결형이라 이전
+ * 대화가 필요 없다. [Mode.REPAIR_JSON] 은 비우지 않는다. 프롬프트에 깨진 응답이 없어서
+ * 기록에 남은 직전 답을 봐야 형식만 고칠 수 있다.
  */
 data class PlanRequest(
     val utterance: String,

@@ -30,11 +30,14 @@ import java.net.URL
  * 화면 쪽에서 진행 상황을 사용자에게 보여 줘야 한다.
  */
 class LlamaPlanGenerator(
-    private val context: Context
+    private val context: Context,
+    engineFactory: (Context) -> InferenceEngine = { AiChat.getInferenceEngine(it.applicationContext) }
 ) : PlanGenerator {
 
-    private val engine: InferenceEngine by lazy { AiChat.getInferenceEngine(context.applicationContext) }
-    private var prepared = false
+    private val engine: InferenceEngine by lazy { engineFactory(context) }
+
+    /** 테스트에서 모델 준비(다운로드, 로딩)를 건너뛰고 생성 경로만 확인하려고 열어 둔다. */
+    internal var prepared = false
 
     override fun isReady(): Boolean = prepared && engine.state.value.isModelLoaded
 
@@ -61,6 +64,16 @@ class LlamaPlanGenerator(
 
     override suspend fun generate(request: PlanRequest): PlanResult {
         if (!isReady()) return PlanResult.EngineError("모델이 아직 준비되지 않았다")
+
+        // 명령마다 대화 기록이 쌓이면 프롬프트 처리가 느려지고 이전 명령의 영향을 받는다(#15).
+        // 시스템 프롬프트는 남기고 그 뒤만 비우므로 시스템 프롬프트를 다시 처리하지 않는다.
+        if (shouldResetConversation(request.mode)) {
+            try {
+                engine.resetConversation()
+            } catch (e: Exception) {
+                return PlanResult.EngineError(e.message ?: e::class.java.simpleName)
+            }
+        }
 
         val prompt = buildPrompt(request)
         Log.i(TAG, "프롬프트(${request.mode}): $prompt")
@@ -216,6 +229,18 @@ class LlamaPlanGenerator(
     }
 
     companion object {
+        /**
+         * 요청 전에 대화 기록을 비울지.
+         *
+         * INITIAL 은 새 명령이라 비운다. REPLAN 도 비운다. 프롬프트에 원래 명령, 지금까지 한 것,
+         * 문제, 현재 화면이 다 들어 있어서 이전 대화가 없어도 되고, 남기면 재분석이 이어질수록
+         * 문맥이 길어져 응답이 느려지며 직전 답의 형식에 끌린다.
+         * REPAIR_JSON 은 비우지 않는다. 프롬프트에 깨진 응답이 없어서 기록에 남은 직전 답을
+         * 봐야 형식만 고칠 수 있다.
+         */
+        internal fun shouldResetConversation(mode: PlanRequest.Mode): Boolean =
+            mode != PlanRequest.Mode.REPAIR_JSON
+
         private const val TAG = "LlamaPlanGenerator"
 
         private const val MAX_SCREEN_TEXTS = 20
