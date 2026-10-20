@@ -31,6 +31,8 @@
     <string name="pipeline_command_label">음성 명령 (STT 결과 대신 직접 입력)</string>
     <string name="pipeline_sample_command">알라딘에서 로그인하고 싶어</string>
     <string name="pipeline_run">실행</string>
+    <string name="pipeline_auto_run">말하면 바로 실행</string>
+    <string name="pipeline_auto_run_busy">실행 중이라 새 명령을 무시했습니다: %1$s</string>
     <string name="pipeline_state_idle">대기 중</string>
     <string name="pipeline_use_real_llm">진짜 LLM 사용 (최초 1회 모델 1.2GB 다운로드, Wi-Fi 권장)</string>
     <string name="pipeline_llm_ready">LLM 준비 완료. 명령을 실행하세요.</string>

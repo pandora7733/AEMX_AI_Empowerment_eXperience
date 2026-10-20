@@ -134,7 +134,7 @@ enum class KnownSituation(
 
     /** 이 상황으로 판단한 근거를 사람이 읽을 수 있게. */
     fun reason(screen: ScreenSnapshot): String {
-        val hit = keywords.firstOrNull { screen.containsText(it) }
+        val hit = keywords.firstOrNull { matches(screen, it) }
         val label = when (this) {
             LOGIN_FAILED -> "로그인이 실패한 것으로 보인다"
             ALREADY_LOGGED_IN -> "이미 로그인된 상태로 보인다"
@@ -152,6 +152,37 @@ enum class KnownSituation(
         fun detect(screen: ScreenSnapshot, includeLogin: Boolean = true): KnownSituation? =
             entries.filter { includeLogin || !it.loginRelated }
                 .sortedByDescending { it.requiresHuman }
-                .firstOrNull { situation -> situation.keywords.any { screen.containsText(it) } }
+                .firstOrNull { situation -> situation.keywords.any { matches(screen, it) } }
+
+        /**
+         * 키워드가 화면에 있는지.
+         *
+         * 영문 키워드는 앞뒤가 영문자가 아닐 때만 맞는 단어 경계로 찾는다. 부분 문자열로 찾으면
+         * "footprint", "hotpot" 에 "otp" 가 걸려 멀쩡한 화면에서 사람에게 넘어간다.
+         * 한글 키워드는 붙여 쓰는 일이 많아("보안문자를입력") 경계를 두면 오히려 놓치므로
+         * [ScreenSnapshot.containsText] 의 부분 문자열 일치를 그대로 쓴다.
+         * 대소문자는 둘 다 무시한다.
+         */
+        internal fun matches(screen: ScreenSnapshot, keyword: String): Boolean {
+            val word = keyword.trim()
+            if (word.isEmpty()) return false
+            if (!word.all { it.code < 128 }) return screen.containsText(word)
+            return screen.texts.any { containsWord(it, word) } ||
+                screen.clickableLabels.any { containsWord(it, word) }
+        }
+
+        private fun containsWord(text: String, word: String): Boolean {
+            var from = 0
+            while (true) {
+                val at = text.indexOf(word, from, ignoreCase = true)
+                if (at < 0) return false
+                val before = text.getOrNull(at - 1)
+                val after = text.getOrNull(at + word.length)
+                if (!isAsciiLetter(before) && !isAsciiLetter(after)) return true
+                from = at + 1
+            }
+        }
+
+        private fun isAsciiLetter(c: Char?): Boolean = c != null && (c in 'a'..'z' || c in 'A'..'Z')
     }
 }

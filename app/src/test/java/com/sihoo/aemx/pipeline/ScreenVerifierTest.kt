@@ -157,4 +157,43 @@ class ScreenVerifierTest {
     fun `평범한 화면에서는 아무 상황도 탐지되지 않는다`() {
         assertNull(KnownSituation.detect(screen("베스트셀러", "신간", "장바구니")))
     }
+
+    @Test
+    fun `영문 단어 안에 키워드가 끼어 있으면 캡차로 보지 않는다`() {
+        assertNull(KnownSituation.detect(screen("Footprint", "hotpot", "Otpusk"), includeLogin = false))
+    }
+
+    @Test
+    fun `OTP 인증번호 입력 화면은 캡차로 본다`() {
+        val situation = KnownSituation.detect(screen("OTP 인증번호 입력"), includeLogin = false)
+        assertEquals(KnownSituation.HUMAN_VERIFICATION, situation)
+        // 한글 없이 OTP 만 따로 있어도 단어로 보인다.
+        assertEquals(
+            KnownSituation.HUMAN_VERIFICATION,
+            KnownSituation.detect(screen("Enter OTP:"), includeLogin = false)
+        )
+    }
+
+    @Test
+    fun `한글 키워드는 붙여 써도 찾는다`() {
+        assertEquals(
+            KnownSituation.HUMAN_VERIFICATION,
+            KnownSituation.detect(screen("보안문자를입력해주세요"), includeLogin = false)
+        )
+    }
+
+    @Test
+    fun `로그인 step 에 Log out 버튼이 있으면 이미 로그인된 상태로 본다`() {
+        val login = ActionStep(index = 0, action = ActionType.TAP, target = "로그인")
+        val verdict = ScreenVerifier.verify(
+            Expectation.NONE,
+            before = screen("홈"),
+            after = ScreenSnapshot("com.example", "Main", texts = listOf("Home"), clickableLabels = listOf("Log out")),
+            loginRelated = ScreenVerifier.isLoginStep(login)
+        )
+        assertEquals(
+            KnownSituation.ALREADY_LOGGED_IN,
+            (verdict as ScreenVerifier.Verdict.Mismatch).situation
+        )
+    }
 }

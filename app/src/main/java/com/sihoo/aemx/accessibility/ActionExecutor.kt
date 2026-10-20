@@ -13,6 +13,8 @@ internal class ActionExecutor(
     private val handler = Handler(Looper.getMainLooper())
     private val appLauncher = AppLauncher(service)
     private var executionId = 0L
+    // 메인 스레드에서 바뀌고 다른 스레드(파이프라인)가 읽는다.
+    @Volatile
     var isRunning = false
         private set
     private var lastTreeChange = 0L

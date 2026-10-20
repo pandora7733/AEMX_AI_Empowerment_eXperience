@@ -27,6 +27,8 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         ttsController = AndroidTtsController(applicationContext) { }
     }
 
+    private fun isExecutorRunning(): Boolean = ::executor.isInitialized && executor.isRunning
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (::executor.isInitialized) executor.onAccessibilityTreeChanged()
     }
@@ -130,5 +132,8 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         }
 
         fun isConnected(): Boolean = activeService?.get() != null
+
+        /** 서비스가 지금 계획을 실행 중인지. 서비스가 없거나 아직 준비 전이면 false. 읽기 전용이다. */
+        fun isPlanRunning(): Boolean = activeService?.get()?.isExecutorRunning() == true
     }
 }

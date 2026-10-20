@@ -125,7 +125,11 @@ class SherpaSpeechSource(
         recognizer = null
     }
 
+    /** 화자 확인을 건너뛴 이유 중 이미 경고로 남긴 것. 듣기 한 번에 한 번만 남기려고 둔다. */
+    private val warnedSkipReasons = mutableSetOf<String>()
+
     private fun listen(engine: OnlineRecognizer) {
+        warnedSkipReasons.clear()
         // 핫워드는 스트림을 만들 때 넘긴다. 파일이 아니라 문자열로 준다.
         val stream = engine.createStream(HOTWORDS)
         val buffer = ShortArray((READ_INTERVAL_SECONDS * SAMPLE_RATE).toInt())
@@ -271,7 +275,15 @@ class SherpaSpeechSource(
     /** 등록된 목소리인지. 확인이 꺼져 있거나 등록이 없으면 항상 통과시킨다. */
     private fun isOwner(voice: FloatArray, text: String): Boolean {
         val verifier = speakerVerifier
-        if (!requireOwnerVoice || verifier == null || !verifier.isEnrolled) return true
+        if (!requireOwnerVoice) return true
+        if (verifier == null || !verifier.isEnrolled) {
+            // 켰는데도 확인이 안 되는 경우다. 말이 그대로 통과해서 겉으로는 티가 나지 않는다.
+            val reason = if (verifier == null) "화자 확인기가 없다" else "등록된 목소리가 없다"
+            if (warnedSkipReasons.add(reason)) {
+                Log.w(TAG, "내 목소리만 듣기가 켜져 있지만 화자 확인을 건너뛴다: $reason")
+            }
+            return true
+        }
 
         val score = verifier.score(voice)
         val pass = score != null && score >= verifier.threshold

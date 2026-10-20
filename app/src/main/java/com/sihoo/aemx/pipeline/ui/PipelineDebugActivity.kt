@@ -87,6 +87,7 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var listenButton: Button
     private lateinit var wakeWordSwitch: CheckBox
     private lateinit var ownerOnlySwitch: CheckBox
+    private lateinit var autoRunSwitch: CheckBox
     private lateinit var enrollButton: Button
     private val verifier by lazy { SpeakerVerifier(applicationContext) }
     private val enrolledVoices = ArrayList<FloatArray>()
@@ -141,6 +142,9 @@ class PipelineDebugActivity : AppCompatActivity() {
         val needWake = wakeWordSwitch.isChecked
         gate?.required = needWake
         source.useVad = needWake
+        // 체크박스 리스너는 바꾸는 순간에만 값을 넣는다. 듣기를 켜기 전에 체크했거나 speech 를 새로
+        // 만든 경우에 값이 빠지지 않게, 시작할 때마다 현재 값을 넣는다.
+        source.requireOwnerVoice = ownerOnlySwitch.isChecked
 
         // 준비하는 동안 다시 눌리면 녹음이 두 번 열린다. 버튼을 막아 둔다.
         listenButton.isEnabled = false
@@ -216,6 +220,28 @@ class PipelineDebugActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 명령을 처리하는 중인지. 오케스트레이터가 바쁘거나 실제 기기 경로가 계획을 만드는 중이면 실행 버튼이
+     * 막히고, 계획을 서비스에 넘긴 뒤 실행하는 동안은 서비스의 실행 상태로 안다.
+     */
+    private fun isRunning(): Boolean =
+        !runButton.isEnabled || orchestrator.isBusy || AemxAccessibilityService.isPlanRunning()
+
+    /** 선택된 경로(오케스트레이터, 실제 기기, 가짜)로 명령을 실행한다. 실행 버튼과 "말하면 바로 실행"이 같이 쓴다. */
+    private fun runCommand(command: String) {
+        if (orchestratorSwitch.isChecked) {
+            runViaOrchestrator(command)
+            return
+        }
+        if (realExecutorSwitch.isChecked) {
+            runOnDevice(command)
+            return
+        }
+        // 진짜 LLM 은 준비 비용이 커서 매번 다시 만들지 않고 계속 쓴다.
+        if (!realLlmSwitch.isChecked) resetPipeline()
+        orchestrator.submit(command)
+    }
+
     private fun render(result: SpeechResult) {
         when (result) {
             // 중간 결과는 보여 주기만 한다. 아직 말이 끝나지 않았다.
@@ -223,6 +249,14 @@ class PipelineDebugActivity : AppCompatActivity() {
             is SpeechResult.Final -> {
                 commandInput.setText(result.text)
                 stateView.text = "들은 말: ${result.text}"
+                if (autoRunSwitch.isChecked) {
+                    // 실행 중에 온 명령은 실행 버튼과 똑같이 무시하되, 왜 안 도는지 알린다.
+                    if (isRunning()) {
+                        stateView.text = getString(R.string.pipeline_auto_run_busy, result.text)
+                    } else {
+                        runCommand(result.text)
+                    }
+                }
             }
             is SpeechResult.Error -> stateView.text = result.message
         }
@@ -518,22 +552,15 @@ class PipelineDebugActivity : AppCompatActivity() {
 
             runButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_run)
-                setOnClickListener {
-                    val command = commandInput.text?.toString().orEmpty()
-                    if (orchestratorSwitch.isChecked) {
-                        runViaOrchestrator(command)
-                        return@setOnClickListener
-                    }
-                    if (realExecutorSwitch.isChecked) {
-                        runOnDevice(command)
-                        return@setOnClickListener
-                    }
-                    // 진짜 LLM 은 준비 비용이 커서 매번 다시 만들지 않고 계속 쓴다.
-                    if (!realLlmSwitch.isChecked) resetPipeline()
-                    orchestrator.submit(command)
-                }
+                setOnClickListener { runCommand(commandInput.text?.toString().orEmpty()) }
             }
             addView(runButton, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            // AEMX: 켜면 음성 최종 결과가 오는 대로 실행 버튼과 같은 경로로 실행한다. 기본은 꺼짐.
+            autoRunSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_auto_run)
+            }
+            addView(autoRunSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
             wakeWordSwitch = CheckBox(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_use_wake_word)
