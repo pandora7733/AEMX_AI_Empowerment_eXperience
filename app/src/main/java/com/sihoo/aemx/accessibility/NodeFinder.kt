@@ -186,7 +186,7 @@ internal object NodeFinder {
      *       ViewGroup  cd="사이트 방문"  (누를 수 있음)
      *
      * 즉 광고 표시는 **항목을 감싸는 조상**에 붙고, 항목 자신의 설명에는 제목만 들어 있다.
-     * 그래서 조상만 본다. 예전에는 항목 자신과 그 아래를 전부 훑었는데, 제목에 "광고"가
+     * 그래서 조상과, 항목 안에 따로 붙은 배지(라벨 전체가 정확히 일치할 때만)를 본다. 예전에는 항목 자신과 그 아래를 전부 훑었는데, 제목에 "광고"가
      * 들어간 멀쩡한 영상("추억의 TV 광고 모음")까지 광고로 걸러졌다(이슈 #13).
      *
      * 조상을 끝까지 올라가지 않고 몇 단계로 끊는 이유는, 더 올라가면 결과 목록이나 창
@@ -199,6 +199,30 @@ internal object NodeFinder {
         while (ancestor != null && hops++ < AD_ANCESTOR_HOPS) {
             if (hasAdLabel(ancestor)) return true
             ancestor = ancestor.parent
+        }
+        return hasAdBadgeInside(item)
+    }
+
+    /**
+     * 항목 안에 "광고" 같은 배지가 따로 있는지 본다.
+     *
+     * 항목 자신의 content-desc(제목)는 보지 않는다. 자식 노드 중 라벨 전체가 표시 문구와 정확히
+     * 같은 것만 인정해서, 제목에 "광고"가 들어간 일반 영상은 걸리지 않는다. 배지는 항목 바로 아래
+     * 몇 단계에 있고, 더 깊이 내려가면 비용만 늘어서 [AD_BADGE_DEPTH] 로 끊는다.
+     */
+    private fun hasAdBadgeInside(item: AccessibilityNodeInfo): Boolean {
+        var level = listOf(item)
+        repeat(AD_BADGE_DEPTH) {
+            val next = ArrayList<AccessibilityNodeInfo>()
+            for (parent in level) {
+                for (index in 0 until parent.childCount) {
+                    val child = parent.getChild(index) ?: continue
+                    val labels = listOfNotNull(child.text?.toString(), child.contentDescription?.toString())
+                    if (labels.any { raw -> AD_BADGES.any { raw.trim().equals(it, ignoreCase = true) } }) return true
+                    next += child
+                }
+            }
+            level = next
         }
         return false
     }
@@ -230,6 +254,12 @@ internal object NodeFinder {
 
     /** 광고 표시를 찾아 조상을 몇 단계까지 올라갈지. 실기기에서는 한 단계면 닿는다. */
     private const val AD_ANCESTOR_HOPS = 4
+
+    /** 항목 안에 따로 붙는 배지의 라벨. 정확히 같을 때만 광고로 본다("Ad" 는 접두어로는 너무 흔해 여기서만 쓴다). */
+    private val AD_BADGES = listOf("광고", "스폰서", "프로모션", "Sponsored", "Ad")
+
+    /** 항목 아래로 배지를 찾아 내려갈 단계 수. */
+    private const val AD_BADGE_DEPTH = 3
 
     /** 유튜브가 광고 항목에 붙이는 표시. 앱 업데이트로 문구가 바뀌면 여기를 고친다. */
     private val AD_MARKERS = listOf("스폰서", "sponsored", "광고", "프로모션")

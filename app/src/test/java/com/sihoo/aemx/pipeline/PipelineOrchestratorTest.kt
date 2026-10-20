@@ -11,6 +11,7 @@ import com.sihoo.aemx.pipeline.port.PlanRequest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -136,6 +137,58 @@ class PipelineOrchestratorTest {
         assertEquals("10s", next.delay)
     }
 
+    @Test
+    fun `scroll 은 target 의 방향대로 위나 아래로 보낸다`() = runTest {
+        val expected = mapOf(
+            "up" to ActionExecutor.Command.Direction.UP,
+            "UP" to ActionExecutor.Command.Direction.UP,
+            "backward" to ActionExecutor.Command.Direction.UP,
+            "위" to ActionExecutor.Command.Direction.UP,
+            "down" to ActionExecutor.Command.Direction.DOWN,
+            "forward" to ActionExecutor.Command.Direction.DOWN,
+            "아래" to ActionExecutor.Command.Direction.DOWN
+        )
+        for ((target, direction) in expected) {
+            val plan = """{"app":"유튜브","steps":[{"action":"scroll","target":"$target"}]}"""
+            val observer = FakeScreenObserver(snapshot("목록"))
+            val executor = ScriptedExecutor(observer, listOf(snapshot("스크롤한 목록")))
+            val orchestrator = build(FakePlanGenerator(listOf(plan)), executor, observer)
+
+            orchestrator.submit("스크롤 해줘")
+            advanceUntilIdle()
+
+            val scroll = executor.performed.filterIsInstance<ActionExecutor.Command.Scroll>().single()
+            assertEquals("target=$target", direction, scroll.direction)
+        }
+    }
+
+    @Test
+    fun `wait 는 value 의 시간만큼 실제로 기다린다`() = runTest {
+        val plan = """{"app":"유튜브","steps":[{"action":"wait","value":"10s"}]}"""
+        val observer = FakeScreenObserver(snapshot("쇼츠"))
+        val executor = ScriptedExecutor(observer, emptyList())
+        val orchestrator = build(FakePlanGenerator(listOf(plan)), executor, observer)
+
+        orchestrator.submit("10초 기다려")
+        advanceUntilIdle()
+
+        assertTrue("상태가 ${orchestrator.state.value} 였다", orchestrator.state.value is PipelineState.Finished)
+        assertTrue("가상 시간이 ${currentTime}ms 만 흘렀다", currentTime >= 10_000L)
+        assertTrue("대기는 실행모듈에 넘기지 않는다", executor.performed.isEmpty())
+    }
+
+    @Test
+    fun `wait 는 value 가 없으면 target 으로 시간을 읽는다`() = runTest {
+        val plan = """{"app":"유튜브","steps":[{"action":"wait","target":"3"}]}"""
+        val observer = FakeScreenObserver(snapshot("쇼츠"))
+        val orchestrator = build(FakePlanGenerator(listOf(plan)), ScriptedExecutor(observer, emptyList()), observer)
+
+        orchestrator.submit("3초 기다려")
+        advanceUntilIdle()
+
+        assertTrue("가상 시간이 ${currentTime}ms 만 흘렀다", currentTime >= 3_000L)
+    }
+
     // ------------------------------------------------------------- 재분석
 
     @Test
@@ -177,28 +230,27 @@ class PipelineOrchestratorTest {
     }
 
     @Test
-    fun `로그인 실패 팝업을 만나면 재분석한다`() = runTest {
-        val observer = FakeScreenObserver(snapshot("아이디", "비밀번호"))
+    fun `엉뚱한 앱 화면이 뜨면 불일치로 보고 재분석한다`() = runTest {
+        // 실행은 됐지만 기대한 앱(알라딘)이 아니라 다른 앱 화면이 떴다.
+        val observer = FakeScreenObserver(snapshot("홈", pkg = "com.android.launcher"))
         val executor = ScriptedExecutor(
             observer,
             listOf(
-                snapshot("비밀번호가 올바르지 않습니다", "확인"),   // 로그인 눌렀더니 실패 팝업
-                snapshot("아이디", "비밀번호")                    // 확인 누르고 복귀
+                snapshot("광고", pkg = "com.example.fake.other"),   // 앱 실행했더니 다른 앱
+                snapshot("알라딘", "베스트셀러")                      // 다시 실행해서 알라딘
             )
         )
-        val planner = FakePlanGenerator(
-            listOf(
-                """{"app": "알라딘", "steps": [{"action": "tap", "target": "로그인"}]}""",
-                """{"app": "알라딘", "steps": [{"action": "tap", "target": "확인"}]}"""
-            )
-        )
+        val openAladin = """{"app": "알라딘", "steps": [{"action": "open_app", "target": "알라딘"}]}"""
+        val planner = FakePlanGenerator(listOf(openAladin, openAladin))
         val orchestrator = build(planner, executor, observer)
 
-        orchestrator.submit("알라딘에서 로그인하고 싶어")
+        orchestrator.submit("알라딘 열어줘")
         advanceUntilIdle()
 
         assertEquals(2, planner.requests.size)
-        assertTrue(planner.requests[1].reason!!.contains("로그인이 실패"))
+        assertEquals(PlanRequest.Mode.REPLAN, planner.requests[1].mode)
+        assertTrue(planner.requests[1].reason!!.contains("기대했는데"))
+        assertTrue(orchestrator.state.value is PipelineState.Finished)
     }
 
     @Test
@@ -258,7 +310,7 @@ class PipelineOrchestratorTest {
         val observer = FakeScreenObserver(snapshot("화면0"))
         val executor = ScriptedExecutor(
             observer,
-            (1..10).map { snapshot("화면$it", "로그아웃") }   // 계속 ALREADY_LOGGED_IN 으로 걸린다
+            List(10) { null }   // 누를 때마다 화면이 그대로라 계속 기대가 어긋난다
         )
         val planner = FakePlanGenerator(
             List(10) { """{"app": "알라딘", "steps": [{"action": "tap", "target": "로그인"}]}""" }

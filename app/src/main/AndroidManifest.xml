@@ -20,8 +20,13 @@
         <package android:name="com.instagram.android" />
     </queries>
 
+    <!--
+        자동 백업은 끈다(이슈 #16). files/models/ 의 모델(1.2GB)은 앱당 25MB 한도를 넘어 백업 전체가
+        건너뛰어지게 만들고, 화자 등록(aemx_speaker)은 목소리 특징이라 "기기 밖으로 보내지 않는다"는
+        방침과 맞지 않는다. 아래 규칙 파일에도 같은 항목을 제외해 두었다.
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -54,16 +59,7 @@
 
         <activity android:name=".accessibility.ActionPlanActivity" android:exported="false" />
 
-        <!--
-            개발용 화면이라 런처에는 띄우지 않는다(아이콘이 두 개가 되고 Run 대상이
-            모호해짐). 실행은 아래 명령으로 한다.
-              adb shell am start -n com.sihoo.aemx/.pipeline.ui.PipelineDebugActivity
-        -->
-        <activity
-            android:name=".pipeline.ui.PipelineDebugActivity"
-            android:exported="true"
-            android:label="@string/pipeline_title"
-            android:windowSoftInputMode="adjustResize" />
+        <!-- 개발용 화면(PipelineDebugActivity)은 릴리스에 넣지 않는다. src/debug/AndroidManifest.xml 에 있다. -->
 
         <service
             android:name=".accessibility.AemxAccessibilityService"

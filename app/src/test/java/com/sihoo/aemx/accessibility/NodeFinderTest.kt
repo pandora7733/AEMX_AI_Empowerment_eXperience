@@ -73,6 +73,18 @@ class NodeFinderTest {
     }
 
     @Test
+    fun `항목 안에 광고 배지가 있으면 건너뛴다`() {
+        // 이슈 #13 제안: 항목 컨테이너 안의 짧은 배지 텍스트만 본다. 제목은 보지 않는다.
+        val advert = videoItem("노트북 특가 모음").with(node("광고"))
+        val video = videoItem("귀여운 고양이 모음")
+        val root = node().with(advert, video)
+
+        val found = NodeFinder.findFirstPlayable(root)
+
+        assertEquals("귀여운 고양이 모음 - 3분 12초 - 동영상 재생", found?.contentDescription)
+    }
+
+    @Test
     fun `제목에 shorts가 들어가도 일반 영상으로 본다`() {
         // 같은 이슈. Shorts 판정도 제목이 아니라 꼬리말로 해야 한다.
         val root = node().with(

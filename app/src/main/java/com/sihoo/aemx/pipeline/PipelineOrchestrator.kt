@@ -1,5 +1,6 @@
 package com.sihoo.aemx.pipeline
 
+import com.sihoo.aemx.accessibility.WaitDuration
 import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ActionStep
 import com.sihoo.aemx.pipeline.model.ActionType
@@ -24,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -268,8 +270,18 @@ class PipelineOrchestrator(
     private suspend fun performAndVerify(step: ActionStep, appName: String): StepOutcome {
         val before = screenObserver.capture() ?: ScreenSnapshot.EMPTY
 
-        // WAIT 은 실행모듈이 할 일이 없다. 화면이 잠잠해지기만 기다린다.
-        if (step.action != ActionType.WAIT) {
+        // WAIT 은 실행모듈에 넘기지 않고 여기서 직접 기다린다. 실행모듈의 WaitDuration 과 같은
+        // 규칙(정수는 초, ms/s 단위, 최대 30초)으로 읽는다. 오케스트레이터가 기다리는 이유는
+        // 기다리는 동안 화면을 보고 있는 쪽이 여기라서이고, 코루틴 delay 라 가상 시간 테스트가
+        // 된다. 다 기다린 뒤에는 아래 공통 경로로 화면이 잠잠해지기만 기다린다.
+        if (step.action == ActionType.WAIT) {
+            val waitMs = try {
+                WaitDuration.millis(step.value ?: step.target.orEmpty())
+            } catch (e: IllegalArgumentException) {
+                return StepOutcome.Mismatch(before, "대기 시간을 읽지 못했다: ${e.message}")
+            }
+            delay(waitMs)
+        } else {
             val command = when (val mapped = toCommand(step, appName)) {
                 is CommandMapping.Ready -> mapped.command
                 is CommandMapping.Rejected -> return mapped.outcome(before)
@@ -306,7 +318,7 @@ class PipelineOrchestrator(
         val settle = awaitSettle(step.timeoutMs, before)
         val after = settle.snapshot
 
-        return when (val verdict = ScreenVerifier.verify(step.expect, before, after, ScreenVerifier.isLoginStep(step))) {
+        return when (val verdict = ScreenVerifier.verify(step.expect, before, after)) {
             is ScreenVerifier.Verdict.Match -> StepOutcome.Success(after)
 
             is ScreenVerifier.Verdict.Mismatch -> when {
@@ -382,7 +394,10 @@ class PipelineOrchestrator(
             ActionType.SCROLL ->
                 CommandMapping.Ready(
                     ActionExecutor.Command.Scroll(
-                        if (step.target?.contains("위") == true ||
+                        // 새 스키마는 방향을 target 에 up/down/forward/backward 로 준다.
+                        // 앞 판정(target 의 "위", value 의 up)도 그대로 둔다.
+                        if (step.target?.trim()?.lowercase() in UP_TARGETS ||
+                            step.target?.contains("위") == true ||
                             step.value?.contains("up", ignoreCase = true) == true
                         ) {
                             ActionExecutor.Command.Direction.UP
@@ -521,5 +536,8 @@ class PipelineOrchestrator(
 
     private companion object {
         const val MAX_LOG_ENTRIES = 200
+
+        /** scroll 의 target 중 위쪽(되돌아가는) 방향. 나머지(down, forward)는 아래쪽이다. */
+        val UP_TARGETS = setOf("up", "backward")
     }
 }

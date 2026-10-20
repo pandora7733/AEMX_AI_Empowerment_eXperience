@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!--
+            개발용 화면이라 디버그 빌드에만 넣는다(이슈 #16). 런처에는 띄우지 않는다(아이콘이
+            두 개가 되고 Run 대상이 모호해짐). 실행은 아래 명령으로 한다.
+              adb shell am start -n com.sihoo.aemx/.pipeline.ui.PipelineDebugActivity
+        -->
+        <activity
+            android:name=".pipeline.ui.PipelineDebugActivity"
+            android:exported="true"
+            android:label="@string/pipeline_title"
+            android:windowSoftInputMode="adjustResize" />
+
+    </application>
+
+</manifest>

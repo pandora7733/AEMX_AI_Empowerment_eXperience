@@ -209,8 +209,7 @@ class MainActivity : AppCompatActivity() {
         private const val MODEL_URL =
             "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
 
-        // LLM/system_prompt.txt 와 동일한 내용 (PC에서 검증한 최종본).
-        // 프롬프트를 수정하면 반드시 두 곳(여기, system_prompt.txt) 모두 갱신할 것.
+        // 원본은 LLM/system_prompt.txt 이고 이것은 사본이다. 프롬프트를 고치면 원본을 먼저 고치고 여기도 맞출 것.
         private const val SYSTEM_PROMPT = """당신은 AEMX 앱의 의도분석 모듈입니다. 사용자의 한국어 명령을 받아 실행 가능한 단계별 작업 계획을 JSON으로만 출력하세요. 다른 설명은 절대 하지 마세요.
 
 중요: 검색어의 의미를 해석하거나 바꾸지 말고 사용자가 말한 핵심 단어를 그대로 사용하세요. 로그인, 아이디, 비밀번호, 결제 액션은 생성하지 마세요.

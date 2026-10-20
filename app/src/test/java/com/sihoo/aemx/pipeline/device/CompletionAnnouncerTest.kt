@@ -14,7 +14,8 @@ class CompletionAnnouncerTest {
         finished = "끝",
         failed = "실패",
         needsUser = "확인 필요",
-        needsSetup = "준비 필요"
+        needsSetup = "준비 필요",
+        replanning = "다시 시도"
     )
 
     private val screen = ScreenSnapshot(packageName = "pkg", className = null, texts = emptyList())
@@ -25,6 +26,12 @@ class CompletionAnnouncerTest {
         assertEquals("실패", announcementFor(PipelineState.Failed("이유"), texts))
         assertEquals("확인 필요", announcementFor(PipelineState.NeedsUser("캡차", screen), texts))
         assertEquals("준비 필요", announcementFor(PipelineState.NeedsSetup("서비스 꺼짐"), texts))
+    }
+
+    @Test
+    fun `재분석에 들어가면 다시 시도를 알린다`() {
+        assertEquals("다시 시도", announcementFor(PipelineState.Planning("유튜브 틀어줘", 1), texts))
+        assertEquals("다시 시도", announcementFor(PipelineState.Planning("유튜브 틀어줘", 3), texts))
     }
 
     @Test

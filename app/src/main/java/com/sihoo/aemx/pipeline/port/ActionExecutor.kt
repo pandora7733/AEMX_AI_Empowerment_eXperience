@@ -12,8 +12,8 @@ import com.sihoo.aemx.pipeline.model.ActionType
  *    화면이 기대대로 바뀌었는지는 판단하지 않는다.
  *
  * 2. **[Command] 는 [com.sihoo.aemx.pipeline.model.ActionStep] 이 아니다.**
- *    `input_credential` 은 오케스트레이터가 계정 저장소에서 실제 값을 꺼내
- *    [Command.InputText] 로 바꿔서 넘긴다. 실행모듈은 자격증명 조회를 하지 않는다.
+ *    오케스트레이터가 step 을 실행모듈이 이해하는 명령으로 바꿔서 넘긴다. 예를 들어
+ *    `open_app` 의 앱 이름은 패키지명으로 바뀐다.
  */
 interface ActionExecutor {
 

@@ -118,14 +118,10 @@ Shorts 는 다른 영상이 없을 때만 쓴다. 유튜브 앱이 업데이트�
 
 ### 3. 단위 테스트
 
-`./gradlew test` 가 모든 테스트 클래스에서 "실행 자체를 못 함"(ClassNotFoundException)
-으로 떨어진다. 컴파일은 통과하므로 실행 환경 쪽 문제로 보인다. 빌드 설정을 바꿔 보는
-실험(설정 캐시 끄기, Kotlin 플러그인 명시, 새 DSL 끄기, jvmTarget 맞추기)은 전부
-효과가 없어 되돌렸다.
-
-아직 안 해 본 것: 저장소를 한글이 없는 경로(`C:\aemx` 등)에 복사해서 거기서 돌려 본다.
-저장소 경로에 "AI 대회"가 들어가 있고 이 때문에 `android.overridePathCheck` 도 켜 둔
-상태라, 경로가 원인일 가능성이 남아 있다.
+한글 경로 때문에 단위 테스트가 실행되지 않던 문제는 원인이 확인되어 우회법이 있다
+(루트 README "자주 발생하는 문제", 이슈 #7). `subst X: "C:\경로\한글폴더"`로 드라이브를 붙인
+뒤 `gradlew.bat :app:testDebugUnitTest`를 돌리면 정상 실행된다. PR마다 GitHub Actions
+(`.github/workflows/test.yml`)가 같은 테스트를 돌린다.
 
 ---
 

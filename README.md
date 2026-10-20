@@ -1,8 +1,8 @@
 # AEMX
 
-AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하면 앱을 대신 조작해주는 접근성 도우미입니다. 현재 실행 계층은 온라인 서점 검색과 네이버·구글 검색, 유튜브 검색/재생, 유튜브 Shorts·인스타그램 릴스 이동을 목표로 하며 로그인·자격증명·결제 자동화는 범위에서 제외합니다.
+AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하면 앱을 대신 조작해주는 접근성 도우미입니다. 지금 동작하는 범위는 네이버·구글 검색, 유튜브 검색과 첫 영상 재생, 인스타그램 릴스 이동, 서점(교보문고·알라딘) 검색입니다. 로그인·자격증명·결제 자동화는 범위에서 제외합니다.
 
-아래 "프로젝트 현황"은 각 파트의 진행 상태를, 1장부터는 개발환경 구성 및 빌드 절차를 설명합니다.
+아래 "프로젝트 현황"은 파트 구성과 문서 위치를, 1장부터는 개발환경 구성 및 빌드 절차를 설명합니다. 진행 상황은 [CHECKLIST.md](CHECKLIST.md) 한 곳에서 관리합니다.
 
 ## 프로젝트 현황
 
@@ -14,51 +14,42 @@ AI Empowerment eXperience(AEMX) Android 프로젝트입니다. 말로 명령하�
                                                         [TTS] 결과 음성 안내
 ```
 
-### 파트별 상태
+### 파트별 문서
 
-| 파트 | 담당 | 상태 | 문서 |
-| --- | --- | --- | --- |
-| STT (음성 인식) | 배재준 | 완료 — sherpa-onnx 한국어 스트리밍 인식, 실기기 확인 | [STT/README.md](STT/README.md) |
-| TTS (음성 출력) | 공규태 | 완료 — Android TextToSpeech 한국어 재생 | [TTS/README.md](TTS/README.md) |
-| LLM (의도 분석) | 배재준 | 완료 — 온디바이스 Qwen3 1.7B, 실기기 확인 | [LLM/README.md](LLM/README.md) |
-| AccessibilityService (화면 조작) | 공규태 | 서점·검색·영상 실행 계층 구현 · 새 앱은 Galaxy S25+ 실기기 검증 필요 | [ACCESSIBILITY/README.md](ACCESSIBILITY/README.md) |
-| 파이프라인 연결 + 오류 재분석 | 김정우 | 진행 예정 | [TASK_김정우.md](TASK_김정우.md) |
-
-STT·TTS·LLM은 각각 독립 실행형으로 동작 검증까지 끝났고, `main`에 병합되어 있습니다. 아직 세 파트를 하나로 이어붙이지는 않았습니다.
-
-### LLM 실기기 테스트 결과 (갤럭시 S22 Ultra, Android 16)
-
-| 명령 | 응답 시간 | 결과 |
+| 파트 | 담당 | 문서 |
 | --- | --- | --- |
-| "알라딘에서 데미안 검색해줘" | 34.4초 | 정확 |
+| STT (음성 인식) | 배재준 | [STT/README.md](STT/README.md) |
+| TTS (음성 출력) | 공규태 | [TTS/README.md](TTS/README.md) |
+| LLM (의도 분석) | 배재준 | [LLM/README.md](LLM/README.md) |
+| AccessibilityService (화면 조작) | 공규태 | [ACCESSIBILITY/README.md](ACCESSIBILITY/README.md) |
+| 파이프라인 연결 + 오류 재분석 | 김정우 | [TASK_김정우.md](TASK_김정우.md) |
 
-초기에는 한 명령에 93초가 걸렸으나, Qwen3 thinking 모드가 75초를 차지하는 것을 확인하고 생각 토큰을 150개로 제한하여 약 3배 단축했습니다(정확도 손실 없음). 자세한 내용은 [LLM/README.md](LLM/README.md)를 참고합니다.
-
-에뮬레이터는 arm64 번역 오버헤드 때문에 추론 도중 앱이 강제 종료되므로, LLM 파트는 실기기에서 테스트해야 합니다.
+파트별 진행 상태와 남은 일, 실기기 측정 결과는 [CHECKLIST.md](CHECKLIST.md)에 있습니다.
 
 ### 폴더 구조
 
 ```text
 AEMX_AI_Empowerment_eXperience/
-├── app/          메인 앱 모듈 (com.sihoo.aemx) — TTS 및 접근성 실행 테스트 화면
+├── app/          메인 앱 모듈 (com.sihoo.aemx) — 파이프라인, 접근성 서비스, TTS
+├── llm-engine/   LLM 엔진 모듈 (소스는 LLM/LlamaDemo/lib 를 가리킨다)
+├── stt-engine/   STT 엔진 모듈 (소스는 STT/SherpaOnnx 를 가리킨다)
 ├── STT/          음성 인식 참고 프로젝트 (독립 실행형)
 ├── TTS/          음성 출력 파트 문서
 ├── LLM/          의도 분석 참고 프로젝트 (독립 실행형) + 프롬프트·빌드 스크립트
-├── ACCESSIBILITY/ 화면 조작 파트 문서 + 개발용 에뮬레이터 테스트 앱
+├── ACCESSIBILITY/ 화면 조작 파트 문서 + 개발용 기기 테스트 앱 (accessibility-device-tests)
 └── AEMX_upload/  제출용 자료
 ```
 
-모델 파일과 대용량 네이티브 라이브러리는 저장소에 커밋하지 않습니다. 각 파트의 setup 스크립트(`STT/setup_assets.sh`, `LLM/setup_llamademo.sh`)로 내려받습니다.
+모델 파일과 대용량 네이티브 라이브러리는 저장소에 커밋하지 않습니다. 각 파트의 setup 스크립트(`STT/setup_assets.sh`, `LLM/setup_llamademo.sh`)로 내려받습니다. 단위 테스트는 이 파일들 없이 돌아갑니다.
 
 ### 브랜치
 
 | 브랜치 | 용도 |
 | --- | --- |
-| `main` | STT + TTS + LLM 병합 완료 |
-| `feature/accessibility` | AccessibilityService 실행 모듈 (공규태) |
-| `feature/pipeline` | 파이프라인 연결 + 오류 재분석 (김정우) |
+| `integration` | 작업 브랜치. STT·LLM·파이프라인·실행모듈이 모두 합쳐져 있습니다 |
+| `main` | 안정판. integration이 검증되면 병합합니다 |
 
-작업은 각자 브랜치에서 진행하고, PR을 올려 팀 확인 후 `main`에 병합합니다.
+작업은 각자 브랜치에서 진행하고, PR을 올려 팀 확인 후 병합합니다. PR마다 GitHub Actions(`.github/workflows/test.yml`)가 단위 테스트를 돌립니다.
 
 LLM Action Plan을 실제 Android UI 조작으로 연결하는 실행 계층은
 [`ACCESSIBILITY/README.md`](ACCESSIBILITY/README.md)를 참고하세요.
@@ -74,10 +65,10 @@ LLM Action Plan을 실제 Android UI 조작으로 연결하는 실행 계층은
 | Android Gradle Plugin | 9.3.2 |
 | Gradle Wrapper | 9.5.0 |
 | compileSdk / targetSdk | Android API 37 |
-| minSdk | Android API 24 |
+| minSdk | Android API 28 |
 | Java 소스/타깃 호환성 | Java 11 |
 | 애플리케이션 ID | `com.sihoo.aemx` |
-| 모듈 | `app`, 개발용 `accessibility-device-tests` |
+| 모듈 | `app`, `llm-engine`, `stt-engine`, 개발용 `accessibility-device-tests` |
 
 `Java 소스/타깃 호환성`이 Java 11이라는 뜻과 Gradle을 실행하는 JVM의 버전은 서로 다릅니다. Gradle 9.5 및 최신 Android Gradle Plugin을 실행하려면 JDK 17 이상이 필요하며, 저장소의 `gradle/gradle-daemon-jvm.properties`에 지정된 JDK 25를 권장합니다.
 
@@ -254,7 +245,7 @@ Android Lint를 실행합니다.
 
 ## 8. 에뮬레이터 또는 실제 기기에서 설치
 
-Android Studio의 `Device Manager`에서 API 24 이상인 가상 기기를 만들고 실행합니다. 실제 기기를 사용하는 경우 개발자 옵션과 USB 디버깅을 활성화합니다.
+Android Studio의 `Device Manager`에서 API 28 이상인 가상 기기를 만들고 실행합니다. LLM은 arm64 실기기에서 확인해야 합니다. 실제 기기를 사용하는 경우 개발자 옵션과 USB 디버깅을 활성화합니다.
 
 연결 상태를 확인합니다.
 
@@ -291,6 +282,20 @@ Android Studio에서 SDK가 설치된 위치를 확인한 후 `local.properties`
 ### `failed to find target with hash android-37`가 발생하는 경우
 
 SDK Manager에서 Android SDK Platform 37을 설치한 후 Android Studio의 Gradle Sync 또는 빌드를 다시 실행합니다.
+
+### 저장소 경로에 한글이 있어서 단위 테스트가 실행되지 않는 경우
+
+경로에 한글이 섞여 있으면(예: `C:\AI 대회\AEMX...`) 빌드는 `android.overridePathCheck=true`로 되지만, 단위 테스트는 모든 클래스가 `ClassNotFoundException`으로 실행되지 않을 수 있습니다(이슈 #7). Windows에서는 다음 두 방법 중 하나로 우회합니다.
+
+첫째, 드라이브 문자를 붙여서 그 경로에서 실행합니다. 재부팅하면 `subst`는 사라지므로 다시 입력합니다.
+
+```bat
+subst X: "C:\경로\한글폴더"
+X:
+gradlew.bat :app:testDebugUnitTest
+```
+
+둘째, 한글이 없는 경로(예: `C:emx`)에 저장소를 다시 clone해서 거기서 실행합니다.
 
 ### 의존성 다운로드가 실패하는 경우
 

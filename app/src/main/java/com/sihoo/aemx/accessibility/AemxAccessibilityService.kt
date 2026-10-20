@@ -78,6 +78,8 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         // target/value는 사용자 입력일 수 있으므로 로그에 포함하지 않습니다.
         Log.e(TAG, "Action step ${index + 1} (${step.action.wireName}) failed: $message")
         status = "${index + 1}단계 실패: $message"
+        // 성공 안내와 같은 스위치를 따른다. 오케스트레이터 경로(false)는 최종 결과를 따로 말한다.
+        if (announceCompletion) ttsController?.speak("화면 조작을 하지 못했습니다. 화면을 확인해 주세요")
         observer?.invoke(PlanOutcome.Failed(index, step, message, screen))
     }
 

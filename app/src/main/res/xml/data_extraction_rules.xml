@@ -1,19 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+   API 31 이상용 규칙. backup_rules.xml 과 같은 이유로 모델과 화자 등록은 클라우드 백업과
+   기기 간 전송에서 뺀다.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="file" path="models/" />
+        <exclude domain="sharedpref" path="aemx_speaker.xml" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="file" path="models/" />
+        <exclude domain="sharedpref" path="aemx_speaker.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

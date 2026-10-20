@@ -1,7 +1,5 @@
 package com.sihoo.aemx.pipeline
 
-import com.sihoo.aemx.pipeline.model.ActionStep
-import com.sihoo.aemx.pipeline.model.ActionType
 import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import org.junit.Assert.assertEquals
@@ -65,71 +63,23 @@ class ScreenVerifierTest {
     // ------------------------------------------------ 흔한 실패 케이스
 
     @Test
-    fun `로그인 실패 팝업은 화면이 바뀌었어도 실패로 본다`() {
-        // 로그인 버튼을 눌러 화면은 분명히 바뀌었다(=requireScreenChange 는 만족).
-        // 그래도 실패 팝업이 떠 있으면 성공이 아니다.
-        val verdict = ScreenVerifier.verify(
-            Expectation(requireScreenChange = true),
-            before = screen("로그인", "아이디"),
-            after = screen("비밀번호가 올바르지 않습니다", "확인")
-        )
-        assertTrue(verdict is ScreenVerifier.Verdict.Mismatch)
-        assertEquals(
-            KnownSituation.LOGIN_FAILED,
-            (verdict as ScreenVerifier.Verdict.Mismatch).situation
-        )
-    }
-
-    @Test
-    fun `이미 로그인된 화면을 알아챈다`() {
-        val verdict = ScreenVerifier.verify(
-            Expectation.NONE,
-            before = screen("홈"),
-            after = screen("마이페이지", "로그아웃")
-        )
-        assertTrue(verdict is ScreenVerifier.Verdict.Mismatch)
-        assertEquals(
-            KnownSituation.ALREADY_LOGGED_IN,
-            (verdict as ScreenVerifier.Verdict.Mismatch).situation
-        )
-    }
-
-    @Test
-    fun `로그인과 상관없는 step 은 로그아웃 글자가 있어도 통과한다`() {
-        // 로그인한 네이버 앱 화면에는 "로그아웃" 이 늘 있다. open_app 검증이 이걸로 실패하면 안 된다.
-        val openApp = ActionStep(index = 0, action = ActionType.OPEN_APP, target = "네이버")
+    fun `로그아웃 글자가 있는 로그인된 화면은 정상으로 통과한다`() {
+        // 로그인한 네이버 앱 화면에는 "로그아웃" 이 늘 있다. 로그인은 범위 밖이라 이걸로 실패하면 안 된다.
         val naver = screen("검색", "로그아웃", "마이페이지", pkg = "com.nhn.android.search")
         val verdict = ScreenVerifier.verify(
             Expectation(packageName = "com.nhn.android.search"),
             before = screen("홈", pkg = "com.android.launcher"),
-            after = naver,
-            loginRelated = ScreenVerifier.isLoginStep(openApp)
+            after = naver
         )
         assertEquals(ScreenVerifier.Verdict.Match, verdict)
     }
 
     @Test
-    fun `로그인 step 은 로그아웃 글자가 있으면 이미 로그인된 상태로 본다`() {
-        val login = ActionStep(index = 0, action = ActionType.TAP, target = "로그인")
+    fun `캡차는 어떤 step 에서도 사람에게 넘긴다`() {
         val verdict = ScreenVerifier.verify(
             Expectation.NONE,
             before = screen("홈"),
-            after = screen("검색", "로그아웃"),
-            loginRelated = ScreenVerifier.isLoginStep(login)
-        )
-        assertEquals(
-            KnownSituation.ALREADY_LOGGED_IN,
-            (verdict as ScreenVerifier.Verdict.Mismatch).situation
-        )
-    }
-
-    @Test
-    fun `로그인과 상관없는 step 에서도 캡차는 사람에게 넘긴다`() {
-        val verdict = ScreenVerifier.verify(
-            Expectation.NONE,
-            before = screen("홈"),
-            after = screen("보안문자를 입력해 주세요", "로그아웃"),
-            loginRelated = false
+            after = screen("보안문자를 입력해 주세요", "로그아웃")
         )
         assertEquals(
             KnownSituation.HUMAN_VERIFICATION,
@@ -145,32 +95,23 @@ class ScreenVerifierTest {
     }
 
     @Test
-    fun `캡차와 로그인 실패가 같이 보이면 캡차가 이긴다`() {
-        // 둘 다 뜨는 화면에서 자동 재시도로 캡차를 뚫으려 들면 안 된다.
-        val situation = KnownSituation.detect(
-            screen("로그인에 실패했습니다", "보안문자를 입력해 주세요")
-        )
-        assertEquals(KnownSituation.HUMAN_VERIFICATION, situation)
-    }
-
-    @Test
     fun `평범한 화면에서는 아무 상황도 탐지되지 않는다`() {
         assertNull(KnownSituation.detect(screen("베스트셀러", "신간", "장바구니")))
     }
 
     @Test
     fun `영문 단어 안에 키워드가 끼어 있으면 캡차로 보지 않는다`() {
-        assertNull(KnownSituation.detect(screen("Footprint", "hotpot", "Otpusk"), includeLogin = false))
+        assertNull(KnownSituation.detect(screen("Footprint", "hotpot", "Otpusk")))
     }
 
     @Test
     fun `OTP 인증번호 입력 화면은 캡차로 본다`() {
-        val situation = KnownSituation.detect(screen("OTP 인증번호 입력"), includeLogin = false)
+        val situation = KnownSituation.detect(screen("OTP 인증번호 입력"))
         assertEquals(KnownSituation.HUMAN_VERIFICATION, situation)
         // 한글 없이 OTP 만 따로 있어도 단어로 보인다.
         assertEquals(
             KnownSituation.HUMAN_VERIFICATION,
-            KnownSituation.detect(screen("Enter OTP:"), includeLogin = false)
+            KnownSituation.detect(screen("Enter OTP:"))
         )
     }
 
@@ -178,22 +119,7 @@ class ScreenVerifierTest {
     fun `한글 키워드는 붙여 써도 찾는다`() {
         assertEquals(
             KnownSituation.HUMAN_VERIFICATION,
-            KnownSituation.detect(screen("보안문자를입력해주세요"), includeLogin = false)
-        )
-    }
-
-    @Test
-    fun `로그인 step 에 Log out 버튼이 있으면 이미 로그인된 상태로 본다`() {
-        val login = ActionStep(index = 0, action = ActionType.TAP, target = "로그인")
-        val verdict = ScreenVerifier.verify(
-            Expectation.NONE,
-            before = screen("홈"),
-            after = ScreenSnapshot("com.example", "Main", texts = listOf("Home"), clickableLabels = listOf("Log out")),
-            loginRelated = ScreenVerifier.isLoginStep(login)
-        )
-        assertEquals(
-            KnownSituation.ALREADY_LOGGED_IN,
-            (verdict as ScreenVerifier.Verdict.Mismatch).situation
+            KnownSituation.detect(screen("보안문자를입력해주세요"))
         )
     }
 }

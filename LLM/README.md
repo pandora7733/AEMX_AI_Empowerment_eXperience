@@ -6,7 +6,7 @@
 
 STT가 뽑아낸 자연어 명령을 "실행 가능한 작업계획(JSON)"으로 변환하는 온디바이스 LLM. 기존 서점 검색에 더해 네이버·구글 검색, 유튜브 검색/첫 영상 재생, 유튜브 Shorts·인스타그램 릴스의 다음 영상 이동 스키마를 반영했다. 로그인·자격증명·결제 액션은 제거했다. 새 프롬프트의 온디바이스 출력은 실기기 재검증이 필요하다.
 
-Android 앱(`LlamaDemo/`)도 세팅함 — llama.cpp 공식 Android 예제를 가져와서 우리 프롬프트/설정에 맞게 수정. 아직 실기기에서 직접 실행해서 확인은 안 함 (다음 단계). STT 결과 연결·AccessibilityService 실행 연결도 안 함.
+Android 앱(`LlamaDemo/`)도 세팅함 — llama.cpp 공식 Android 예제를 가져와서 우리 프롬프트/설정에 맞게 수정. 실기기(갤럭시 S25+)에서 직접 실행해 확인을 마쳤고, 메인 앱에는 `llm-engine` 모듈로 연결되어 STT와 실행모듈과 이어져 있다.
 
 ### 모델을 APK에 안 넣고 다운로드 방식으로 한 이유
 
@@ -86,10 +86,10 @@ LLM/
 └── LlamaDemo/                (Android 참고용 프로젝트 — llama.cpp 공식 예제를 우리 용도로 수정)
     ├── app/                  MainActivity: 명령 입력 → 실행계획 JSON 출력 화면
     └── lib/                  JNI 브릿지 (ai_chat.cpp) + Kotlin InferenceEngine API
-        └── src/main/jniLibs/arm64-v8a/libai-chat.so   (직접 컴파일한 결과물, 용량 작아서 git에 커밋해둠)
+        └── src/main/jniLibs/arm64-v8a/libai-chat.so, libc++_shared.so   (직접 컴파일한 결과물과 C++ 런타임, git에 커밋해둠)
 ```
 
-모델(1.2GB), llama.cpp 소스/큰 `.so`들은 용량 문제로 git에 커밋하지 않음 — 스크립트로 받을 것. `libai-chat.so`(수십 KB)만 예외적으로 커밋되어 있어서, **`setup_llamademo.sh`만 실행하면 CMake 없이 바로 빌드/실행 가능함.**
+모델(1.2GB), llama.cpp 소스/큰 `.so`들은 용량 문제로 git에 커밋하지 않음 — 스크립트로 받을 것. `libai-chat.so`(수십 KB)와 `libc++_shared.so`(약 9.2MB)는 예외적으로 커밋되어 있어서, **`setup_llamademo.sh`만 실행하면 CMake 없이 바로 빌드/실행 가능함.** `ai_chat.cpp`를 고쳤다면 `build_native.sh`로 `libai-chat.so`를 다시 만들어 커밋해야 한다. 안 그러면 고친 내용이 앱에 반영되지 않는다.
 
 ## 테스트 방법 (PC, 프롬프트만 빠르게 확인)
 
@@ -124,12 +124,12 @@ bash setup_llamademo.sh   # 최초 1회: llama.cpp 헤더 + 미리 빌드된 .so
   - **최종 해결**: CMake를 아예 포기함. `ai_chat.cpp` 하나뿐이라 **NDK의 `aarch64-linux-android33-clang++`를 직접 호출**해서 `libai-chat.so`를 만듦 (`LLM/build_native.sh`) — 이 방식은 매번 성공적으로 재현됐음 (문제는 CMake.exe 자체에 있었던 것으로 보임, NDK의 clang++ 자체는 멀쩡함). llama.cpp 본체는 STT 때(sherpa-onnx)처럼 **GitHub 릴리스의 미리 빌드된 `.so`를 그대로 링크** — 소스로 빌드하지 않음
   - 결과물 `libai-chat.so`는 수십 KB라 git에 커밋해둠 — **팀원들은 이 삽질을 다시 겪을 필요 없이 `setup_llamademo.sh`만 실행하면 바로 빌드됨** (`ai_chat.cpp`를 수정했을 때만 `build_native.sh`로 재컴파일 필요)
   - 대신 미리 빌드된 라이브러리가 **arm64-v8a(실기기)만 있어서 x86_64 에뮬레이터는 지원 안 함** — 이 프로젝트가 어차피 폰 중심이라 문제 없음
-  - 헤더(`.llama.cpp-src`)와 `.so`(GitHub 릴리스)는 정확히 같은 빌드 태그(`b11067`)로 맞춰뒀음 — 버전이 어긋나면 ABI 불일치로 이상하게 동작하거나 크래시할 수 있으니 업데이트할 때 주의
+  - 헤더(`.llama.cpp-src`)와 `.so`(GitHub 릴리스)는 정확히 같은 빌드 태그(`b11100`)로 맞춰뒀음(`setup_llamademo.sh`의 `LLAMA_CPP_TAG`). PC 시험용 llama-cli(`setup_llm.sh`)는 별개로 `b11067`이다 — 버전이 어긋나면 ABI 불일치로 이상하게 동작하거나 크래시할 수 있으니 업데이트할 때 주의
 - **결론적으로 이 프로젝트는 Android Studio GUI로 여는 게 제일 편함** — 터미널(headless gradlew)로 빌드하면 라이선스/SDK 컴포넌트 자동 설치가 매끄럽지 않은 경우가 있었음
 
 ## 다음 할 일
 
-- [ ] LlamaDemo 실기기 실행 테스트 (아직 안 해봄 — PC 테스트 결과가 폰에서도 똑같이 나오는지 확인 필요)
+- [x] LlamaDemo 실기기 실행 테스트 (완료)
   - 특히 native 코드가 PC의 llama-cli와 달리 jinja 챗 템플릿을 안 쓰기 때문에(`use_jinja=false`), Qwen3의 thinking 모드 동작이 PC 테스트와 다를 수 있음 — 실행해보고 출력이 이상하면 이 부분부터 의심할 것
 - [ ] STT 출력 → LLM 입력 실시간 연결
 - [ ] LLM 출력(JSON) → AccessibilityService 실행 모듈 연결

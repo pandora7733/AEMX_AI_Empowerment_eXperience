@@ -5,13 +5,16 @@ import android.util.Log
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.isModelLoaded
+import com.sihoo.aemx.pipeline.PipelineRedaction
 import com.sihoo.aemx.pipeline.json.ActionPlanParser
 import com.sihoo.aemx.pipeline.json.ParseResult
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
 import com.sihoo.aemx.pipeline.port.PlanResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -35,6 +38,9 @@ class LlamaPlanGenerator(
 ) : PlanGenerator {
 
     private val engine: InferenceEngine by lazy { engineFactory(context) }
+
+    /** 프롬프트와 응답에는 사용자 문장과 화면 글자가 들어 있어 디버그 빌드에서만 원문을 남긴다(#16). */
+    private val debuggable = PipelineRedaction.isDebuggable(context)
 
     /** 테스트에서 모델 준비(다운로드, 로딩)를 건너뛰고 생성 경로만 확인하려고 열어 둔다. */
     internal var prepared = false
@@ -76,7 +82,7 @@ class LlamaPlanGenerator(
         }
 
         val prompt = buildPrompt(request)
-        Log.i(TAG, "프롬프트(${request.mode}): $prompt")
+        Log.i(TAG, "프롬프트(${request.mode}): ${if (debuggable) prompt else PipelineRedaction.maskValue(prompt)}")
 
         val raw = try {
             engine.sendUserPrompt(prompt).toList().joinToString("")
@@ -84,7 +90,7 @@ class LlamaPlanGenerator(
             return PlanResult.EngineError(e.message ?: e::class.java.simpleName)
         }
 
-        Log.i(TAG, "응답: $raw")
+        Log.i(TAG, "응답: ${if (debuggable) raw else PipelineRedaction.maskValue(raw)}")
 
         return when (val parsed = ActionPlanParser.parse(raw)) {
             is ParseResult.Success -> {
@@ -151,7 +157,19 @@ class LlamaPlanGenerator(
     private suspend fun ensureModelDownloaded(onProgress: (Int, String) -> Unit): File {
         val modelsDir = File(context.filesDir, DIRECTORY_MODELS).apply { if (!exists()) mkdirs() }
         val modelFile = File(modelsDir, MODEL_FILE_NAME)
-        if (modelFile.exists() && modelFile.length() > 0) return modelFile
+        val marker = File(modelsDir, "$MODEL_FILE_NAME.verified")
+        if (modelFile.exists()) {
+            // 이미 받아 둔 파일. 크기와 표시 파일만 보고, 표시가 없으면 한 번만 해시를 계산한다.
+            val ok = withContext(Dispatchers.IO) {
+                ModelIntegrity.verify(modelFile, MODEL_SIZE, MODEL_SHA256, marker) {
+                    onProgress(100, "모델 파일 확인 중...")
+                }
+            }
+            if (ok) return modelFile
+            Log.w(TAG, "받아 둔 모델이 기대한 파일과 달라 지우고 다시 받는다")
+            modelFile.delete()
+            marker.delete()
+        }
 
         val tmpFile = File(modelsDir, "$MODEL_FILE_NAME.part")
         var lastError: IOException? = null
@@ -160,6 +178,17 @@ class LlamaPlanGenerator(
             try {
                 downloadTo(tmpFile, onProgress)
                 check(tmpFile.renameTo(modelFile)) { "받은 모델 파일 이름을 바꾸지 못했다" }
+                val ok = withContext(Dispatchers.IO) {
+                    ModelIntegrity.verify(modelFile, MODEL_SIZE, MODEL_SHA256, marker) {
+                        onProgress(100, "모델 파일 확인 중...")
+                    }
+                }
+                if (!ok) {
+                    // 다시 받아도 같은 파일이 올 가능성이 커서 재시도 대상(IOException)이 아니다.
+                    modelFile.delete()
+                    marker.delete()
+                    throw IllegalStateException("받은 모델의 SHA-256 이 기대한 값과 다르다")
+                }
                 Log.i(TAG, "모델 다운로드 완료: ${modelFile.path}")
                 return modelFile
             } catch (e: IOException) {
@@ -252,7 +281,18 @@ class LlamaPlanGenerator(
 
         private const val DIRECTORY_MODELS = "models"
         private const val MODEL_FILE_NAME = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+
+        /**
+         * 모델 저장소의 커밋. `main` 은 바뀔 수 있어 이 커밋으로 고정한다(#16).
+         * 값은 huggingface API(`/api/models/bartowski/Qwen_Qwen3-1.7B-GGUF`)와 resolve 응답의
+         * X-Repo-Commit 에서 확인했다(2026-10-20).
+         */
+        private const val MODEL_COMMIT = "dcb19155b962dbb6389f4691a982043a8e651022"
         private const val MODEL_URL =
-            "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+            "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/$MODEL_COMMIT/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+
+        /** 위 커밋의 파일 크기와 SHA-256(LFS 해시, resolve 응답의 X-Linked-ETag 와 같다). */
+        private const val MODEL_SIZE = 1_282_439_584L
+        private const val MODEL_SHA256 = "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb"
     }
 }

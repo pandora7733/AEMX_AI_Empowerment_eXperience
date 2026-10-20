@@ -1,5 +1,8 @@
 package com.sihoo.aemx.pipeline
 
+import android.content.Context
+import android.content.pm.ApplicationInfo
+
 /**
  * 로그와 화면에 내보내기 전에 민감한 값을 가린다.
  *
@@ -20,6 +23,13 @@ object PipelineRedaction {
         VALUE_FIELD.replace(raw) { match ->
             "\"value\": \"***(" + match.groupValues[1].length + "자)\""
         }
+
+    /**
+     * 디버그 빌드인지. 사용자 문장 같은 원문 로그는 디버그에서만 남기려고 쓴다(이슈 #16).
+     * BuildConfig 는 이 모듈에서 켜 두지 않아 앱의 debuggable 플래그를 본다.
+     */
+    fun isDebuggable(context: Context): Boolean =
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     /** 한 줄짜리 값에 쓰는 가림 처리. */
     fun maskValue(value: String?): String =

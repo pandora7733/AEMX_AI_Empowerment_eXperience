@@ -1,0 +1,56 @@
+name: test
+
+# main, integration 대상 PR과 push 마다 단위 테스트를 돌린다.
+# 로컬에서 같은 검사: ./gradlew :app:testDebugUnitTest
+on:
+  pull_request:
+    branches: [main, integration]
+  push:
+    branches: [main, integration]
+
+permissions:
+  contents: read
+
+# 같은 브랜치에 새 커밋이 올라오면 이전 실행은 멈춘다.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # gradlew 를 띄우는 JVM 은 17 이상이면 되고, Gradle 데몬은 gradle/gradle-daemon-jvm.properties
+      # 의 JDK 25 를 쓴다. 데몬 JDK 는 settings.gradle.kts 의 foojay 플러그인이 toolchain 으로
+      # 내려받는 것이 기본 경로다. 25 를 미리 깔아 두는 것은 보조 수단이라, 다운로드가 막히는
+      # 환경에서는 Gradle 이 이 JDK 를 찾는지 첫 실행 로그로 확인할 것.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            25
+
+      # 라이선스 동의와 platforms;android-37 설치를 맡는다. ubuntu-latest 에 SDK 는 있지만
+      # 플랫폼 37 이 들어 있다는 보장이 없다.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-37"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # STT 모델과 sherpa-onnx .so 는 git 에 없다(STT/setup_assets.sh 로 받는다). 단위 테스트는
+      # 앱을 실행하지 않고 컴파일만 하므로 받지 않는다. 필요한 테스트가 생기면 여기서 받을 것.
+      - name: 단위 테스트
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: 테스트 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests
+          if-no-files-found: ignore

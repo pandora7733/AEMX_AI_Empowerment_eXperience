@@ -408,13 +408,14 @@ class PipelineDebugActivity : AppCompatActivity() {
         device.submit(command)
     }
 
-    /** 명령이 끝나 최종 상태가 되면 한 번 말한다. 오케스트레이터 경로에서만 불린다(가짜 경로는 말하지 않는다). */
+    /** 명령이 끝나 최종 상태가 되거나 재분석에 들어가면 말한다. 오케스트레이터 경로에서만 불린다(가짜 경로는 말하지 않는다). */
     private fun announce(state: PipelineState) {
         val texts = AnnouncementTexts(
             finished = getString(R.string.pipeline_announce_finished),
             failed = getString(R.string.pipeline_announce_failed),
             needsUser = getString(R.string.pipeline_announce_needs_user),
             needsSetup = getString(R.string.pipeline_announce_needs_setup),
+            replanning = getString(R.string.pipeline_announce_replanning),
         )
         val text = announcementFor(state, texts) ?: return
         announcer?.speak(text)
@@ -455,30 +456,29 @@ class PipelineDebugActivity : AppCompatActivity() {
             )
         )
 
-        fun aladin(vararg texts: String) = ScreenSnapshot(
-            packageName = "com.example.fake.aladin",
-            className = "AladinScreen",
+        fun youtube(vararg texts: String) = ScreenSnapshot(
+            packageName = "com.example.fake.youtube",
+            className = "YoutubeScreen",
             texts = texts.toList()
         )
 
-        // 시나리오: 로그인 버튼을 눌렀는데 아무 반응이 없어(2번째 = null)
-        // 재분석이 돌고, 새 계획의 "회원 로그인"으로 끝까지 진행된다.
+        // 시나리오: "유튜브에서 고양이 영상 틀어줘" = open_app -> search -> play_first.
+        // 첫 영상을 눌렀는데 아무 반응이 없어(3번째 = null) 재분석이 돌고,
+        // 새 계획의 play_first 로 끝까지 진행된다.
         val executor = ScriptedActionExecutor(
             observer = observer,
             screensAfterEach = listOf(
-                aladin("알라딘", "로그인", "베스트셀러"),                    // 앱 실행
-                null,                                                      // 로그인 눌렀으나 반응 없음
-                aladin("아이디", "비밀번호", "로그인"),                      // 회원 로그인 눌러 폼 진입
-                aladin("아이디", "demo_user", "비밀번호", "로그인"),
-                aladin("아이디", "demo_user", "비밀번호", "••••", "로그인"),
-                aladin("알라딘", "환영합니다", "장바구니", "베스트셀러")        // 로그인 성공
+                youtube("유튜브", "홈", "Shorts"),                          // 앱 실행
+                youtube("고양이", "고양이 영상 모음", "고양이 브이로그"),         // 검색 결과
+                null,                                                      // 첫 영상을 눌렀으나 반응 없음
+                youtube("고양이 영상 모음", "재생 중", "댓글")                 // 다시 눌러 재생
             )
         )
 
         val effectivePlanner = planner ?: FakePlanGenerator(
             responses = listOf(
-                """{"app": "알라딘", "steps": [{"action": "open_app", "target": "알라딘"}, {"action": "tap", "target": "로그인"}, {"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}, {"action": "tap", "target": "로그인"}]}""",
-                """{"app": "알라딘", "steps": [{"action": "tap", "target": "회원 로그인"}, {"action": "input_credential", "target": "id"}, {"action": "input_credential", "target": "password"}, {"action": "tap", "target": "로그인"}]}"""
+                """{"app": "유튜브", "steps": [{"action": "open_app", "target": "유튜브"}, {"action": "search", "target": "고양이"}, {"action": "play_first"}]}""",
+                """{"app": "유튜브", "steps": [{"action": "play_first"}]}"""
             ),
             // 실기기 추론이 20~35초 걸리는 것을 짧게나마 흉내 낸다.
             latencyMs = 800

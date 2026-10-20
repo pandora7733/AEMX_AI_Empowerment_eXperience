@@ -20,6 +20,7 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizerResult
 import com.k2fsa.sherpa.onnx.getFeatureConfig
 import com.k2fsa.sherpa.onnx.getModelConfig
 import com.sihoo.aemx.TtsSilence
+import com.sihoo.aemx.pipeline.PipelineRedaction
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.port.SpeechSource
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +44,9 @@ class SherpaSpeechSource(
 
     private val _results = MutableSharedFlow<SpeechResult>(extraBufferCapacity = 32)
     override val results: Flow<SpeechResult> = _results.asSharedFlow()
+
+    /** 인식된 글과 화자 점수는 사용자 말이라 디버그 빌드에서만 로그에 남긴다(#16). */
+    private val debuggable = PipelineRedaction.isDebuggable(context)
 
     private var recognizer: OnlineRecognizer? = null
     private var audioRecord: AudioRecord? = null
@@ -206,7 +210,7 @@ class SherpaSpeechSource(
                                 engine.decode(stream)
                             }
                             val flushed = engine.getResult(stream).textWithSpacing()
-                            Log.d(TAG, "문이 닫혀 문장을 끝낸다: $flushed")
+                            if (debuggable) Log.d(TAG, "문이 닫혀 문장을 끝낸다: $flushed")
                             finishUtterance(flushed.ifBlank { lastLoggedText })
                         }
                         wasOpen = false
@@ -235,7 +239,7 @@ class SherpaSpeechSource(
                 val text = engine.getResult(stream).textWithSpacing()
                 if (text != lastLoggedText) {
                     lastLoggedText = text
-                    if (text.isNotBlank()) Log.d(TAG, "중간: $text")
+                    if (debuggable && text.isNotBlank()) Log.d(TAG, "중간: $text")
                 }
                 if (engine.isEndpoint(stream)) {
                     finishUtterance(text)
@@ -287,10 +291,12 @@ class SherpaSpeechSource(
 
         val score = verifier.score(voice)
         val pass = score != null && score >= verifier.threshold
-        Log.d(TAG, "화자 점수 %s (기준 %.2f) %s: %s".format(
-            score?.let { "%.3f".format(it) } ?: "측정불가", verifier.threshold,
-            if (pass) "통과" else "거절", text,
-        ))
+        if (debuggable) {
+            Log.d(TAG, "화자 점수 %s (기준 %.2f) %s: %s".format(
+                score?.let { "%.3f".format(it) } ?: "측정불가", verifier.threshold,
+                if (pass) "통과" else "거절", text,
+            ))
+        }
         if (!pass) {
             val shown = score?.let { "%.2f".format(it) } ?: "너무 짧음"
             scope.launch { _rejections.emit("$text ($shown)") }

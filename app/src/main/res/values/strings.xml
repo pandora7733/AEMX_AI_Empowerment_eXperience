@@ -29,12 +29,13 @@
     <string name="pipeline_title">파이프라인 테스트</string>
     <string name="pipeline_description">STT·LLM·실행모듈이 아직 합류하지 않아 가짜 구현으로 흐름만 확인하는 개발용 화면입니다.</string>
     <string name="pipeline_command_label">음성 명령 (STT 결과 대신 직접 입력)</string>
-    <string name="pipeline_sample_command">알라딘에서 로그인하고 싶어</string>
+    <string name="pipeline_sample_command">유튜브에서 고양이 영상 틀어줘</string>
     <string name="pipeline_run">실행</string>
     <string name="pipeline_announce_finished">작업을 마쳤습니다</string>
     <string name="pipeline_announce_failed">하지 못했습니다. 화면을 확인해 주세요</string>
     <string name="pipeline_announce_needs_user">직접 확인이 필요합니다</string>
     <string name="pipeline_announce_needs_setup">먼저 준비가 필요합니다. 화면을 확인해 주세요</string>
+    <string name="pipeline_announce_replanning">다시 시도합니다</string>
     <string name="pipeline_auto_run">말하면 바로 실행</string>
     <string name="pipeline_auto_run_busy">실행 중이라 새 명령을 무시했습니다: %1$s</string>
     <string name="pipeline_state_idle">대기 중</string>

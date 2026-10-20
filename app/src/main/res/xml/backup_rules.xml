@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+   API 30 이하용 자동 백업 규칙. allowBackup 을 꺼 두었지만, 나중에 켜더라도 아래는 백업하지 않는다.
+   - files/models/: LLM 모델(1.2GB). 앱당 백업 한도(25MB)를 넘고 다시 받으면 된다.
+   - aemx_speaker: 등록한 목소리 특징. 기기 밖으로 보내지 않는 값이다.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="file" path="models/" />
+    <exclude domain="sharedpref" path="aemx_speaker.xml" />
 </full-backup-content>

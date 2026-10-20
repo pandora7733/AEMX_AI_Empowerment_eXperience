@@ -143,7 +143,8 @@ class FakeScreenObserver(
 class FakeAppResolver(
     private val known: Map<String, String> = mapOf(
         "알라딘" to "com.example.fake.aladin",
-        "교보문고" to "com.example.fake.kyobo"
+        "교보문고" to "com.example.fake.kyobo",
+        "유튜브" to "com.example.fake.youtube"
     )
 ) : AppResolver {
     override fun resolvePackage(appName: String): String? = known[appName.trim()]
