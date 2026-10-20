@@ -139,6 +139,25 @@ class SherpaSpeechSource(
         // 지금 말하고 있는 한 문장의 소리. 끝났을 때 누구 목소리인지 보려고 모아 둔다.
         val utterance = ArrayList<FloatArray>()
         val loud = ArrayList<Boolean>()
+        // 직전에 로그로 남긴 중간 결과와 마이크 차단 여부. 같은 값을 프레임마다 반복해 찍지 않으려는 것이다.
+        var lastLoggedText = ""
+        var wasMuted = false
+
+        // 한 발화가 끝났다. 이 값이 파이프라인을 돌리는 방아쇠다. 인식기 endpoint 와 VAD 문이 닫힌
+        // 경우 둘 다 같은 흐름으로 끝내야 해서 한 곳에 둔다.
+        fun finishUtterance(text: String) {
+            engine.reset(stream)
+            lastLoggedText = ""
+            val voice = speechOnly(utterance, loud)
+            utterance.clear()
+            loud.clear()
+            val sink = enrollmentSink
+            if (sink != null) {
+                sink(voice)
+            } else if (text.isNotBlank() && isOwner(voice, text)) {
+                emit(SpeechResult.Final(text))
+            }
+        }
 
         try {
             while (listening) {
@@ -148,6 +167,11 @@ class SherpaSpeechSource(
                 // 앱이 말하는 소리가 마이크로 되돌아 들어온 것이다. 인식기에 넣지 않고, 말끝이
                 // 이어 붙지 않게 지금까지 쌓인 것도 비운다.
                 if (TtsSilence.isMuted()) {
+                    if (!wasMuted) {
+                        wasMuted = true
+                        Log.d(TAG, "마이크 차단으로 인식 초기화")
+                    }
+                    lastLoggedText = ""
                     engine.reset(stream)
                     vad.reset()
                     preRoll.clear()
@@ -156,6 +180,7 @@ class SherpaSpeechSource(
                     loud.clear()
                     continue
                 }
+                wasMuted = false
 
                 val samples = FloatArray(read) { buffer[it] / 32768.0f }
                 if (useVad) {
@@ -167,6 +192,19 @@ class SherpaSpeechSource(
                         peakRms = 0.0
                     }
                     if (!open) {
+                        // 문이 닫히는 순간 끝나지 않은 문장이 남아 있으면 여기서 끝낸다. 문이 닫히면 인식기에
+                        // 무음이 더 들어가지 않아 endpoint 의 무음 길이(2.0초)가 채워지지 않고, 문장이 다음
+                        // 말소리까지 매달려 앞뒤 문장이 이어 붙는다. 문이 열려 있던 hangover(2.5초) 동안의
+                        // 무음은 인식기 지연만큼 덜 세어져서 이 경우가 생긴다.
+                        if (shouldFlushOnGateClose(wasOpen, lastLoggedText)) {
+                            stream.acceptWaveform(FloatArray(FLUSH_SILENCE_SAMPLES), sampleRate = SAMPLE_RATE)
+                            while (engine.isReady(stream)) {
+                                engine.decode(stream)
+                            }
+                            val flushed = engine.getResult(stream).textWithSpacing()
+                            Log.d(TAG, "문이 닫혀 문장을 끝낸다: $flushed")
+                            finishUtterance(flushed.ifBlank { lastLoggedText })
+                        }
                         wasOpen = false
                         preRoll.addLast(samples)
                         if (preRoll.size > PRE_ROLL_FRAMES) preRoll.removeFirst()
@@ -191,18 +229,12 @@ class SherpaSpeechSource(
                 }
 
                 val text = engine.getResult(stream).textWithSpacing()
+                if (text != lastLoggedText) {
+                    lastLoggedText = text
+                    if (text.isNotBlank()) Log.d(TAG, "중간: $text")
+                }
                 if (engine.isEndpoint(stream)) {
-                    engine.reset(stream)
-                    val voice = speechOnly(utterance, loud)
-                    utterance.clear()
-                    loud.clear()
-                    // 한 발화가 끝났다. 이 값이 파이프라인을 돌리는 방아쇠다.
-                    val sink = enrollmentSink
-                    if (sink != null) {
-                        sink(voice)
-                    } else if (text.isNotBlank() && isOwner(voice, text)) {
-                        emit(SpeechResult.Final(text))
-                    }
+                    finishUtterance(text)
                 } else if (text.isNotBlank()) {
                     emit(SpeechResult.Partial(text))
                 }
@@ -349,6 +381,9 @@ class SherpaSpeechSource(
         /** 한 문장으로 모아 둘 수 있는 최대 길이. 100ms 프레임 300개, 30초. */
         const val MAX_UTTERANCE_FRAMES = 300
 
+        /** 문이 닫힐 때 인식기에 밀어 넣는 무음 길이. endpoint 무음 규칙(2.0초)을 넘기는 2.5초다. */
+        const val FLUSH_SILENCE_SAMPLES = (2.5 * SAMPLE_RATE).toInt()
+
         /** 문이 열리기 전 몇 프레임을 들고 있을지. 100ms 단위라 0.3초다. */
         const val PRE_ROLL_FRAMES = 3
 
@@ -373,6 +408,14 @@ class SherpaSpeechSource(
         ).joinToString("\n")
     }
 }
+
+/**
+ * VAD 문이 열림에서 닫힘으로 바뀌는 순간 인식기에 끝나지 않은 문장이 있는지.
+ *
+ * [pendingText] 는 마지막으로 본 중간 결과이고, endpoint 로 끝난 문장은 비워진다.
+ */
+internal fun shouldFlushOnGateClose(wasOpen: Boolean, pendingText: String): Boolean =
+    wasOpen && pendingText.isNotBlank()
 
 /**
  * 인식 결과를 토큰에서 직접 만든다.

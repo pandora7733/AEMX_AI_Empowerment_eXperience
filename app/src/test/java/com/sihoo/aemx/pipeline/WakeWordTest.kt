@@ -58,6 +58,21 @@ class WakeWordTest {
     }
 
     @Test
+    fun `IMAX 로 적어도 잡는다`() {
+        // 2026-10-20 실기기에서 "하이 에이맥스, 날씨 알려줘" 를 "IMAX? 날씨 알려줘?" 로 적었다.
+        // 뒤쪽 구분자(?)도 명령 양끝에서 같이 떼어진다.
+        assertEquals("날씨 알려줘", WakeWordMatcher.match("IMAX? 날씨 알려줘?"))
+        assertEquals("", WakeWordMatcher.match("IMAX?"))
+    }
+
+    @Test
+    fun `IMAX 영화처럼 호출이 아닌 말도 깨운다`() {
+        // 알려진 부작용이다. "imax" 를 "아이맥스" 로 바꾸면 skip 1 에서 "이맥스" 에 맞아서,
+        // 문장 앞에 나온 IMAX 는 실제 영화 얘기여도 호출로 본다. 오인식 복구와 맞바꾼 것이다.
+        assertEquals("영화 예매해줘", WakeWordMatcher.match("IMAX 영화 예매해줘"))
+    }
+
+    @Test
     fun `인사 없이 맥스만 있으면 호출로 보지 않는다`() {
         assertNull(WakeWordMatcher.match("맥스 틀어줘"))
         assertNull(WakeWordMatcher.match("max 틀어줘"))

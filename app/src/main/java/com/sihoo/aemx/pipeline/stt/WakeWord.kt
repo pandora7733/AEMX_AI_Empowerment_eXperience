@@ -91,7 +91,7 @@ object WakeWordMatcher {
 
     /** STT 가 "맥스" 를 영단어로 적은 것. 단어째로 바꾸고, 여기 없는 영문만 글자별로 바꾼다. */
     private val WORD_SOUNDS = mapOf(
-        "max" to "맥스", "macs" to "맥스", "mex" to "맥스", "maks" to "맥스", "amax" to "에이맥스",
+        "max" to "맥스", "macs" to "맥스", "mex" to "맥스", "maks" to "맥스", "amax" to "에이맥스", "imax" to "아이맥스",
     )
 
     /** 영문으로 적힌 것을 한글 발음으로 바꾼다. */
