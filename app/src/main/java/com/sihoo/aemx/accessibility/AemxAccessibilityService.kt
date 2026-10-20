@@ -14,6 +14,9 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
     private lateinit var executor: ActionExecutor
     private var ttsController: AndroidTtsController? = null
 
+    /** 지금 도는 계획의 끝 안내(TTS)를 말할지. 제출할 때마다 그 계획 기준으로 다시 정해진다. */
+    private var announceCompletion = true
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         if (::executor.isInitialized) executor.cancel()
@@ -42,10 +45,19 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         super.onDestroy()
     }
 
-    private fun submit(json: String): Result<Unit> = runCatching {
+    private fun submit(json: String, announceCompletion: Boolean): Result<Unit> = runCatching {
         check(Looper.myLooper() == Looper.getMainLooper()) { "메인 스레드에서 제출해 주세요." }
         check(::executor.isInitialized) { "접근성 서비스가 아직 준비되지 않았습니다." }
-        executor.execute(ActionPlanParser.parse(json))
+        val plan = ActionPlanParser.parse(json)
+        // 이미 실행 중이라 거절되면 돌고 있는 계획의 값을 건드리지 않도록 되돌린다.
+        val previous = this.announceCompletion
+        this.announceCompletion = announceCompletion
+        try {
+            executor.execute(plan)
+        } catch (e: Throwable) {
+            this.announceCompletion = previous
+            throw e
+        }
     }
 
     override fun onStepStarted(index: Int, step: ActionStep) {
@@ -56,7 +68,7 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
     override fun onCompleted(plan: ActionPlan) {
         status = "모든 UI 명령 전달 완료 (실제 결과 확인 필요)"
         Log.i(TAG, "Action Plan dispatched")
-        ttsController?.speak("화면 조작을 마쳤습니다. 결과를 확인해 주세요")
+        if (announceCompletion) ttsController?.speak("화면 조작을 마쳤습니다. 결과를 확인해 주세요")
         observer?.invoke(PlanOutcome.Completed)
     }
 
@@ -105,11 +117,16 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
             Handler(Looper.getMainLooper()).post { activeService?.get()?.onInterrupt() }
         }
 
-        /** LLM 연결부가 생성한 JSON을 현재 활성화된 서비스에 전달합니다. */
-        fun submitActionPlan(json: String): Result<Unit> {
+        /**
+         * LLM 연결부가 생성한 JSON을 현재 활성화된 서비스에 전달합니다.
+         *
+         * @param announceCompletion false 면 이 계획이 끝나도 완료 음성 안내를 하지 않는다(기본 true).
+         *   step 마다 계획을 따로 제출하는 호출자가 매 step 안내를 막으려고 쓴다. 이 계획에만 적용된다.
+         */
+        fun submitActionPlan(json: String, announceCompletion: Boolean = true): Result<Unit> {
             val service = activeService?.get()
                 ?: return Result.failure(IllegalStateException("AEMX 접근성 서비스를 먼저 활성화해 주세요."))
-            return service.submit(json)
+            return service.submit(json, announceCompletion)
         }
 
         fun isConnected(): Boolean = activeService?.get() != null

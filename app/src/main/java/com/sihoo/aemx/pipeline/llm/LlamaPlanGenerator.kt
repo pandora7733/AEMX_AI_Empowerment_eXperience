@@ -75,12 +75,10 @@ class LlamaPlanGenerator(
 
         return when (val parsed = ActionPlanParser.parse(raw)) {
             is ParseResult.Success -> {
-                // 처음 명령에서만 바로잡는다. 재분석은 화면을 보고 앱을 바꿀 수 있어서 그대로 둔다.
-                val plan = if (request.mode == PlanRequest.Mode.INITIAL) {
-                    AppMentionGuard.apply(request.utterance, parsed.plan)
-                } else {
-                    parsed.plan
-                }
+                // 모드와 상관없이 건다. 재분석 요청에도 원래 문장(request.utterance)이 들어 있고,
+                // 가드는 사용자가 문장 앞에서 앱을 직접 지목했을 때만 움직인다. 지목이 없는 문장의
+                // 재분석은 화면을 보고 앱을 바꿀 수 있으므로 결과를 그대로 둔다.
+                val plan = AppMentionGuard.apply(request.utterance, parsed.plan)
                 PlanResult.Success(plan, raw, parsed.warnings)
             }
             is ParseResult.Failure -> PlanResult.Malformed(raw, parsed.reason)

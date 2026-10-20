@@ -306,7 +306,7 @@ class PipelineOrchestrator(
         val settle = awaitSettle(step.timeoutMs, before)
         val after = settle.snapshot
 
-        return when (val verdict = ScreenVerifier.verify(step.expect, before, after)) {
+        return when (val verdict = ScreenVerifier.verify(step.expect, before, after, ScreenVerifier.isLoginStep(step))) {
             is ScreenVerifier.Verdict.Match -> StepOutcome.Success(after)
 
             is ScreenVerifier.Verdict.Mismatch -> when {

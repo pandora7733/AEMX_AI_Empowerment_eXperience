@@ -1,5 +1,7 @@
 package com.sihoo.aemx.pipeline
 
+import com.sihoo.aemx.pipeline.model.ActionStep
+import com.sihoo.aemx.pipeline.model.ActionType
 import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import org.junit.Assert.assertEquals
@@ -88,6 +90,49 @@ class ScreenVerifierTest {
         assertTrue(verdict is ScreenVerifier.Verdict.Mismatch)
         assertEquals(
             KnownSituation.ALREADY_LOGGED_IN,
+            (verdict as ScreenVerifier.Verdict.Mismatch).situation
+        )
+    }
+
+    @Test
+    fun `로그인과 상관없는 step 은 로그아웃 글자가 있어도 통과한다`() {
+        // 로그인한 네이버 앱 화면에는 "로그아웃" 이 늘 있다. open_app 검증이 이걸로 실패하면 안 된다.
+        val openApp = ActionStep(index = 0, action = ActionType.OPEN_APP, target = "네이버")
+        val naver = screen("검색", "로그아웃", "마이페이지", pkg = "com.nhn.android.search")
+        val verdict = ScreenVerifier.verify(
+            Expectation(packageName = "com.nhn.android.search"),
+            before = screen("홈", pkg = "com.android.launcher"),
+            after = naver,
+            loginRelated = ScreenVerifier.isLoginStep(openApp)
+        )
+        assertEquals(ScreenVerifier.Verdict.Match, verdict)
+    }
+
+    @Test
+    fun `로그인 step 은 로그아웃 글자가 있으면 이미 로그인된 상태로 본다`() {
+        val login = ActionStep(index = 0, action = ActionType.TAP, target = "로그인")
+        val verdict = ScreenVerifier.verify(
+            Expectation.NONE,
+            before = screen("홈"),
+            after = screen("검색", "로그아웃"),
+            loginRelated = ScreenVerifier.isLoginStep(login)
+        )
+        assertEquals(
+            KnownSituation.ALREADY_LOGGED_IN,
+            (verdict as ScreenVerifier.Verdict.Mismatch).situation
+        )
+    }
+
+    @Test
+    fun `로그인과 상관없는 step 에서도 캡차는 사람에게 넘긴다`() {
+        val verdict = ScreenVerifier.verify(
+            Expectation.NONE,
+            before = screen("홈"),
+            after = screen("보안문자를 입력해 주세요", "로그아웃"),
+            loginRelated = false
+        )
+        assertEquals(
+            KnownSituation.HUMAN_VERIFICATION,
             (verdict as ScreenVerifier.Verdict.Mismatch).situation
         )
     }

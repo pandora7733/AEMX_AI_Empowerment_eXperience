@@ -53,4 +53,20 @@ class AppMentionGuardTest {
         assertEquals("인스타그램", AppMentionGuard.leadingApp("인스타그램에서 릴스 보여줘"))
         assertEquals(null, AppMentionGuard.leadingApp("구글 뉴스 검색해줘"))
     }
+
+    @Test
+    fun `재분석 계획도 지목한 앱으로 바로잡는다`() {
+        // 재분석 요청의 원래 문장은 그대로 "네이버에서 유튜브 검색해줘" 이고, 모델이 앱을 유튜브로 바꿔 낸 경우.
+        val fixed = AppMentionGuard.apply("네이버에서 유튜브 검색해줘", plan("유튜브", "유튜브"))
+
+        assertEquals("네이버", fixed.app)
+        assertEquals("네이버", fixed.steps[0].target)
+        assertEquals("유튜브", fixed.steps[1].target)
+    }
+
+    @Test
+    fun `지목이 없는 문장은 재분석에서 앱이 바뀌어도 그대로 둔다`() {
+        val replanned = plan("크롬", "유튜브")
+        assertSame(replanned, AppMentionGuard.apply("유튜브 검색해줘", replanned))
+    }
 }

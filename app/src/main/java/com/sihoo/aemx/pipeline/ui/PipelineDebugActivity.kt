@@ -28,6 +28,11 @@ import com.sihoo.aemx.pipeline.fake.FakeAppResolver
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
 import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
+import com.sihoo.aemx.pipeline.device.AccessibilityAppResolver
+import com.sihoo.aemx.pipeline.device.AccessibilityScreenObserver
+import com.sihoo.aemx.pipeline.device.AccessibilityStepExecutor
+import com.sihoo.aemx.pipeline.device.ServicePlanBridge
+import com.sihoo.aemx.pipeline.device.ServiceScreenSource
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
@@ -39,7 +44,10 @@ import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
 import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -62,6 +70,19 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var runButton: Button
     private lateinit var realLlmSwitch: CheckBox
     private lateinit var realExecutorSwitch: CheckBox
+    private lateinit var orchestratorSwitch: CheckBox
+    private var deviceOrchestrator: PipelineOrchestrator? = null
+    private var deviceExecutor: AccessibilityStepExecutor? = null
+
+    /** 화면이 보이는 동안만 true. 어댑터가 끝나고 콜백을 되돌릴지 정하는 데 쓴다. */
+    @Volatile
+    private var visible = false
+
+    /**
+     * 오케스트레이터를 메인이 아닌 곳에서 돌리는 스코프. 화면 읽기(바인더 호출)를
+     * 메인 스레드에서 하지 않으려는 것이다. 화면이 사라질 때 같이 닫는다.
+     */
+    private val deviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var llmPlanner: LlamaPlanGenerator? = null
     private lateinit var listenButton: Button
     private lateinit var wakeWordSwitch: CheckBox
@@ -308,6 +329,55 @@ class PipelineDebugActivity : AppCompatActivity() {
     }
 
     /**
+     * 말한 명령을 오케스트레이터를 거쳐 실제 기기에서 실행한다(이슈 #11).
+     *
+     * [runOnDevice] 와 달리 step 마다 화면이 기대대로 바뀌었는지 검사하고, 어긋나면 현재 화면을
+     * 넣어 LLM 에 다시 묻는다. 진짜 LLM 이 켜져 있고 접근성 서비스가 연결돼 있어야 한다.
+     */
+    private fun runViaOrchestrator(command: String) {
+        val planner = llmPlanner
+        if (planner == null || !planner.isReady()) {
+            stateView.setText(R.string.pipeline_device_needs_llm)
+            return
+        }
+        if (!AemxAccessibilityService.isConnected()) {
+            stateView.setText(R.string.pipeline_device_needs_service)
+            return
+        }
+
+        val device = deviceOrchestrator ?: buildDeviceOrchestrator(planner).also { deviceOrchestrator = it }
+        // 다른 경로가 orchestrator 를 갈아 끼웠을 수 있으니, 이쪽이 아니면 화면 구독을 옮긴다.
+        if (orchestrator !== device) {
+            collectJob?.cancel()
+            orchestrator = device
+            collectJob = lifecycleScope.launch {
+                launch { device.state.collect { render(it) } }
+                launch { device.log.collect { entries -> renderLog(entries) } }
+            }
+        }
+        device.submit(command)
+    }
+
+    /** 진짜 LLM + 접근성 서비스 어댑터로 오케스트레이터를 조립한다. */
+    private fun buildDeviceOrchestrator(planner: PlanGenerator): PipelineOrchestrator {
+        val screenObserver = AccessibilityScreenObserver(ServiceScreenSource())
+        val executor = AccessibilityStepExecutor(
+            bridge = ServicePlanBridge,
+            foregroundPackage = { screenObserver.capture()?.packageName },
+            // step 이 끝나면 화면이 원래 걸어 둔 콜백으로 되돌린다. 멈춘 화면이면 걸지 않는다.
+            restoreObserver = { if (visible) deviceObserver else null }
+        )
+        deviceExecutor = executor
+        return PipelineOrchestrator(
+            planner = planner,
+            executor = executor,
+            screenObserver = screenObserver,
+            appResolver = AccessibilityAppResolver(),
+            scope = deviceScope
+        )
+    }
+
+    /**
      * 가짜 파트로 파이프라인을 조립한다.
      *
      * 가짜 LLM 은 시스템 프롬프트의 예시 출력을 그대로 돌려주고, 가짜 실행모듈은
@@ -439,10 +509,21 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             addView(realExecutorSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
+            // AEMX: 켜면 접근성 서비스를 오케스트레이터에 꽂아 화면 검증과 재분석을 거친다.
+            // 꺼 두면 위의 기존 경로가 그대로 동작한다.
+            orchestratorSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_use_orchestrator)
+            }
+            addView(orchestratorSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
             runButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_run)
                 setOnClickListener {
                     val command = commandInput.text?.toString().orEmpty()
+                    if (orchestratorSwitch.isChecked) {
+                        runViaOrchestrator(command)
+                        return@setOnClickListener
+                    }
                     if (realExecutorSwitch.isChecked) {
                         runOnDevice(command)
                         return@setOnClickListener
@@ -541,26 +622,43 @@ class PipelineDebugActivity : AppCompatActivity() {
      */
     override fun onStart() {
         super.onStart()
-        AemxAccessibilityService.setPlanObserver { outcome ->
-            runOnUiThread {
-                stateView.text = when (outcome) {
-                    is PlanOutcome.Completed -> getString(R.string.pipeline_device_done)
-                    is PlanOutcome.Failed -> getString(
-                        R.string.pipeline_device_step_failed,
-                        outcome.stepIndex + 1,
-                        outcome.message,
-                    )
-                }
+        visible = true
+        setPlanObserverIfIdle(deviceObserver)
+    }
+
+    /** 우회 경로(runOnDevice)의 결과를 상태줄에 띄우는 콜백. 오케스트레이터 경로는 이걸 거치지 않는다. */
+    private val deviceObserver: (PlanOutcome) -> Unit = { outcome ->
+        runOnUiThread {
+            stateView.text = when (outcome) {
+                is PlanOutcome.Completed -> getString(R.string.pipeline_device_done)
+                is PlanOutcome.Failed -> getString(
+                    R.string.pipeline_device_step_failed,
+                    outcome.stepIndex + 1,
+                    outcome.message,
+                )
             }
         }
     }
 
+    /**
+     * 오케스트레이터 경로가 실행 중에 쥐고 있는 콜백은 건드리지 않는다. 지우면 그 step 의
+     * 끝 알림을 못 받아 25초 뒤 시간 초과가 난다. 어댑터가 끝나면 [visible] 을 보고 되돌린다.
+     */
+    private fun setPlanObserverIfIdle(callback: ((PlanOutcome) -> Unit)?) {
+        val executor = deviceExecutor
+        if (executor != null) executor.setObserverIfIdle(callback)
+        else AemxAccessibilityService.setPlanObserver(callback)
+    }
+
     override fun onStop() {
-        AemxAccessibilityService.setPlanObserver(null)
+        visible = false
+        setPlanObserverIfIdle(null)
         super.onStop()
     }
 
     override fun onDestroy() {
+        deviceOrchestrator?.cancel()
+        deviceScope.cancel()
         verifier.release()
         speech?.release()
         speech = null

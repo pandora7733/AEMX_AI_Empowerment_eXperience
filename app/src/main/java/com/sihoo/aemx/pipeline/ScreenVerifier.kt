@@ -1,5 +1,6 @@
 package com.sihoo.aemx.pipeline
 
+import com.sihoo.aemx.pipeline.model.ActionStep
 import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 
@@ -13,19 +14,25 @@ import com.sihoo.aemx.pipeline.model.ScreenSnapshot
  * 1번이 먼저다. 기대 조건을 만족했더라도 실패 팝업이 떠 있으면 실패로 본다.
  * "로그인" 버튼을 눌러 화면은 분명히 바뀌었는데(=requireScreenChange 만족)
  * 사실은 "비밀번호가 올바르지 않습니다" 팝업이 뜬 경우가 딱 그 형태다.
+ *
+ * 로그인 관련 상황(실패/이미 로그인)은 로그인 step 에서만 본다. 로그인한 앱 화면에는
+ * "로그아웃", "마이페이지" 가 늘 있어서, 아무 step 에서나 보면 멀쩡한 화면을 실패로 친다.
+ * 캡차·인증은 사람에게 넘기는 안전장치라 step 과 상관없이 늘 본다.
  */
 object ScreenVerifier {
 
     /**
      * @param before step 을 실행하기 직전의 화면. 화면 변화 여부를 보는 데 쓴다.
      * @param after  화면이 안정된 뒤의 화면.
+     * @param loginRelated 로그인 관련 step 인지. 아니면 로그인 상황 탐지를 건너뛴다.
      */
     fun verify(
         expect: Expectation,
         before: ScreenSnapshot,
-        after: ScreenSnapshot
+        after: ScreenSnapshot,
+        loginRelated: Boolean = true
     ): Verdict {
-        KnownSituation.detect(after)?.let { situation ->
+        KnownSituation.detect(after, loginRelated)?.let { situation ->
             if (situation.treatAsFailure) {
                 return Verdict.Mismatch(situation.reason(after), situation)
             }
@@ -57,6 +64,14 @@ object ScreenVerifier {
 
         return Verdict.Match
     }
+
+    /** step 의 대상·값·기대 설명에 로그인을 가리키는 말이 있으면 로그인 step 으로 본다. */
+    fun isLoginStep(step: ActionStep): Boolean {
+        val text = listOfNotNull(step.target, step.value, step.expect.note).joinToString(" ").lowercase()
+        return LOGIN_HINTS.any { it in text }
+    }
+
+    private val LOGIN_HINTS = listOf("로그인", "login", "sign in", "아이디", "비밀번호", "password")
 
     sealed interface Verdict {
         data object Match : Verdict
@@ -113,6 +128,10 @@ enum class KnownSituation(
         requiresHuman = true
     );
 
+    /** 로그인과 관련된 상황인가. 로그인 step 에서만 탐지한다. */
+    val loginRelated: Boolean
+        get() = this == LOGIN_FAILED || this == ALREADY_LOGGED_IN
+
     /** 이 상황으로 판단한 근거를 사람이 읽을 수 있게. */
     fun reason(screen: ScreenSnapshot): String {
         val hit = keywords.firstOrNull { screen.containsText(it) }
@@ -128,9 +147,11 @@ enum class KnownSituation(
         /**
          * 화면에서 알려진 상황을 찾는다.
          * 사람 개입이 필요한 쪽을 먼저 보므로, 로그인 실패와 캡차가 함께 보이면 캡차가 이긴다.
+         * [includeLogin] 이 false 면 로그인 관련 상황은 건너뛴다.
          */
-        fun detect(screen: ScreenSnapshot): KnownSituation? =
-            entries.sortedByDescending { it.requiresHuman }
+        fun detect(screen: ScreenSnapshot, includeLogin: Boolean = true): KnownSituation? =
+            entries.filter { includeLogin || !it.loginRelated }
+                .sortedByDescending { it.requiresHuman }
                 .firstOrNull { situation -> situation.keywords.any { screen.containsText(it) } }
     }
 }
