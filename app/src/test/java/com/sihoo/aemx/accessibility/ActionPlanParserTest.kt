@@ -98,6 +98,26 @@ class ActionPlanParserTest {
     }
 
     @Test
+    fun `open_app passes for an app that is not in the fixed table`() {
+        val plan = ActionPlanParser.parse(
+            """{"app":"마켓컬리","steps":[{"action":"open_app","target":"마켓컬리"}]}""",
+        )
+        assertEquals("마켓컬리", plan.app)
+        // 이름이 다르면 같은 앱이 아니다.
+        assertThrows(ActionPlanParseException::class.java) {
+            ActionPlanParser.parse("""{"app":"마켓컬리","steps":[{"action":"open_app","target":"쿠팡"}]}""")
+        }
+    }
+
+    @Test
+    fun `parses youtube music search and play_first`() {
+        val plan = ActionPlanParser.parse(
+            """{"app":"유튜브 뮤직","steps":[{"action":"search","target":"아이유"},{"action":"play_first","target":"첫 번째 노래"}]}""",
+        )
+        assertEquals(listOf(ActionType.SEARCH, ActionType.PLAY_FIRST), plan.steps.map { it.action })
+    }
+
+    @Test
     fun `rejects an empty step list`() {
         val json = """{"app":"교보문고","steps":[]}"""
         assertThrows(ActionPlanParseException::class.java) { ActionPlanParser.parse(json) }

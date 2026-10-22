@@ -27,6 +27,14 @@ class StepPlanFactoryTest {
     }
 
     @Test
+    fun `고정 표에 없는 설치된 앱도 서비스 파서가 받는다`() {
+        val plan = parse(Command.LaunchApp("com.kurly.android"), "마켓컬리")
+        assertEquals("마켓컬리", plan.app)
+        assertEquals(A11yType.OPEN_APP, plan.steps.single().action)
+        assertEquals("마켓컬리", plan.steps.single().target)
+    }
+
+    @Test
     fun `누르기와 입력은 라벨과 값을 그대로 옮긴다`() {
         val tap = parse(Command.Tap("로그인"), "알라딘").steps.single()
         assertEquals(A11yType.TAP, tap.action)

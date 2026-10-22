@@ -33,6 +33,7 @@ import com.sihoo.aemx.pipeline.device.AccessibilityAppResolver
 import com.sihoo.aemx.pipeline.device.AccessibilityScreenObserver
 import com.sihoo.aemx.pipeline.device.AccessibilityStepExecutor
 import com.sihoo.aemx.pipeline.device.AnnouncementTexts
+import com.sihoo.aemx.pipeline.device.AppNames
 import com.sihoo.aemx.pipeline.device.announcementFor
 import com.sihoo.aemx.pipeline.device.ServicePlanBridge
 import com.sihoo.aemx.pipeline.device.ServiceScreenSource
@@ -424,9 +425,13 @@ class PipelineDebugActivity : AppCompatActivity() {
     /** 진짜 LLM + 접근성 서비스 어댑터로 오케스트레이터를 조립한다. */
     private fun buildDeviceOrchestrator(planner: PlanGenerator): PipelineOrchestrator {
         val screenObserver = AccessibilityScreenObserver(ServiceScreenSource())
+        // 같은 리졸버를 오케스트레이터와 실행기가 나눠 써서, 풀린 앱 이름을 서비스에 그대로 넘긴다.
+        val appResolver = AccessibilityAppResolver(applicationContext)
         val executor = AccessibilityStepExecutor(
             bridge = ServicePlanBridge,
             foregroundPackage = { screenObserver.capture()?.packageName },
+            nameForPackage = { pkg -> AppNames.forPackage(pkg) ?: appResolver.nameFor(pkg) },
+            isSupportedApp = appResolver::isResolvable,
             // step 이 끝나면 화면이 원래 걸어 둔 콜백으로 되돌린다. 멈춘 화면이면 걸지 않는다.
             restoreObserver = { if (visible) deviceObserver else null }
         )
@@ -435,7 +440,7 @@ class PipelineDebugActivity : AppCompatActivity() {
             planner = planner,
             executor = executor,
             screenObserver = screenObserver,
-            appResolver = AccessibilityAppResolver(),
+            appResolver = appResolver,
             scope = deviceScope
         )
     }

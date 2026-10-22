@@ -95,11 +95,12 @@ class ExpectationInferencer(
                 )
             )
 
+            // 화면 변화를 요구하지 않는다. 화면 지문은 위쪽 글자 일부만 보는데, 웹 결과처럼 위쪽이
+            // 그대로인 화면은 스크롤해도 같아 보여서 성공한 스크롤이 불일치로 판정되고 계획 전체가
+            // 되풀이됐다(실기기). 끝까지 내려가 더 안 움직이는 경우도 실패가 아니다. 제스처를 못
+            // 보냈으면 실행모듈이 직접 실패를 알린다.
             ActionType.SCROLL -> step.copy(
-                expect = Expectation(
-                    requireScreenChange = true,
-                    note = "스크롤하면 보이는 내용이 달라져야 한다"
-                )
+                expect = Expectation(note = "스크롤은 실행모듈이 성공을 알리면 통과한다")
             )
 
             // 대기는 오히려 화면이 그대로일 수도 있다. 아무것도 요구하지 않는다.

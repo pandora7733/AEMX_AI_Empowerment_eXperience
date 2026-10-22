@@ -137,7 +137,9 @@ internal class ActionExecutor(
     private fun performUiAction(app: String, step: ActionStep): StepResult {
         val root = service.rootInActiveWindow ?: return StepResult.NotReady
         // Event package filters do not restrict rootInActiveWindow. Never act on another app.
-        if (root.packageName?.toString() != AppLauncher.packageFor(app)) return StepResult.NotReady
+        val appPackage = appLauncher.resolve(app)
+            ?: return StepResult.Fatal("설치되지 않았거나 찾을 수 없는 앱입니다.")
+        if (root.packageName?.toString() != appPackage) return StepResult.NotReady
         return when (step.action) {
             ActionType.OPEN_APP, ActionType.SEARCH -> StepResult.Success
             ActionType.TAP -> {
@@ -148,7 +150,12 @@ internal class ActionExecutor(
             }
             ActionType.INPUT_TEXT -> setText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
-                val node = NodeFinder.findFirstPlayable(root) ?: return StepResult.NotReady
+                val first = if (appPackage == AppLauncher.YOUTUBE_MUSIC_PACKAGE) {
+                    NodeFinder.findFirstSong(root)
+                } else {
+                    NodeFinder.findFirstPlayable(root)
+                }
+                val node = first ?: return StepResult.NotReady
                 val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
                 if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success
                 else StepResult.NotReady

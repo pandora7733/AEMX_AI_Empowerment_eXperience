@@ -69,4 +69,30 @@ class AppMentionGuardTest {
         val replanned = plan("크롬", "유튜브")
         assertSame(replanned, AppMentionGuard.apply("유튜브 검색해줘", replanned))
     }
+
+    @Test
+    fun `유튜브 뮤직은 유튜브보다 먼저 읽는다`() {
+        assertEquals("유튜브 뮤직", AppMentionGuard.leadingApp("유튜브 뮤직에서 아이유 노래 틀어줘"))
+        assertEquals("유튜브 뮤직", AppMentionGuard.leadingApp("유튜브뮤직에서 아이유 노래 틀어줘"))
+        assertEquals("유튜브", AppMentionGuard.leadingApp("유튜브에서 고양이 영상 틀어줘"))
+    }
+
+    @Test
+    fun `모델이 유튜브 뮤직을 유튜브로 내면 바로잡는다`() {
+        // 폰의 모델이 "유튜브뮤직에서 ..." 를 유튜브로 낸 경우.
+        val fixed = AppMentionGuard.apply("유튜브뮤직에서 아이유 노래 틀어줘", plan("유튜브", "아이유 노래"))
+
+        assertEquals("유튜브 뮤직", fixed.app)
+        assertEquals("유튜브 뮤직", fixed.steps[0].target)
+        assertEquals("아이유 노래", fixed.steps[1].target)
+    }
+
+    @Test
+    fun `카톡 쿠팡 문자 별칭을 읽는다`() {
+        assertEquals("카카오톡", AppMentionGuard.leadingApp("카톡에서 엄마 찾아줘"))
+        assertEquals("카카오톡", AppMentionGuard.leadingApp("카카오톡에서 엄마 찾아줘"))
+        assertEquals("쿠팡", AppMentionGuard.leadingApp("쿠팡에서 물티슈 찾아줘"))
+        assertEquals("메시지", AppMentionGuard.leadingApp("문자에서 엄마 찾아줘"))
+        assertEquals(null, AppMentionGuard.leadingApp("쿠팡 열어줘"))
+    }
 }

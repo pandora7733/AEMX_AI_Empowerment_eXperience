@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 홈 화면에 보이는 개발용 아이콘 이름. 디버그 빌드에만 들어간다(릴리스에는 이 파일이 없다). -->
+    <string name="pipeline_launcher_label">AEMX 개발</string>
+</resources>

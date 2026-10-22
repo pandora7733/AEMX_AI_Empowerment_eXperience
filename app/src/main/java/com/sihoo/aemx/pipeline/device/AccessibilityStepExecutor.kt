@@ -46,7 +46,14 @@ class AccessibilityStepExecutor(
     private val bridge: PlanBridge,
     private val foregroundPackage: () -> String? = { null },
     private val restoreObserver: () -> ((PlanOutcome) -> Unit)? = { null },
-    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
+    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
+    /**
+     * 패키지에 해당하는 서비스 앱 이름. 고정 표의 앱만 알면 되면 기본값을 쓰고, 설치된 앱까지 열려면
+     * [AccessibilityAppResolver.nameFor] 를 넘긴다.
+     */
+    private val nameForPackage: (String?) -> String? = AppNames::forPackage,
+    /** 서비스가 알아듣는 앱 이름인지. 기본은 고정 표, 설치된 앱까지 보려면 [AccessibilityAppResolver.isResolvable]. */
+    private val isSupportedApp: (String) -> Boolean = AppNames::isSupported
 ) : ActionExecutor {
 
     /** 서비스에는 콜백이 하나뿐이라 동시에 두 명령을 흘려보내면 결과가 뒤섞인다. */
@@ -119,11 +126,11 @@ class AccessibilityStepExecutor(
 
     /** 서비스가 알아듣는 앱 이름. 앞 화면 -> 직전 앱 순. 열기/검색은 명령이 앱을 알려 준다. */
     private fun resolveApp(command: Command): String? = when (command) {
-        is Command.LaunchApp -> AppNames.forPackage(command.packageName)
-        is Command.Search -> command.appName.takeIf { AppNames.isSupported(it) }
+        is Command.LaunchApp -> nameForPackage(command.packageName)
+        is Command.Search -> command.appName.takeIf { isSupportedApp(it) }
         // 서비스가 첫 영상 재생을 받는 앱은 유튜브뿐이라 앞 화면이나 직전 앱을 보지 않는다.
         Command.PlayFirst -> YOUTUBE
-        else -> AppNames.forPackage(foregroundPackage()) ?: currentApp
+        else -> nameForPackage(foregroundPackage()) ?: currentApp
     }
 
     /**

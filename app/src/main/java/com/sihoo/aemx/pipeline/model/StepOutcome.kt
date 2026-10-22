@@ -25,7 +25,9 @@ sealed interface StepOutcome {
     /** 실행모듈이 동작 자체를 못 했다(대상 못 찾음, 접근성 서비스 꺼짐 등). */
     data class ExecutorError(
         override val screen: ScreenSnapshot,
-        val message: String
+        val message: String,
+        /** 재분석해도 풀릴 수 없는 실패(설치되지 않은 앱 등). true 면 바로 포기한다. */
+        val unrecoverable: Boolean = false
     ) : StepOutcome
 
     /** 사람이 직접 처리해야 한다(캡차·2단계 인증). 자동 재시도하지 않는다. */

@@ -18,6 +18,7 @@ internal class AndroidTtsController(
 
     private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val focusTracker = SpeechFocusTracker()
+    private val pendingSpeech = PendingSpeech()
     private var focusRequest: AudioFocusRequest? = null
 
     init {
@@ -28,6 +29,7 @@ internal class AndroidTtsController(
     override fun onInit(status: Int) {
         val engine = textToSpeech
         if (status != TextToSpeech.SUCCESS || engine == null) {
+            pendingSpeech.clear()
             onStateChanged(State.INIT_FAILED)
             return
         }
@@ -36,6 +38,7 @@ internal class AndroidTtsController(
             TextToSpeech.LANG_MISSING_DATA,
             TextToSpeech.LANG_NOT_SUPPORTED,
             -> {
+                pendingSpeech.clear()
                 onStateChanged(State.KOREAN_UNAVAILABLE)
                 return
             }
@@ -74,6 +77,9 @@ internal class AndroidTtsController(
 
         isReady = true
         onStateChanged(State.READY)
+        // 엔진이 준비되기 전에 들어온 말이 있으면 지금 한다. 앱을 새로 설치한 뒤 첫 명령은
+        // 끝 안내가 엔진 초기화보다 먼저 와서 버려졌다.
+        pendingSpeech.take()?.let { speak(it) }
     }
 
     fun speak(rawText: String) {
@@ -85,6 +91,8 @@ internal class AndroidTtsController(
 
         val engine = textToSpeech
         if (!isReady || engine == null) {
+            // 초기화 중이면 마지막 한 문장만 들고 있다가 준비되면 말한다(onInit).
+            if (engine != null) pendingSpeech.hold(text)
             onStateChanged(State.INITIALIZING)
             return
         }
@@ -130,6 +138,7 @@ internal class AndroidTtsController(
     fun shutdown() {
         TtsSilence.end()
         focusTracker.clear()
+        pendingSpeech.clear()
         focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         focusRequest = null
         isReady = false
@@ -194,4 +203,29 @@ internal class SpeechFocusTracker {
 
     @Synchronized
     fun clear() = active.clear()
+}
+
+/**
+ * TTS 엔진이 준비되기 전에 말하라고 한 문장을 보관한다.
+ *
+ * 문장이 여러 번 들어와도 마지막 하나만 남긴다. 말하기는 QUEUE_FLUSH 라 앞 문장을 끊고 새로
+ * 말하므로, 준비가 늦었다고 쌓아서 한꺼번에 말하면 오히려 지난 안내를 늘어놓게 된다.
+ * 안드로이드에 의존하지 않아 단위 테스트가 된다.
+ */
+internal class PendingSpeech {
+    private var text: String? = null
+
+    @Synchronized
+    fun hold(value: String) {
+        text = value
+    }
+
+    /** 보관한 문장을 꺼내고 비운다. 없으면 null. */
+    @Synchronized
+    fun take(): String? = text.also { text = null }
+
+    @Synchronized
+    fun clear() {
+        text = null
+    }
 }

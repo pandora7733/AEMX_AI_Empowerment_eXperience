@@ -4,8 +4,9 @@
     <application>
 
         <!--
-            개발용 화면이라 디버그 빌드에만 넣는다(이슈 #16). 런처에는 띄우지 않는다(아이콘이
-            두 개가 되고 Run 대상이 모호해짐). 실행은 아래 명령으로 한다.
+            개발용 화면이라 디버그 빌드에만 넣는다(이슈 #16). adb 없이 폰에서 바로 열 수 있게 홈 화면
+            런처 아이콘도 둔다. 아이콘이 두 개(AEMX, AEMX 개발)가 되는 건 사용자가 원한 것이다.
+            아래 adb 명령으로 여는 방법은 그대로 된다.
               adb shell am start -n com.sihoo.aemx/.pipeline.ui.PipelineDebugActivity
         -->
         <activity
@@ -13,6 +14,22 @@
             android:exported="true"
             android:label="@string/pipeline_title"
             android:windowSoftInputMode="adjustResize" />
+
+        <!--
+            런처 진입점은 액티비티가 아니라 별칭에 둔다. 액티비티 자체의 라벨(화면 제목 "파이프라인
+            테스트")을 건드리지 않고 아이콘 이름만 "AEMX 개발"로 구분하려는 것이다.
+        -->
+        <activity-alias
+            android:name=".pipeline.ui.PipelineDebugLauncher"
+            android:exported="true"
+            android:label="@string/pipeline_launcher_label"
+            android:targetActivity=".pipeline.ui.PipelineDebugActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
     </application>
 

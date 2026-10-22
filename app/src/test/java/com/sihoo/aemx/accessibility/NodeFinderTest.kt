@@ -97,6 +97,45 @@ class NodeFinderTest {
         assertEquals("shorts 찍는 법 - 3분 12초 - 동영상 재생", found?.contentDescription)
     }
 
+    /** 유튜브 뮤직 검색 결과 한 항목의 추정 모양: 눌 수 있는 컨테이너 안에 제목과 부제. */
+    private fun musicItem(title: String, subtitle: String) =
+        node(clickable = true).with(node(title), node(subtitle))
+
+    @Test
+    fun `유튜브 뮤직은 노래 부제가 붙은 첫 항목을 고르고 칩과 아티스트는 건너뛴다`() {
+        val chip = node("노래", clickable = true)
+        val artist = musicItem("아이유", "아티스트 • 구독자 3천만명")
+        val song = musicItem("좋은 날", "노래 • 아이유 • 3:53")
+        val second = musicItem("밤편지", "노래 • 아이유 • 3:25")
+        val root = node().with(chip, artist, song, second)
+
+        assertEquals(song, NodeFinder.findFirstSong(root))
+    }
+
+    @Test
+    fun `유튜브 뮤직은 영문 기기의 Song 부제도 인식한다`() {
+        val song = musicItem("Good Day", "Song • IU • 3:53")
+        val root = node().with(node("Songs", clickable = true), song)
+
+        assertEquals(song, NodeFinder.findFirstSong(root))
+    }
+
+    @Test
+    fun `노래 부제가 없으면 구분점이 있는 아티스트 아닌 첫 항목을 대신 고른다`() {
+        val album = musicItem("Palette", "앨범 • 아이유 • 2017")
+        val video = musicItem("좋은 날 MV", "동영상 • 아이유 • 조회수 3억회")
+        val root = node().with(album, video)
+
+        assertEquals(video, NodeFinder.findFirstSong(root))
+    }
+
+    @Test
+    fun `유튜브 뮤직 결과가 없으면 null 이다`() {
+        val root = node().with(node("노래", clickable = true), node("검색 결과가 없습니다"))
+
+        assertNull(NodeFinder.findFirstSong(root))
+    }
+
     @Test
     fun `채널 버튼이나 검색창은 영상으로 보지 않는다`() {
         // 예전 구현은 "라벨이 있는 첫 누를 수 있는 노드"를 골라서 검색창을 눌렀고,

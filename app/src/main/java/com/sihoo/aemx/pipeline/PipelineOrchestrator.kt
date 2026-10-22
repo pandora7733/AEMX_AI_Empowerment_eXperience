@@ -223,6 +223,11 @@ class PipelineOrchestrator(
                 is StepOutcome.Mismatch,
                 is StepOutcome.Timeout,
                 is StepOutcome.ExecutorError -> {
+                    if (outcome is StepOutcome.ExecutorError && outcome.unrecoverable) {
+                        fail(outcome.message)
+                        return
+                    }
+
                     val current = outcome.screen
                     val reason = history.last().toPromptLine()
                     append(PipelineLogEntry.Level.WARN, "예상과 다름 -> 재분석: $reason")
@@ -347,7 +352,13 @@ class PipelineOrchestrator(
                 val packageName = appResolver.resolvePackage(wanted)
                 if (packageName == null) {
                     CommandMapping.Rejected { screen ->
-                        StepOutcome.ExecutorError(screen, "\"$wanted\" 앱을 기기에서 찾지 못했다")
+                        // 설치되지 않았거나 이름을 알 수 없는 앱은 화면을 다시 봐도 열 수 없다.
+                        // 재분석하면 엉뚱한 버튼을 누르며 시간만 쓰므로 바로 포기한다.
+                        StepOutcome.ExecutorError(
+                            screen,
+                            "\"$wanted\" 앱을 기기에서 찾지 못했다",
+                            unrecoverable = true
+                        )
                     }
                 } else {
                     CommandMapping.Ready(ActionExecutor.Command.LaunchApp(packageName))

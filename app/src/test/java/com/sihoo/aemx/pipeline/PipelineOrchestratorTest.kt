@@ -189,6 +189,53 @@ class PipelineOrchestratorTest {
         assertTrue("가상 시간이 ${currentTime}ms 만 흘렀다", currentTime >= 3_000L)
     }
 
+    @Test
+    fun `검색 결과에서 스크롤해도 위쪽 글자가 같으면 재분석하지 않고 끝난다`() = runTest {
+        // 웹 결과처럼 위쪽 글자(화면 지문이 보는 앞쪽 10개)가 그대로인 화면. 스크롤은 성공했지만
+        // 지문이 같아서 예전에는 불일치로 판정돼 계획이 되풀이됐다.
+        val yt = "com.example.fake.youtube"
+        val top = (1..10).map { "결과 $it" }
+        val plan =
+            """{"app":"유튜브","steps":[{"action":"open_app","target":"유튜브"},{"action":"search","target":"맛집"},{"action":"scroll","target":"down"}]}"""
+
+        val observer = FakeScreenObserver(snapshot("홈", pkg = "com.android.launcher"))
+        val executor = ScriptedExecutor(
+            observer,
+            listOf(
+                snapshot("유튜브", "홈", pkg = yt),
+                snapshot(*top.toTypedArray(), "아래 결과 A", pkg = yt),
+                snapshot(*top.toTypedArray(), "아래 결과 B", pkg = yt)   // 앞 10개가 같다
+            )
+        )
+        val planner = FakePlanGenerator(listOf(plan, plan, plan))
+        val orchestrator = build(planner, executor, observer)
+
+        orchestrator.submit("맛집 검색하고 아래로 스크롤해줘")
+        advanceUntilIdle()
+
+        assertTrue("상태가 ${orchestrator.state.value} 였다", orchestrator.state.value is PipelineState.Finished)
+        assertEquals("재분석을 요청하면 안 된다", 1, planner.requests.size)
+        assertEquals(3, executor.performed.size)
+    }
+
+    @Test
+    fun `해석되지 않는 앱을 열라고 하면 재분석 없이 바로 실패한다`() = runTest {
+        val plan = """{"app":"쿠팡","steps":[{"action":"open_app","target":"쿠팡"}]}"""
+        val observer = FakeScreenObserver(snapshot("홈", pkg = "com.android.launcher"))
+        val executor = ScriptedExecutor(observer, emptyList())
+        val planner = FakePlanGenerator(listOf(plan, plan, plan))
+        val orchestrator = build(planner, executor, observer)
+
+        orchestrator.submit("쿠팡 열어줘")
+        advanceUntilIdle()
+
+        val state = orchestrator.state.value
+        assertTrue("상태가 $state 였다", state is PipelineState.Failed)
+        assertTrue((state as PipelineState.Failed).reason.contains("쿠팡"))
+        assertEquals("재분석을 요청하면 안 된다", 1, planner.requests.size)
+        assertTrue("실행모듈을 부르면 안 된다", executor.performed.isEmpty())
+    }
+
     // ------------------------------------------------------------- 재분석
 
     @Test

@@ -88,7 +88,11 @@ internal object StepPlanFactory {
     }
 }
 
-/** 서비스가 지원하는 앱 이름과 패키지명 사이의 변환. 서비스의 표를 그대로 따른다. */
+/**
+ * 서비스의 고정 표에 있는 앱 이름과 패키지명 사이의 변환. 표에 없는 설치된 앱은 여기서 풀지 않고
+ * [AccessibilityAppResolver] 가 푼 이름을 쓴다(서비스 파서는 표에 없는 앱의 open_app 도 받고,
+ * 실행할 때 설치된 앱 라벨로 푼다).
+ */
 internal object AppNames {
 
     /** 서비스 표의 대표 이름들. 같은 패키지의 별칭("naver" 등)은 넣지 않는다. */

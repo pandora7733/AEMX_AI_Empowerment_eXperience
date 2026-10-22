@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <queries>
+        <!-- 설치된 앱을 이름(런처 라벨)으로 열려고 런처 앱 목록을 본다. QUERY_ALL_PACKAGES 는 쓰지 않는다. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>

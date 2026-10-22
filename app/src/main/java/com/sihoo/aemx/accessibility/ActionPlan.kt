@@ -49,7 +49,8 @@ object ActionPlanParser {
             val root = JSONObject(json)
             val app = string(root, "app").trim()
             require(app.isNotEmpty()) { "app은 비어 있을 수 없습니다." }
-            require(AppLauncher.packageFor(app) != null) { "지원하지 않는 앱입니다." }
+            // 앱 이름이 고정 표에 없어도 통과시킨다. 설치된 앱의 이름은 실행할 때 풀어 보고,
+            // 못 찾으면 그 단계에서 "설치되지 않았거나 찾을 수 없는 앱"으로 실패한다.
 
             val jsonSteps = root.getJSONArray("steps")
             require(jsonSteps.length() > 0) { "steps는 한 개 이상이어야 합니다." }
@@ -65,15 +66,15 @@ object ActionPlanParser {
                         null
                     }
                     validate(action, target, value, index)
-                    require(action != ActionType.OPEN_APP || AppLauncher.packageFor(target) == AppLauncher.packageFor(app)) {
+                    require(action != ActionType.OPEN_APP || sameApp(target, app)) {
                         "open_app target은 plan.app과 같아야 합니다."
                     }
                     require(action != ActionType.SEARCH || AppLauncher.supportsDirectSearch(app)) {
-                        "search는 네이버, 구글, 유튜브에서만 지원합니다."
+                        "search는 네이버, 구글, 유튜브, 유튜브 뮤직에서만 지원합니다."
                     }
-                    require(action != ActionType.PLAY_FIRST || AppLauncher.packageFor(app) == AppLauncher.YOUTUBE_PACKAGE) {
-                        "play_first는 유튜브에서만 지원합니다."
-                    }
+                    require(action != ActionType.PLAY_FIRST || AppLauncher.packageFor(app) in setOf(
+                        AppLauncher.YOUTUBE_PACKAGE, AppLauncher.YOUTUBE_MUSIC_PACKAGE,
+                    )) { "play_first는 유튜브와 유튜브 뮤직에서만 지원합니다." }
                     require(action != ActionType.NEXT_VIDEO || AppLauncher.packageFor(app) in setOf(
                         AppLauncher.YOUTUBE_PACKAGE, AppLauncher.INSTAGRAM_PACKAGE,
                     )) { "next_video는 유튜브와 인스타그램에서만 지원합니다." }
@@ -87,6 +88,17 @@ object ActionPlanParser {
             throw ActionPlanParseException("Action Plan JSON 형식이 올바르지 않습니다.")
         } catch (error: IllegalArgumentException) {
             throw ActionPlanParseException(error.message ?: "Action Plan 값이 올바르지 않습니다.", error)
+        }
+    }
+
+    /** 같은 앱을 가리키는지. 하나라도 고정 표에 있으면 패키지로, 둘 다 없으면 이름(공백·대소문자 무시)으로 비교한다. */
+    private fun sameApp(a: String, b: String): Boolean {
+        val packageA = AppLauncher.packageFor(a)
+        val packageB = AppLauncher.packageFor(b)
+        return if (packageA != null || packageB != null) {
+            packageA == packageB
+        } else {
+            AppLauncher.normalizeName(a) == AppLauncher.normalizeName(b)
         }
     }
 

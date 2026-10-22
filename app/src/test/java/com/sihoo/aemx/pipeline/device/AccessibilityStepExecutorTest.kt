@@ -143,6 +143,36 @@ class AccessibilityStepExecutorTest {
     }
 
     @Test
+    fun `고정 표에 없는 앱의 LaunchApp 도 풀린 이름으로 제출된다`() = runTest {
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val resolver = AccessibilityAppResolver { name -> "com.kurly.android".takeIf { name == "마켓컬리" } }
+        // 오케스트레이터가 이름을 패키지로 풀 때 기억한 이름을 서비스에 넘긴다.
+        assertEquals("com.kurly.android", resolver.resolvePackage("마켓컬리"))
+
+        val exec = AccessibilityStepExecutor(
+            bridge = bridge,
+            mainDispatcher = UnconfinedTestDispatcher(testScheduler),
+            nameForPackage = { pkg -> AppNames.forPackage(pkg) ?: resolver.nameFor(pkg) },
+            isSupportedApp = resolver::isResolvable
+        )
+        val result = exec.execute(Command.LaunchApp("com.kurly.android"))
+
+        assertEquals(ExecutionResult.Performed, result)
+        val plan = JSONObject(bridge.submitted.single())
+        assertEquals("마켓컬리", plan.getString("app"))
+        assertEquals("마켓컬리", plan.getJSONArray("steps").getJSONObject(0).getString("target"))
+    }
+
+    @Test
+    fun `풀린 적 없는 패키지의 LaunchApp 은 서비스에 제출하지 않고 실패한다`() = runTest {
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val result = executor(bridge).execute(Command.LaunchApp("com.unknown.app"))
+
+        assertTrue(result is ExecutionResult.Failed)
+        assertTrue(bridge.submitted.isEmpty())
+    }
+
+    @Test
     fun `앱 실행 실패는 Failed 다`() = runTest {
         val bridge = FakeBridge(onSubmit = { _, obs ->
             obs?.invoke(failed(A11yType.OPEN_APP, "앱 화면이 열리지 않았습니다."))

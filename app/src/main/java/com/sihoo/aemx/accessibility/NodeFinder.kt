@@ -101,6 +101,69 @@ internal object NodeFinder {
         return shortsFallback
     }
 
+    /**
+     * 유튜브 뮤직 검색 결과에서 맨 처음 나오는 노래를 고른다.
+     *
+     * 주의: 유튜브 뮤직의 접근성 트리는 아직 실기기에서 확인하지 못했다. 아래 규칙은 추정이고,
+     * 실기기 uiautomator dump 로 보정해야 한다. 보정할 곳은 [SONG_KIND], [OTHER_KIND],
+     * [MAX_ITEM_LABELS] 와 [itemLabels] 의 깊이다.
+     *
+     * 추정한 모양:
+     * - 검색 결과는 세로 목록이고, 항목 하나가 눌 수 있는 컨테이너 하나다.
+     * - 항목 안에 글자가 둘 이상 있다: 제목, 그리고 "노래 • 가수 • 앨범" 같은 부제(영문 기기는
+     *   "Song • Artist"). 부제의 첫 단어가 종류(노래/앨범/아티스트/재생목록…)를 말해 준다.
+     * - 상단의 필터 칩(노래, 동영상, 앨범…)은 글자가 하나뿐이라 둘 이상이라는 조건으로 걸러진다.
+     *
+     * 그래서 눌 수 있고 글자가 2~[MAX_ITEM_LABELS]개인 항목 중 부제가 "노래"로 시작하는 첫 항목을 고른다.
+     * 그런 항목이 없으면(부제 문구가 다르면) 구분점(•)이 있는 부제를 가졌고 아티스트·앨범·
+     * 재생목록 등으로 보이지 않는 첫 항목을 대신 고른다. 맨 위 "상위 결과" 카드가 아티스트면 건너뛴다.
+     */
+    fun findFirstSong(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        var fallback: AccessibilityNodeInfo? = null
+
+        while (queue.isNotEmpty()) {
+            if (++visited > 2_000) break
+            val node = queue.removeFirst()
+            if (isClickableNode(node)) {
+                val labels = itemLabels(node)
+                if (labels.size in 2..MAX_ITEM_LABELS) {
+                    if (labels.any { SONG_KIND.containsMatchIn(it) }) return node
+                    if (fallback == null &&
+                        labels.any { it.contains('\u2022') || it.contains('\u00B7') } &&
+                        labels.none { OTHER_KIND.containsMatchIn(it) }
+                    ) {
+                        fallback = node
+                    }
+                }
+            }
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
+        }
+        return fallback
+    }
+
+    private fun isClickableNode(node: AccessibilityNodeInfo): Boolean =
+        node.isVisibleToUser && node.isEnabled &&
+            (node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+
+    /** 항목 안의 글자(자신 포함, 몇 단계 아래까지). 중복은 뺀다. */
+    private fun itemLabels(item: AccessibilityNodeInfo): List<String> {
+        val labels = LinkedHashSet<String>()
+        fun visit(node: AccessibilityNodeInfo, depth: Int) {
+            if (labels.size > MAX_ITEM_LABELS) return
+            listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && it.length <= MAX_LABEL_LENGTH }
+                .forEach { labels += it }
+            if (depth >= ITEM_LABEL_DEPTH) return
+            for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, depth + 1) }
+        }
+        visit(item, 0)
+        return labels.toList()
+    }
+
     /** 검색 결과가 담기는 목록. 못 찾으면 호출한 쪽이 화면 전체를 쓰게 null 을 준다. */
     private fun resultList(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
@@ -250,6 +313,19 @@ internal object NodeFinder {
         .replace(Regex("\\s+"), "")
 
     private const val MAX_LABELS = 40
+
+    /** 유튜브 뮤직 검색 결과 한 항목에서 읽을 글자 수 상한. 더 많으면 항목이 아니라 목록 전체로 본다. */
+    private const val MAX_ITEM_LABELS = 8
+    private const val ITEM_LABEL_DEPTH = 4
+
+    /** 부제가 "노래"(영문 기기는 Song)로 시작하거나 그 종류 표시가 따로 있는 글자. 실기기 dump 로 보정한다. */
+    private val SONG_KIND = Regex("(^|[\\u2022\\u00B7,]\\s*)(노래|song)\\s*([\\u2022\\u00B7,]|$)", RegexOption.IGNORE_CASE)
+
+    /** 노래가 아닌 종류 표시. 폴백에서 이런 항목은 건너뛴다. 실기기 dump 로 보정한다. */
+    private val OTHER_KIND = Regex(
+        "(^|[\\u2022\\u00B7,]\\s*)(아티스트|앨범|싱글|EP|재생목록|프로필|팟캐스트|에피소드|artist|album|single|playlist|profile|podcast|episode)\\s*([\\u2022\\u00B7,]|$)",
+        RegexOption.IGNORE_CASE,
+    )
     private const val MAX_LABEL_LENGTH = 60
 
     /** 광고 표시를 찾아 조상을 몇 단계까지 올라갈지. 실기기에서는 한 단계면 닿는다. */
