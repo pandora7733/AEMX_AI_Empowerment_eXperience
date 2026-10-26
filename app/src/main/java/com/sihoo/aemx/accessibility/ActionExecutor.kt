@@ -1,9 +1,11 @@
 package com.sihoo.aemx.accessibility
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 internal class ActionExecutor(
@@ -12,6 +14,7 @@ internal class ActionExecutor(
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val appLauncher = AppLauncher(service)
+    private val messageSender = MessageSender(service, handler, appLauncher)
     private var executionId = 0L
     // 메인 스레드에서 바뀌고 다른 스레드(파이프라인)가 읽는다.
     @Volatile
@@ -70,6 +73,14 @@ internal class ActionExecutor(
                 val delayMs = WaitDuration.millis(step.value ?: step.target)
                 handler.postDelayed({ executeStep(plan, index + 1, id) }, delayMs)
             }
+            // 화면을 여러 단계 거치는 흐름이라 retryUntilReady 의 한 번짜리 조작으로는 못 한다.
+            ActionType.SEND_MESSAGE -> messageSender.send(
+                app = plan.app,
+                step = step,
+                isCurrent = { id == executionId },
+                onDone = { awaitSettled(plan, index + 1, id) },
+                onFailed = { fail(index, step, it, id) },
+            )
             else -> retryUntilReady(plan, index, id)
         }
     }
@@ -87,6 +98,9 @@ internal class ActionExecutor(
                 performUiAction(plan.app, step)
             } catch (_: RuntimeException) {
                 StepResult.Fatal("화면 조작 중 오류가 발생했습니다.")
+            }
+            if (observed == StepResult.NotReady && step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) {
+                probeForeground(plan.app)
             }
             val result = if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH) && observed == StepResult.Success) {
                 val now = SystemClock.uptimeMillis()
@@ -134,6 +148,33 @@ internal class ActionExecutor(
         handler.postDelayed(check, 300L)
     }
 
+    private var lastProbeAt = 0L
+    private var lastChipTapAt = 0L
+
+    /**
+     * 앱 화면이 뜨기를 기다리는 동안 1초마다 맨 앞 창이 무엇으로 보이는지 남긴다.
+     * "앱 화면이 열리지 않았습니다" 가 (1) 활성 창을 못 읽어서(root=null, 앱이 접근성 데이터를
+     * 막은 경우 등) 인지 (2) 다른 패키지 창이 앞에 있어서인지 (3) 창은 맞는데 패키지 비교가
+     * 어긋나서인지 가르는 용도다. 진단이 끝나면 지워도 된다.
+     */
+    private fun probeForeground(app: String) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastProbeAt < PROBE_INTERVAL_MS) return
+        lastProbeAt = now
+        runCatching {
+            val root = service.rootInActiveWindow
+            val windows = service.windows.joinToString { window ->
+                "type=${window.type} layer=${window.layer} active=${window.isActive} " +
+                    "focused=${window.isFocused} pkg=${window.root?.packageName}"
+            }
+            Log.i(
+                TAG,
+                "앱 화면 대기: 기대=${appLauncher.resolve(app)} root=${root?.packageName}/${root?.className} " +
+                    "windows=[$windows]"
+            )
+        }
+    }
+
     private fun performUiAction(app: String, step: ActionStep): StepResult {
         val root = service.rootInActiveWindow ?: return StepResult.NotReady
         // Event package filters do not restrict rootInActiveWindow. Never act on another app.
@@ -151,14 +192,13 @@ internal class ActionExecutor(
             ActionType.INPUT_TEXT -> setText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
                 val first = if (appPackage == AppLauncher.YOUTUBE_MUSIC_PACKAGE) {
-                    NodeFinder.findFirstSong(root)
+                    NodeFinder.findFirstSong(root) ?: return tapSongChip(root)
                 } else {
                     NodeFinder.findFirstPlayable(root)
                 }
                 val node = first ?: return StepResult.NotReady
-                val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
-                if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success
-                else StepResult.NotReady
+                // 유튜브 뮤직 행은 눌 수 있다고 알리는 노드가 없어서(dump 확인) 노드 클릭이 안 되면 좌표 탭으로 넘어간다.
+                if (clickOrTap(node)) StepResult.Success else StepResult.NotReady
             }
             ActionType.NEXT_VIDEO -> {
                 // ACTION_SCROLL_FORWARD 는 방향이 없다. 인스타그램처럼 바깥에 좌우 페이저(홈/메시지)가 있는
@@ -189,6 +229,33 @@ internal class ActionExecutor(
             }
             else -> StepResult.Fatal("UI Action이 아닌 단계입니다: ${step.action.wireName}")
         }
+    }
+
+    /**
+     * 유튜브 뮤직 "전체" 탭에서는 첫 노래를 가릴 수 없어 "노래" 칩을 먼저 누른다.
+     * 칩이 이미 선택됐거나 방금 눌렀으면 누르지 않고 화면이 바뀌길 기다린다(NotReady).
+     */
+    private fun tapSongChip(root: AccessibilityNodeInfo): StepResult {
+        val chip = NodeFinder.findSongFilterChip(root) ?: return StepResult.NotReady
+        if (NodeFinder.isSelectedChip(chip)) return StepResult.NotReady
+        val now = SystemClock.uptimeMillis()
+        if (now - lastChipTapAt < CHIP_TAP_INTERVAL_MS) return StepResult.NotReady
+        // 칩은 글자 Button 부터 목록까지 clickable 이 전부 false 다(dump 확인). 노드 클릭이 안 되면 좌표 탭으로 넘어간다.
+        if (clickOrTap(chip)) lastChipTapAt = now
+        return StepResult.NotReady
+    }
+
+    /**
+     * 눌 수 있는 조상이 있고 클릭이 받아들여지면 그것으로 끝, 아니면 노드 bounds 중앙을 제스처로 탭한다.
+     * 제스처는 눌렀는지 알려 주지 않으므로 호출한 쪽이 화면 변화로 확인해야 한다.
+     */
+    private fun clickOrTap(node: AccessibilityNodeInfo): Boolean {
+        NodeFinder.clickableAncestor(node)?.let { clickable ->
+            if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        }
+        val bounds = Rect().also(node::getBoundsInScreen)
+        if (bounds.width() <= 0 || bounds.height() <= 0) return false
+        return service.tap(bounds.exactCenterX(), bounds.exactCenterY())
     }
 
     private fun setText(root: AccessibilityNodeInfo, target: String, text: CharSequence): StepResult {
@@ -257,6 +324,9 @@ internal class ActionExecutor(
 
     private companion object {
         const val ACTION_TIMEOUT_MS = 8_000L
+        private const val TAG = "AemxActionExecutor"
+        const val PROBE_INTERVAL_MS = 1_000L
+        const val CHIP_TAP_INTERVAL_MS = 5_000L
         const val OPEN_APP_TIMEOUT_MS = 15_000L
         const val OPEN_APP_STABLE_MS = 3_000L
         const val RETRY_INTERVAL_MS = 250L

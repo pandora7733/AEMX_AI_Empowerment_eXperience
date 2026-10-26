@@ -60,13 +60,13 @@ class AppLauncherTest {
     }
 
     @Test fun `a single partial label match is accepted`() {
-        installLauncherApp("com.example.homeplus", "홈플러스 익스프레스")
+        installLauncherApp("com.example.homeplus", "홈플러스몰")
         assertEquals("com.example.homeplus", launcher().resolve("홈플러스"))
     }
 
     @Test fun `ambiguous partial matches resolve to null with a reason`() {
-        installLauncherApp("com.example.bank", "카카오뱅크")
-        installLauncherApp("com.example.pay", "카카오페이")
+        installLauncherApp("com.example.bank", "카카오맵")
+        installLauncherApp("com.example.pay", "카카오웹")
 
         assertNull(launcher().resolve("카카오"))
         val failure = launcher().launch("카카오").exceptionOrNull()
@@ -75,9 +75,9 @@ class AppLauncherTest {
     }
 
     @Test fun `an exact label wins over longer partial matches`() {
-        installLauncherApp("com.example.music", "멜론")
-        installLauncherApp("com.example.musicplus", "멜론 플러스")
-        assertEquals("com.example.music", launcher().resolve("멜론"))
+        installLauncherApp("com.example.music", "하모니")
+        installLauncherApp("com.example.musicplus", "하모니 플러스")
+        assertEquals("com.example.music", launcher().resolve("하모니"))
     }
 
     @Test fun `packages without a launcher activity are not found by label`() {

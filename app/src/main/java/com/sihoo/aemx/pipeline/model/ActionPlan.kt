@@ -50,7 +50,7 @@ data class ActionStep(
     fun describe(): String {
         val targetPart = target?.let { " \"$it\"" } ?: ""
         val valuePart = when (action) {
-            ActionType.INPUT_TEXT -> value?.let { " (${it.length}자 입력)" } ?: ""
+            ActionType.INPUT_TEXT, ActionType.SEND_MESSAGE -> value?.let { " (${it.length}자 입력)" } ?: ""
             else -> ""
         }
         return "#${index + 1} ${action.label}$targetPart$valuePart"
@@ -87,6 +87,9 @@ enum class ActionType(val wire: String, val label: String) {
 
     SCROLL("scroll", "스크롤"),
     WAIT("wait", "대기"),
+
+    /** 카카오톡·문자로 메시지를 보낸다. target 은 받는 사람, value 는 보낼 내용이다. */
+    SEND_MESSAGE("send_message", "메시지 보내기"),
 
     /** 파서가 모르는 action 문자열. 실행하지 않고 재분석 대상이 된다. */
     UNKNOWN("", "알 수 없는 동작");

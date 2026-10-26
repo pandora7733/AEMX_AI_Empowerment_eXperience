@@ -307,7 +307,10 @@ class PipelineOrchestrator(
                 is ExecutionResult.Failed ->
                     return StepOutcome.ExecutorError(
                         screenObserver.capture() ?: before,
-                        result.message
+                        result.message,
+                        // 메시지는 보냈을 수도 있고, 받는 사람을 못 정한 것은 재분석으로 풀리지 않는다.
+                        // 모델이 다른 조작을 지어내거나 같은 메시지를 또 보내지 않도록 바로 포기한다.
+                        unrecoverable = step.action == ActionType.SEND_MESSAGE
                     )
 
                 is ExecutionResult.Unsupported ->
@@ -417,6 +420,20 @@ class PipelineOrchestrator(
                         }
                     )
                 )
+
+            ActionType.SEND_MESSAGE -> {
+                val recipient = step.target
+                val text = step.value
+                if (recipient.isNullOrBlank() || text.isNullOrBlank()) {
+                    CommandMapping.Rejected { screen ->
+                        StepOutcome.ExecutorError(
+                            screen, "받는 사람이나 보낼 내용이 비어 있다", unrecoverable = true
+                        )
+                    }
+                } else {
+                    CommandMapping.Ready(ActionExecutor.Command.SendMessage(appName, recipient, text))
+                }
+            }
 
             ActionType.WAIT ->
                 CommandMapping.Rejected { screen ->

@@ -104,64 +104,98 @@ internal object NodeFinder {
     /**
      * 유튜브 뮤직 검색 결과에서 맨 처음 나오는 노래를 고른다.
      *
-     * 주의: 유튜브 뮤직의 접근성 트리는 아직 실기기에서 확인하지 못했다. 아래 규칙은 추정이고,
-     * 실기기 uiautomator dump 로 보정해야 한다. 보정할 곳은 [SONG_KIND], [OTHER_KIND],
-     * [MAX_ITEM_LABELS] 와 [itemLabels] 의 깊이다.
+     * 실기기 dump 로 확인한 사실(`ytmusic_search_1.xml`: 칩 선택 전, `ytmusic_songs_chip.xml`: 노래 칩 선택 뒤):
+     * - "전체" 탭의 결과 항목에는 글자가 하나도 없어 노래·앨범·아티스트를 가릴 수 없다.
+     * - "노래" 칩을 누르면 `results_list` 의 직계 자식 행(`swipe_layout`)마다 id 가 붙은 글자가 생긴다:
+     *   `title`(곡명), `subtitle`("가수 • 4:05 • 276만회 재생").
+     * - 행과 그 안의 어떤 노드도 clickable 이 아니다(long-clickable 인 `two_column_item_content_parent` 만 있다).
+     *   그래서 이 함수는 누를 노드가 아니라 **행**을 주고, 누르는 일은 호출한 쪽이 노드 클릭 → 좌표 탭 순으로 한다.
+     * - 칩 선택 여부는 selected/checked 가 아니라 칩 글자 두 단계 위 FrameLayout 의 content-desc 가
+     *   "노래 검색결과 표시" 에서 "노래 검색결과 표시가 선택됨" 으로 바뀐다.
      *
-     * 추정한 모양:
-     * - 검색 결과는 세로 목록이고, 항목 하나가 눌 수 있는 컨테이너 하나다.
-     * - 항목 안에 글자가 둘 이상 있다: 제목, 그리고 "노래 • 가수 • 앨범" 같은 부제(영문 기기는
-     *   "Song • Artist"). 부제의 첫 단어가 종류(노래/앨범/아티스트/재생목록…)를 말해 준다.
-     * - 상단의 필터 칩(노래, 동영상, 앨범…)은 글자가 하나뿐이라 둘 이상이라는 조건으로 걸러진다.
-     *
-     * 그래서 눌 수 있고 글자가 2~[MAX_ITEM_LABELS]개인 항목 중 부제가 "노래"로 시작하는 첫 항목을 고른다.
-     * 그런 항목이 없으면(부제 문구가 다르면) 구분점(•)이 있는 부제를 가졌고 아티스트·앨범·
-     * 재생목록 등으로 보이지 않는 첫 항목을 대신 고른다. 맨 위 "상위 결과" 카드가 아티스트면 건너뛴다.
+     * 그래서 "노래" 칩이 선택된 상태에서만, 목록의 첫 행 중 `title` 글자가 있고 화면에 보이는 것을 고른다.
+     * 칩이 없거나 선택 전이면 null 을 돌려 엉뚱한 걸 누르지 않는다. 칩은 [findSongFilterChip] 으로 찾는다.
      */
     fun findFirstSong(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (root == null) return null
+        val chip = findSongFilterChip(root) ?: return null
+        if (!isSelectedChip(chip)) return null
+        val list = findById(root, SONG_LIST_ID_SUFFIX) ?: return null
+        for (index in 0 until list.childCount) {
+            val row = list.getChild(index) ?: continue
+            if (isSongRow(row)) return row
+        }
+        return null
+    }
+
+    /**
+     * 유튜브 뮤직 검색 결과 위의 "노래" 필터 칩. 글자가 정확히 "노래"(영문 Songs)인 칩 버튼의 글자 노드를 그대로 준다.
+     * 칩은 clickable 로 나오지 않으니 누르려면 호출한 쪽이 노드 클릭 → 좌표 탭 순으로 한다. 못 찾거나 둘 이상이면 null.
+     */
+    fun findSongFilterChip(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+        var match: AccessibilityNodeInfo? = null
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0
-        var fallback: AccessibilityNodeInfo? = null
-
         while (queue.isNotEmpty()) {
-            if (++visited > 2_000) break
+            if (++visited > 2_000) return null
             val node = queue.removeFirst()
-            if (isClickableNode(node)) {
-                val labels = itemLabels(node)
-                if (labels.size in 2..MAX_ITEM_LABELS) {
-                    if (labels.any { SONG_KIND.containsMatchIn(it) }) return node
-                    if (fallback == null &&
-                        labels.any { it.contains('\u2022') || it.contains('\u00B7') } &&
-                        labels.none { OTHER_KIND.containsMatchIn(it) }
-                    ) {
-                        fallback = node
-                    }
-                }
+            if (node.viewIdResourceName?.endsWith(SONG_CHIP_ID_SUFFIX) == true &&
+                node.text?.toString()?.trim()?.let { label -> SONG_CHIP_LABELS.any { it.equals(label, ignoreCase = true) } } == true
+            ) {
+                if (match != null) return null
+                match = node
             }
             for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
-        return fallback
+        return match
+    }
+
+    /**
+     * 칩이 선택됐는지. 칩과 그 부모 몇 단계의 selected/checked 또는 content-desc 끝의 "선택됨"(영문 "selected")으로 본다.
+     * 실기기에서는 content-desc 만 바뀌었다.
+     */
+    fun isSelectedChip(chip: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = chip
+        var hops = 0
+        while (current != null && hops++ < CHIP_ANCESTOR_HOPS) {
+            if (current.isSelected || current.isChecked) return true
+            val description = current.contentDescription?.toString()?.trim()
+            if (description != null && SELECTED_SUFFIXES.any { description.endsWith(it, ignoreCase = true) }) return true
+            current = current.parent
+        }
+        return false
+    }
+
+    /** 노래 행: 보이고, id 가 title 인 글자가 있다. 위쪽 섹션 제목 같은 글자 없는 행은 빠진다. */
+    private fun isSongRow(row: AccessibilityNodeInfo): Boolean {
+        if (!row.isVisibleToUser) return false
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(row) }
+        var visited = 0
+        while (queue.isNotEmpty() && ++visited <= SONG_ROW_MAX_NODES) {
+            val node = queue.removeFirst()
+            if (node.viewIdResourceName?.endsWith(SONG_TITLE_ID_SUFFIX) == true &&
+                !node.text.isNullOrBlank()
+            ) return true
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
+        }
+        return false
     }
 
     private fun isClickableNode(node: AccessibilityNodeInfo): Boolean =
         node.isVisibleToUser && node.isEnabled &&
             (node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
 
-    /** 항목 안의 글자(자신 포함, 몇 단계 아래까지). 중복은 뺀다. */
-    private fun itemLabels(item: AccessibilityNodeInfo): List<String> {
-        val labels = LinkedHashSet<String>()
-        fun visit(node: AccessibilityNodeInfo, depth: Int) {
-            if (labels.size > MAX_ITEM_LABELS) return
-            listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
-                .map { it.trim() }
-                .filter { it.isNotEmpty() && it.length <= MAX_LABEL_LENGTH }
-                .forEach { labels += it }
-            if (depth >= ITEM_LABEL_DEPTH) return
-            for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, depth + 1) }
+    private fun findById(root: AccessibilityNodeInfo, suffix: String): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        while (queue.isNotEmpty()) {
+            if (++visited > 2_000) return null
+            val node = queue.removeFirst()
+            if (node.viewIdResourceName?.endsWith(suffix) == true) return node
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
-        visit(item, 0)
-        return labels.toList()
+        return null
     }
 
     /** 검색 결과가 담기는 목록. 못 찾으면 호출한 쪽이 화면 전체를 쓰게 null 을 준다. */
@@ -314,18 +348,14 @@ internal object NodeFinder {
 
     private const val MAX_LABELS = 40
 
-    /** 유튜브 뮤직 검색 결과 한 항목에서 읽을 글자 수 상한. 더 많으면 항목이 아니라 목록 전체로 본다. */
-    private const val MAX_ITEM_LABELS = 8
-    private const val ITEM_LABEL_DEPTH = 4
-
-    /** 부제가 "노래"(영문 기기는 Song)로 시작하거나 그 종류 표시가 따로 있는 글자. 실기기 dump 로 보정한다. */
-    private val SONG_KIND = Regex("(^|[\\u2022\\u00B7,]\\s*)(노래|song)\\s*([\\u2022\\u00B7,]|$)", RegexOption.IGNORE_CASE)
-
-    /** 노래가 아닌 종류 표시. 폴백에서 이런 항목은 건너뛴다. 실기기 dump 로 보정한다. */
-    private val OTHER_KIND = Regex(
-        "(^|[\\u2022\\u00B7,]\\s*)(아티스트|앨범|싱글|EP|재생목록|프로필|팟캐스트|에피소드|artist|album|single|playlist|profile|podcast|episode)\\s*([\\u2022\\u00B7,]|$)",
-        RegexOption.IGNORE_CASE,
-    )
+    /** 유튜브 뮤직 검색 결과 목록과 필터 칩의 resource-id 꼬리. 실기기 dump 에서 확인했다. */
+    private const val SONG_LIST_ID_SUFFIX = "/results_list"
+    private const val SONG_CHIP_ID_SUFFIX = "/chip_cloud_chip_text"
+    private val SONG_CHIP_LABELS = listOf("노래", "Songs")
+    private const val SONG_TITLE_ID_SUFFIX = "/title"
+    private val SELECTED_SUFFIXES = listOf("선택됨", "selected")
+    private const val CHIP_ANCESTOR_HOPS = 4
+    private const val SONG_ROW_MAX_NODES = 40
     private const val MAX_LABEL_LENGTH = 60
 
     /** 광고 표시를 찾아 조상을 몇 단계까지 올라갈지. 실기기에서는 한 단계면 닿는다. */

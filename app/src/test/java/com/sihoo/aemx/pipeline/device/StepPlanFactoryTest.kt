@@ -72,6 +72,16 @@ class StepPlanFactoryTest {
     }
 
     @Test
+    fun `메시지 보내기는 받는 사람과 내용을 그대로 싣는다`() {
+        val plan = parse(Command.SendMessage("카카오톡", "엄마", "곧 갈게"), "카카오톡")
+        assertEquals("카카오톡", plan.app)
+        val step = plan.steps.single()
+        assertEquals(A11yType.SEND_MESSAGE, step.action)
+        assertEquals("엄마", step.target)
+        assertEquals("곧 갈게", step.value)
+    }
+
+    @Test
     fun `입력란 이름이 없으면 만들지 않는다`() {
         assertThrows(IllegalArgumentException::class.java) {
             StepPlanFactory.build(Command.InputText(null, "abc"), "네이버")

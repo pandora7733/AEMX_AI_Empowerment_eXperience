@@ -71,6 +71,12 @@ internal object StepPlanFactory {
                 action = A11yType.SCROLL
                 target = if (command.direction == Command.Direction.UP) "up" else "down"
             }
+
+            is Command.SendMessage -> {
+                action = A11yType.SEND_MESSAGE
+                target = command.target
+                value = command.value
+            }
         }
 
         require(target.isNotBlank()) { "대상이 비어 있다" }

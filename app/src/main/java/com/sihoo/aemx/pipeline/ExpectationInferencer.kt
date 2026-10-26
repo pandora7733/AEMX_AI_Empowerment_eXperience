@@ -109,6 +109,12 @@ class ExpectationInferencer(
                 timeoutMs = WAIT_TIMEOUT_MS
             )
 
+            // 보낸 뒤 확인은 실행모듈(MessageSender)이 마지막 말풍선으로 직접 한다. 여기서는 요구하지 않는다.
+            ActionType.SEND_MESSAGE -> step.copy(
+                expect = Expectation(note = "메시지 전송은 실행모듈이 성공을 알리면 통과한다"),
+                timeoutMs = SEND_MESSAGE_TIMEOUT_MS
+            )
+
             ActionType.UNKNOWN -> step
         }
     }
@@ -117,6 +123,7 @@ class ExpectationInferencer(
         /** 앱 실행은 콜드 스타트면 오래 걸린다. */
         const val APP_LAUNCH_TIMEOUT_MS = 10_000L
         const val WAIT_TIMEOUT_MS = 3_000L
+        const val SEND_MESSAGE_TIMEOUT_MS = 45_000L
 
         /** 입력 확인에 쓸 앞부분 길이. 너무 길게 잡으면 잘려 보일 때 오탐이 난다. */
         const val INPUT_PROBE_LENGTH = 6

@@ -128,8 +128,12 @@ class AccessibilityStepExecutor(
     private fun resolveApp(command: Command): String? = when (command) {
         is Command.LaunchApp -> nameForPackage(command.packageName)
         is Command.Search -> command.appName.takeIf { isSupportedApp(it) }
-        // 서비스가 첫 영상 재생을 받는 앱은 유튜브뿐이라 앞 화면이나 직전 앱을 보지 않는다.
-        Command.PlayFirst -> YOUTUBE
+        is Command.SendMessage -> command.appName.takeIf { isSupportedApp(it) }
+        // 첫 영상 재생을 받는 앱은 유튜브와 유튜브 뮤직뿐이다. 앞 화면이 유튜브 뮤직일 때만 그쪽으로 보내고,
+        // 그 밖에는 앞 화면이나 직전 앱을 보지 않고 유튜브다. 서비스가 패키지를 비교하므로 이름이 틀리면 늘 NotReady 다.
+        Command.PlayFirst ->
+            if (foregroundPackage() == AppLauncher.YOUTUBE_MUSIC_PACKAGE && isSupportedApp(YOUTUBE_MUSIC)) YOUTUBE_MUSIC
+            else YOUTUBE
         else -> nameForPackage(foregroundPackage()) ?: currentApp
     }
 
@@ -139,6 +143,8 @@ class AccessibilityStepExecutor(
      */
     private fun timeoutFor(command: Command): Long = when (command) {
         is Command.LaunchApp, is Command.Search -> LAUNCH_TIMEOUT_MS
+        // 서비스 쪽 제한(카톡 40초 + 확인 8초 + 정착)보다 넉넉하게.
+        is Command.SendMessage -> SEND_MESSAGE_TIMEOUT_MS
         is Command.NextVideo -> {
             val delay = command.delay?.let { runCatching { WaitDuration.millis(it) }.getOrNull() } ?: 0L
             ACTION_TIMEOUT_MS + delay
@@ -149,8 +155,10 @@ class AccessibilityStepExecutor(
     internal companion object {
         const val LAUNCH_TIMEOUT_MS = 25_000L
         const val ACTION_TIMEOUT_MS = 13_000L
+        const val SEND_MESSAGE_TIMEOUT_MS = 55_000L
         private const val TAG = "AccessibilityStepExecutor"
         private const val YOUTUBE = "유튜브"
+        private const val YOUTUBE_MUSIC = "유튜브 뮤직"
 
         /**
          * 서비스의 끝 알림을 오케스트레이터의 결과로 옮긴다.

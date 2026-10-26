@@ -122,4 +122,19 @@ class ScreenVerifierTest {
             KnownSituation.detect(screen("보안문자를입력해주세요"))
         )
     }
+
+    @Test
+    fun `메시지 앱 대화 목록에 인증번호가 보여도 통과한다`() {
+        for (pkg in listOf("com.samsung.android.messaging", "com.google.android.apps.messaging", "com.kakao.talk")) {
+            val list = screen("엄마", "인증번호 123456", "[Web발신]", pkg = pkg)
+            assertNull(KnownSituation.detect(list))
+            assertEquals(ScreenVerifier.Verdict.Match, ScreenVerifier.verify(Expectation.NONE, list, list))
+        }
+    }
+
+    @Test
+    fun `일반 앱의 인증 화면은 그대로 걸린다`() {
+        val situation = KnownSituation.detect(screen("인증번호 입력", pkg = "com.nhn.android.search"))
+        assertEquals(KnownSituation.HUMAN_VERIFICATION, situation)
+    }
 }

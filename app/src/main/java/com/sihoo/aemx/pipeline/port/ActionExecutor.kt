@@ -64,6 +64,12 @@ interface ActionExecutor {
 
         data class Scroll(val direction: Direction) : Command
 
+        /**
+         * 카카오톡·문자(문자는 [appName] 이 "메시지")로 [target] 에게 [value] 를 보낸다.
+         * 받는 사람이 정확히 하나로 정해지지 않거나 화면이 기대와 다르면 보내지 않고 실패한다.
+         */
+        data class SendMessage(val appName: String, val target: String, val value: String) : Command
+
         enum class Direction { UP, DOWN }
     }
 }

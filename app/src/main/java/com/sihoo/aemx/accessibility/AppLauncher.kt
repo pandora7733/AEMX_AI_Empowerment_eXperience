@@ -3,13 +3,14 @@ package com.sihoo.aemx.accessibility
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.provider.Telephony
 import java.util.Locale
 
 internal class AppLauncher(private val context: Context) {
 
     /** 이름을 풀어낸 결과. 못 찾았으면 [packageName] 이 null 이고 [reason] 에 이유가 있다. */
-    private class Resolution(val packageName: String?, val reason: String? = null)
+    internal class Resolution(val packageName: String?, val reason: String? = null)
 
     /** 한 번 풀어낸 이름. 계획을 실행하는 동안 같은 앱을 여러 번 묻는다. 못 찾은 것은 담지 않는다. */
     private val resolved = HashMap<String, String>()
@@ -52,16 +53,7 @@ internal class AppLauncher(private val context: Context) {
             packageName to normalizeName(info.loadLabel(packageManager).toString())
         }.distinct()
 
-        val exact = apps.filter { it.second == query }.map { it.first }.distinct()
-        if (exact.size == 1) return Resolution(exact.single())
-        if (exact.size > 1) return Resolution(null, "이름이 같은 앱이 여러 개입니다: $appName")
-
-        val partial = apps.filter { it.second.contains(query) }.map { it.first }.distinct()
-        return when {
-            partial.size == 1 -> Resolution(partial.single())
-            partial.size > 1 -> Resolution(null, "앱 이름이 모호합니다. 더 정확히 말해 주세요: $appName")
-            else -> Resolution(null, "설치되지 않았거나 찾을 수 없는 앱입니다: $appName")
-        }
+        return pickByLabel(appName, query, apps)
     }
 
     fun launch(appName: String): Result<Unit> = runCatching {
@@ -71,6 +63,7 @@ internal class AppLauncher(private val context: Context) {
         val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
             ?: error("앱이 설치되어 있지 않거나 실행 Activity를 찾을 수 없습니다.")
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        runCatching { Log.i(TAG, "앱 실행: $appName -> $packageName, 시작 화면=${launchIntent.component?.flattenToShortString()}") }
         context.startActivity(launchIntent)
     }
 
@@ -93,6 +86,8 @@ internal class AppLauncher(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "AemxAppLauncher"
+
         // Google Play listing verified 2026-09-25; device validation remains required.
         private val PACKAGE_NAMES = mapOf(
             "교보문고" to "mok.android",
@@ -115,6 +110,8 @@ internal class AppLauncher(private val context: Context) {
             "카카오톡" to KAKAOTALK_PACKAGE,
             "카톡" to KAKAOTALK_PACKAGE,
             "kakaotalk" to KAKAOTALK_PACKAGE,
+            "멜론" to MELON_PACKAGE,
+            "melon" to MELON_PACKAGE,
             "쿠팡" to COUPANG_PACKAGE,
             "coupang" to COUPANG_PACKAGE,
             // 메시지 앱은 기기마다 다르다. 실제로 열 때는 기본 SMS 앱으로 바꾼다([resolve]).
@@ -127,6 +124,38 @@ internal class AppLauncher(private val context: Context) {
 
         /** 라벨 검색에 쓸 최소 길이. 한 글자로는 너무 많은 앱에 걸린다. */
         private const val MIN_LABEL_QUERY = 2
+
+        /**
+         * 설치된 앱의 (패키지, 정규화한 라벨) 목록에서 [query] 에 맞는 앱 하나를 고른다. 순수 함수다.
+         *
+         * 1. 라벨 정확 일치가 하나면 그것, 여럿이면 모호해서 null.
+         * 2. 정확 일치가 없으면 라벨이 query 를 포함하고 **query 가 라벨의 대부분을 차지할 때만** 후보로 본다.
+         *    라벨에 query 말고 남는 글자가 "앱"/"app" 뿐이거나, query 가 라벨 길이의 3/4 이상이면 같은 앱으로 본다.
+         *    "멜론" 이 "멜론티켓"(2/4), "쿠팡" 이 "쿠팡이츠"(2/4), "네이버" 가 "네이버 지도"(3/5)를 여는 일을 막는다.
+         *    "카카오"→"카카오톡"(3/4)처럼 줄여 부르는 말은 계속 열린다.
+         * 3. 후보가 하나일 때만 연다. 여럿이면 모호, 없으면 못 찾음. 불확실하면 열지 않는다.
+         */
+        internal fun pickByLabel(appName: String, query: String, apps: List<Pair<String, String>>): Resolution {
+            val exact = apps.filter { it.second == query }.map { it.first }.distinct()
+            if (exact.size == 1) return Resolution(exact.single())
+            if (exact.size > 1) return Resolution(null, "이름이 같은 앱이 여러 개입니다: $appName")
+
+            val partial = apps.filter { isCloseLabel(query, it.second) }.map { it.first }.distinct()
+            return when {
+                partial.size == 1 -> Resolution(partial.single())
+                partial.size > 1 -> Resolution(null, "앱 이름이 모호합니다. 더 정확히 말해 주세요: $appName")
+                else -> Resolution(null, "설치되지 않았거나 찾을 수 없는 앱입니다: $appName")
+            }
+        }
+
+        private fun isCloseLabel(query: String, label: String): Boolean {
+            if (!label.contains(query)) return false
+            val rest = label.replaceFirst(query, "")
+            return rest in GENERIC_LABEL_WORDS || query.length * 4 >= label.length * 3
+        }
+
+        /** 라벨에 붙어도 같은 앱으로 보는 말. */
+        private val GENERIC_LABEL_WORDS = setOf("앱", "app", "어플")
 
         /** 공백을 없애고 소문자로. "유튜브 뮤직" 과 "유튜브뮤직" 을 같게 본다. */
         internal fun normalizeName(value: String): String =
@@ -145,6 +174,7 @@ internal class AppLauncher(private val context: Context) {
         const val YOUTUBE_MUSIC_PACKAGE = "com.google.android.apps.youtube.music"
         const val INSTAGRAM_PACKAGE = "com.instagram.android"
         const val KAKAOTALK_PACKAGE = "com.kakao.talk"
+        const val MELON_PACKAGE = "com.iloen.melon"
         const val COUPANG_PACKAGE = "com.coupang.mobile"
         const val SAMSUNG_MESSAGES_PACKAGE = "com.samsung.android.messaging"
     }

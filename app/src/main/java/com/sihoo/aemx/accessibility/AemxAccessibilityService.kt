@@ -88,6 +88,18 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
     /** 손가락을 아래로 쓸어 내린다(내용은 위로, 즉 이전 쪽으로 간다). */
     internal fun swipeDown(): Boolean = swipeVertically(fromY = 0.22f, toY = 0.78f)
 
+    /** 화면의 (x, y) 픽셀을 짧게 탭한다. 노드가 눌 수 있다고 알리지 않을 때 쓴다. */
+    internal fun tap(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatchGesture(
+            GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0L, 60L))
+                .build(),
+            null,
+            null,
+        )
+    }
+
     private fun swipeVertically(fromY: Float, toY: Float): Boolean {
         val metrics = resources.displayMetrics
         val x = metrics.widthPixels / 2f

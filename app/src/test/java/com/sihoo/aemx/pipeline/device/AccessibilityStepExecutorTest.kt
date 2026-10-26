@@ -91,6 +91,14 @@ class AccessibilityStepExecutorTest {
     }
 
     @Test
+    fun `첫 곡 재생은 앞 화면이 유튜브 뮤직이면 유튜브 뮤직으로 보낸다`() = runTest {
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        executor(bridge, foreground = "com.google.android.apps.youtube.music").execute(Command.PlayFirst)
+
+        assertEquals("유튜브 뮤직", JSONObject(bridge.submitted.single()).getString("app"))
+    }
+
+    @Test
     fun `첫 영상 재생은 앞 화면을 몰라도 직전 앱이 네이버여도 유튜브로 보낸다`() = runTest {
         val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
         val exec = executor(bridge, foreground = null)

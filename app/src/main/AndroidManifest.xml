@@ -8,6 +8,9 @@
     <!-- 음성 명령을 들으려면 마이크가 필요하다. 실행 중에 사용자에게 물어본다. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- 문자 보내기: 받는 사람 이름이 연락처에 정확히 한 명 있는지 확인한다. 실행 중에 사용자에게 물어본다. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <queries>
         <!-- 설치된 앱을 이름(런처 라벨)으로 열려고 런처 앱 목록을 본다. QUERY_ALL_PACKAGES 는 쓰지 않는다. -->
         <intent>

@@ -117,7 +117,18 @@ class PipelineDebugActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(createContentView())
         resetPipeline()
+        // 문자 보내기가 받는 사람을 연락처에서 찾는다. 거절해도 다른 기능에는 영향이 없다.
+        if (savedInstanceState == null && ContextCompat.checkSelfPermission(
+                this, Manifest.permission.READ_CONTACTS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+        }
     }
+
+    private val contactsPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
 
     private val micPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),

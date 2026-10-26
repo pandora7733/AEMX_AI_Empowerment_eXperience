@@ -34,7 +34,10 @@ enum class ActionType(val wireName: String) {
     PLAY_FIRST("play_first"),
     NEXT_VIDEO("next_video"),
     SCROLL("scroll"),
-    WAIT("wait");
+    WAIT("wait"),
+
+    /** 카카오톡·문자로 메시지를 보낸다. target 은 받는 사람, value 는 사용자가 말한 내용. */
+    SEND_MESSAGE("send_message");
 
     companion object {
         fun fromWireName(value: String): ActionType = entries.firstOrNull { it.wireName == value }
@@ -66,6 +69,7 @@ object ActionPlanParser {
                         null
                     }
                     validate(action, target, value, index)
+                    if (action == ActionType.SEND_MESSAGE) validateSendMessage(app, value, index)
                     require(action != ActionType.OPEN_APP || sameApp(target, app)) {
                         "open_app target은 plan.app과 같아야 합니다."
                     }
@@ -122,6 +126,15 @@ object ActionPlanParser {
             "scroll target은 up/down/forward/backward만 지원합니다."
         }
         if (action == ActionType.WAIT) WaitDuration.millis(value ?: target)
+    }
+
+    private fun validateSendMessage(app: String, value: String?, index: Int) {
+        if (MessageRules.channelFor(app) == null) {
+            throw ActionPlanParseException("steps[$index].send_message는 카카오톡과 메시지(문자) 앱에서만 지원합니다.")
+        }
+        if (value.isNullOrBlank()) {
+            throw ActionPlanParseException("steps[$index].send_message에는 value(보낼 내용)가 필요합니다.")
+        }
     }
 
     private const val MAX_STEPS = 50

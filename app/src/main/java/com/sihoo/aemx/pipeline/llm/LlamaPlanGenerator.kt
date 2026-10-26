@@ -13,7 +13,9 @@ import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
 import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -58,14 +60,43 @@ class LlamaPlanGenerator(
 
         val modelFile = ensureModelDownloaded(onProgress)
 
-        onProgress(100, "모델 로딩 중...")
-        engine.loadModel(modelFile.path)
+        // 엔진은 프로세스 하나에 하나뿐이다. 최근 앱 목록에서 앱을 지워도 접근성 서비스 때문에
+        // 프로세스가 살아 있어서, 새 Activity 가 엔진이 이미 모델을 올린 상태로 prepare 를 부른다.
+        // 그때 loadModel 을 또 부르면 "Cannot load model in ModelReady!" 로 실패한다.
+        val state = settleState()
+        when (val step = nextStep(state, enginePrimed)) {
+            EngineStep.REUSE -> {
+                // 모델과 시스템 프롬프트가 이미 들어 있다. 프롬프트는 APK 에 들어 있어 앱을 새로
+                // 설치하면 프로세스가 죽으므로, 살아 있는 엔진의 프롬프트가 낡았을 수는 없다.
+                // 지난 명령의 대화 기록만 비운다.
+                Log.i(TAG, "엔진에 모델이 이미 올라 있어 다시 올리지 않는다")
+                engine.resetConversation()
+            }
+            EngineStep.LOAD, EngineStep.UNLOAD_THEN_LOAD -> {
+                if (step == EngineStep.UNLOAD_THEN_LOAD) {
+                    // 올라가 있지만 시스템 프롬프트까지 끝났는지 모르거나(준비 도중 끊김) 오류 상태다.
+                    Log.i(TAG, "엔진 상태 ${state.javaClass.simpleName}: 내리고 다시 올린다")
+                    withContext(Dispatchers.IO) { engine.cleanUp() }
+                }
+                enginePrimed = false
+                onProgress(100, "모델 로딩 중...")
+                engine.loadModel(modelFile.path)
 
-        onProgress(100, "시스템 프롬프트 처리 중...")
-        engine.setSystemPrompt(AemxPrompts.systemPrompt(context))
+                onProgress(100, "시스템 프롬프트 처리 중...")
+                engine.setSystemPrompt(AemxPrompts.systemPrompt(context))
+                enginePrimed = true
+            }
+        }
 
         prepared = true
         onProgress(100, "준비 완료")
+    }
+
+    /** 이전 생성이나 로딩이 아직 끝나지 않았다면 끝나기를 기다린다(최대 [SETTLE_TIMEOUT_MS]). */
+    private suspend fun settleState(): InferenceEngine.State {
+        if (!engine.state.value.isBusy()) return engine.state.value
+        return withTimeoutOrNull(SETTLE_TIMEOUT_MS) { engine.state.first { !it.isBusy() } }
+            ?: throw IllegalStateException("엔진이 다른 작업 중이라 모델을 준비할 수 없다: ${engine.state.value.javaClass.simpleName}")
     }
 
     override suspend fun generate(request: PlanRequest): PlanResult {
@@ -98,7 +129,10 @@ class LlamaPlanGenerator(
                 // 가드는 사용자가 문장 앞에서 앱을 직접 지목했을 때만 움직인다. 지목이 없는 문장의
                 // 재분석은 화면을 보고 앱을 바꿀 수 있으므로 결과를 그대로 둔다.
                 val plan = AppMentionGuard.apply(request.utterance, parsed.plan)
-                PlanResult.Success(plan, raw, parsed.warnings)
+                // 보낼 내용이 사용자가 말한 글에 없으면 계획을 버려 다시 받는다. 메시지는 되돌릴 수 없다.
+                val checked = SendMessageGuard.check(request.utterance, plan)
+                    ?: return PlanResult.Malformed(raw, "send_message 의 value 가 사용자가 말한 내용에 없다")
+                PlanResult.Success(checked, raw, parsed.warnings)
             }
             is ParseResult.Failure -> PlanResult.Malformed(raw, parsed.reason)
         }
@@ -258,6 +292,34 @@ class LlamaPlanGenerator(
     }
 
     companion object {
+        /** 모델과 시스템 프롬프트를 끝까지 올린 적이 있는지. 엔진처럼 프로세스에 하나라 정적으로 둔다. */
+        @Volatile
+        private var enginePrimed = false
+
+        private const val SETTLE_TIMEOUT_MS = 60_000L
+
+        internal enum class EngineStep { LOAD, REUSE, UNLOAD_THEN_LOAD }
+
+        /**
+         * 엔진 상태로 prepare 에서 할 일을 정한다.
+         * 엔진이 모델 로딩과 시스템 프롬프트 처리까지 끝낸 채 대기 중([primed])이면 다시 올리지 않는다.
+         * 처음 상태(Initialized)면 그냥 올리고, 그 밖에 모델이 올라가 있거나 오류면 내렸다가 올린다.
+         */
+        internal fun nextStep(state: InferenceEngine.State, primed: Boolean): EngineStep = when {
+            state is InferenceEngine.State.ModelReady && primed -> EngineStep.REUSE
+            state is InferenceEngine.State.Initialized -> EngineStep.LOAD
+            else -> EngineStep.UNLOAD_THEN_LOAD
+        }
+
+        private fun InferenceEngine.State.isBusy(): Boolean =
+            this is InferenceEngine.State.Initializing ||
+                this is InferenceEngine.State.LoadingModel ||
+                this is InferenceEngine.State.UnloadingModel ||
+                this is InferenceEngine.State.Benchmarking ||
+                this is InferenceEngine.State.ProcessingSystemPrompt ||
+                this is InferenceEngine.State.ProcessingUserPrompt ||
+                this is InferenceEngine.State.Generating
+
         /**
          * 요청 전에 대화 기록을 비울지.
          *

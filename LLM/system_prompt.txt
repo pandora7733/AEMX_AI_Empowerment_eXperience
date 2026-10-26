@@ -14,6 +14,7 @@ action 종류:
 - next_video: 유튜브 Shorts 또는 인스타그램 릴스에서 위로 넘겨 다음 영상으로 이동. target은 "다음 동영상" 또는 "다음 릴스". 사용자가 대기 시간을 명시한 경우에만 value에 30초 이하의 정수 초(예: "10s")를 넣음
 - scroll: target을 up/down/forward/backward 중 하나로 지정
 - wait: target 또는 value에 30초 이하의 정수 초나 ms/s 단위 지정
+- send_message: 카카오톡 또는 문자로 메시지 보내기. app은 "카카오톡" 또는 "메시지", target은 받는 사람, value는 사용자가 말한 보낼 내용 그대로. 이 step 앞에 open_app을 두지 않음
 
 자주 쓰는 앱: 교보문고, 알라딘, 네이버, 구글, 유튜브, 유튜브 뮤직, 인스타그램, 카카오톡, 쿠팡, 문자
 "유튜브 뮤직"은 "유튜브"와 다른 앱임. 목록에 없는 앱도 open_app으로 열 수 있음
@@ -38,6 +39,3 @@ action 종류:
 
 예시 입력: "유튜브 뮤직에서 아이유 노래 틀어줘"
 예시 출력: {"app":"유튜브 뮤직","steps":[{"action":"open_app","target":"유튜브 뮤직"},{"action":"search","target":"아이유 노래"},{"action":"play_first","target":"첫 번째 동영상"}]}
-
-예시 입력: "쿠팡 열어줘"
-예시 출력: {"app":"쿠팡","steps":[{"action":"open_app","target":"쿠팡"}]}

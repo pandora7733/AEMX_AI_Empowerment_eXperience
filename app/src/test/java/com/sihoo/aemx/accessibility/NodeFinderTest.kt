@@ -97,43 +97,78 @@ class NodeFinderTest {
         assertEquals("shorts 찍는 법 - 3분 12초 - 동영상 재생", found?.contentDescription)
     }
 
-    /** 유튜브 뮤직 검색 결과 한 항목의 추정 모양: 눌 수 있는 컨테이너 안에 제목과 부제. */
-    private fun musicItem(title: String, subtitle: String) =
-        node(clickable = true).with(node(title), node(subtitle))
+    private fun withId(id: String, label: String? = null) = node(label).apply {
+        viewIdResourceName = "com.google.android.apps.youtube.music:id/$id"
+    }
+
+    /** 실기기 dump 의 노래 행: clickable 은 없고 id 가 title/subtitle 인 글자가 있다. */
+    private fun songRow(title: String? = "시간의 바깥") = node().with(
+        node().with(
+            *listOfNotNull(
+                title?.let { withId("title", it) },
+                withId("subtitle", "아이유(IU) • 5:01 • 6260만회 재생"),
+            ).toTypedArray(),
+        ),
+    )
+
+    /**
+     * 칩: 글자 Button -> chip_contents -> FrameLayout(content-desc). 실기기에서 선택 전은
+     * "노래 검색결과 표시", 선택 뒤는 "노래 검색결과 표시가 선택됨" 이고 selected/checked 는 둘 다 false 다.
+     */
+    private fun songChip(selected: Boolean) = node(
+        description = if (selected) "노래 검색결과 표시가 선택됨" else "노래 검색결과 표시",
+    ).with(node().with(withId("chip_cloud_chip_text", "노래")))
+
+    private fun musicRoot(chip: AccessibilityNodeInfo, vararg rows: AccessibilityNodeInfo) =
+        node().with(chip, withId("results_list").with(*rows))
 
     @Test
-    fun `유튜브 뮤직은 노래 부제가 붙은 첫 항목을 고르고 칩과 아티스트는 건너뛴다`() {
-        val chip = node("노래", clickable = true)
-        val artist = musicItem("아이유", "아티스트 • 구독자 3천만명")
-        val song = musicItem("좋은 날", "노래 • 아이유 • 3:53")
-        val second = musicItem("밤편지", "노래 • 아이유 • 3:25")
-        val root = node().with(chip, artist, song, second)
+    fun `유튜브 뮤직은 노래 칩이 선택됐을 때 글자가 있는 첫 행을 고른다`() {
+        val header = node().with(node())
+        val first = songRow()
+        val root = musicRoot(songChip(selected = true), header, first, songRow("에필로그"))
 
-        assertEquals(song, NodeFinder.findFirstSong(root))
+        assertEquals(first, NodeFinder.findFirstSong(root))
     }
 
     @Test
-    fun `유튜브 뮤직은 영문 기기의 Song 부제도 인식한다`() {
-        val song = musicItem("Good Day", "Song • IU • 3:53")
-        val root = node().with(node("Songs", clickable = true), song)
-
-        assertEquals(song, NodeFinder.findFirstSong(root))
-    }
-
-    @Test
-    fun `노래 부제가 없으면 구분점이 있는 아티스트 아닌 첫 항목을 대신 고른다`() {
-        val album = musicItem("Palette", "앨범 • 아이유 • 2017")
-        val video = musicItem("좋은 날 MV", "동영상 • 아이유 • 조회수 3억회")
-        val root = node().with(album, video)
-
-        assertEquals(video, NodeFinder.findFirstSong(root))
-    }
-
-    @Test
-    fun `유튜브 뮤직 결과가 없으면 null 이다`() {
-        val root = node().with(node("노래", clickable = true), node("검색 결과가 없습니다"))
+    fun `유튜브 뮤직은 노래 칩이 선택되지 않았으면 null 이다`() {
+        val root = musicRoot(songChip(selected = false), songRow())
 
         assertNull(NodeFinder.findFirstSong(root))
+    }
+
+    @Test
+    fun `유튜브 뮤직은 제목이 비어 있는 행은 건너뛴다`() {
+        val real = songRow()
+        val root = musicRoot(songChip(selected = true), songRow(title = null), real)
+
+        assertEquals(real, NodeFinder.findFirstSong(root))
+    }
+
+    @Test
+    fun `유튜브 뮤직은 노래 칩이나 목록이 없으면 null 이다`() {
+        assertNull(NodeFinder.findFirstSong(node().with(withId("results_list").with(songRow()))))
+        assertNull(NodeFinder.findFirstSong(node().with(songChip(selected = true))))
+    }
+
+    @Test
+    fun `칩 선택은 부모 content-desc 끝의 선택됨으로 판정한다`() {
+        val selected = songChip(selected = true)
+        val unselected = songChip(selected = false)
+
+        assertEquals(true, NodeFinder.isSelectedChip(NodeFinder.findSongFilterChip(node().with(selected))!!))
+        assertEquals(false, NodeFinder.isSelectedChip(NodeFinder.findSongFilterChip(node().with(unselected))!!))
+    }
+
+    @Test
+    fun `노래 필터 칩은 글자가 정확히 노래인 칩 하나만 찾는다`() {
+        val chip = withId("chip_cloud_chip_text", "노래")
+        val other = withId("chip_cloud_chip_text", "앨범")
+        val root = node().with(other, chip)
+
+        assertEquals(chip, NodeFinder.findSongFilterChip(root))
+        assertNull(NodeFinder.findSongFilterChip(node().with(other)))
     }
 
     @Test

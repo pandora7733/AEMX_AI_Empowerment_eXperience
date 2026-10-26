@@ -102,9 +102,19 @@ enum class KnownSituation(
 
     companion object {
         /** 화면에서 알려진 상황을 찾는다. 사람 개입이 필요한 쪽을 먼저 본다. */
-        fun detect(screen: ScreenSnapshot): KnownSituation? =
-            entries.sortedByDescending { it.requiresHuman }
+        fun detect(screen: ScreenSnapshot): KnownSituation? {
+            // 대화 앱은 남이 보낸 글("인증번호 123456" 같은 문자 미리보기)이 화면에 늘 떠 있다.
+            // 그 글에 키워드가 걸려 멀쩡한 화면에서 사람에게 넘어가므로 이 앱들은 판정하지 않는다.
+            if (screen.packageName?.lowercase() in MESSAGE_PACKAGES) return null
+            return entries.sortedByDescending { it.requiresHuman }
                 .firstOrNull { situation -> situation.keywords.any { matches(screen, it) } }
+        }
+
+        /** 삼성 메시지·구글 메시지·기본 SMS 앱·카카오톡. */
+        private val MESSAGE_PACKAGES = setOf(
+            "com.samsung.android.messaging", "com.google.android.apps.messaging",
+            "com.android.mms", "com.kakao.talk",
+        )
 
         /**
          * 키워드가 화면에 있는지.

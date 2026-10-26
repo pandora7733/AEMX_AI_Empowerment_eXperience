@@ -95,4 +95,80 @@ class AppMentionGuardTest {
         assertEquals("메시지", AppMentionGuard.leadingApp("문자에서 엄마 찾아줘"))
         assertEquals(null, AppMentionGuard.leadingApp("쿠팡 열어줘"))
     }
+
+    private fun openPlan(app: String) = ActionPlan(app = app, steps = listOf(ActionStep(0, ActionType.OPEN_APP, app)))
+
+    @Test
+    fun `넷플릭스 열어줘인데 계획이 쿠팡이면 넷플릭스로 바로잡는다`() {
+        val fixed = AppMentionGuard.apply("넷플릭스 열어줘", openPlan("쿠팡"))
+
+        assertEquals("넷플릭스", fixed.app)
+        assertEquals("넷플릭스", fixed.steps[0].target)
+    }
+
+    @Test
+    fun `앱 열기 말투의 조사와 앱 글자를 걷어 낸다`() {
+        assertEquals("넷플릭스", AppMentionGuard.apply("넷플릭스를 열어줘", openPlan("쿠팡")).app)
+        assertEquals("넷플릭스", AppMentionGuard.apply("넷플릭스 앱 켜줘", openPlan("쿠팡")).app)
+        assertEquals("인스타그램", AppMentionGuard.apply("인스타 열어줘", openPlan("쿠팡")).app)
+    }
+
+    @Test
+    fun `앱 열기 말이어도 계획에 다른 동작이 있으면 건드리지 않는다`() {
+        val original = plan("쿠팡", "물티슈")
+        assertSame(original, AppMentionGuard.apply("넷플릭스 열어서 찾아줘", original))
+    }
+
+    @Test
+    fun `이미 맞는 앱 열기 계획은 그대로 둔다`() {
+        val original = openPlan("넷플릭스")
+        assertSame(original, AppMentionGuard.apply("넷플릭스 열어줘", original))
+    }
+
+    @Test
+    fun `앱은 맞고 open_app target 만 깨졌으면 target 을 앱에 맞춘다`() {
+        // 폰의 모델이 target 에 태국 문자를 섞어 냈던 경우.
+        val broken = ActionPlan(app = "넷플릭스", steps = listOf(ActionStep(0, ActionType.OPEN_APP, "넷플ิก스")))
+        val fixed = AppMentionGuard.apply("넷플릭스 열어줘", broken)
+
+        assertEquals("넷플릭스", fixed.app)
+        assertEquals("넷플릭스", fixed.steps[0].target)
+    }
+
+    @Test
+    fun `지목이 없는 문장도 open_app target 이 앱과 다르면 맞춘다`() {
+        val broken = ActionPlan(app = "유튜브", steps = listOf(ActionStep(0, ActionType.OPEN_APP, "유튜ㅂ"), ActionStep(1, ActionType.SEARCH, "고양이")))
+        val fixed = AppMentionGuard.apply("유튜브 고양이 검색해줘", broken)
+
+        assertEquals("유튜브", fixed.app)
+        assertEquals("유튜브", fixed.steps[0].target)
+        assertEquals("고양이", fixed.steps[1].target)
+    }
+
+    @Test
+    fun `열어줘를 검색어로 붙인 계획은 open_app 하나로 바꾼다`() {
+        // 폰의 모델이 "멜론 열어줘" 에 search "열어줘" 를 붙여 냈던 경우.
+        val bad = ActionPlan("멜론", listOf(ActionStep(0, ActionType.OPEN_APP, "멜론"), ActionStep(1, ActionType.SEARCH, "열어줘")))
+        val fixed = AppMentionGuard.apply("멜론 열어줘", bad)
+
+        assertEquals("멜론", fixed.app)
+        assertEquals(1, fixed.steps.size)
+        assertEquals(ActionType.OPEN_APP, fixed.steps[0].action)
+        assertEquals("멜론", fixed.steps[0].target)
+    }
+
+    @Test
+    fun `열기 뒤에 다른 요청이 붙은 말은 건드리지 않는다`() {
+        val original = plan("유튜브", "고양이")
+        assertSame(original, AppMentionGuard.apply("유튜브 열어서 고양이 검색해줘", original))
+        assertEquals(null, AppMentionGuard.openOnlyApp("유튜브 열어서 고양이 검색해줘"))
+        assertEquals("멜론", AppMentionGuard.openOnlyApp("멜론 좀 실행해줘"))
+        assertEquals("멜론", AppMentionGuard.openOnlyApp("멜론 앱을 켜줘."))
+    }
+
+    @Test
+    fun `이미 open_app 하나뿐인 계획은 그대로 둔다`() {
+        val original = openPlan("멜론")
+        assertSame(original, AppMentionGuard.apply("멜론 열어줘", original))
+    }
 }

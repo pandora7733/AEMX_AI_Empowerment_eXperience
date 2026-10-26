@@ -49,10 +49,14 @@ class SherpaSpeechSource(
     private val debuggable = PipelineRedaction.isDebuggable(context)
 
     private var recognizer: OnlineRecognizer? = null
+
+    /** [prepare] 때 만든 핫워드 전체. 듣기를 시작할 때마다 스트림에 넘긴다. */
+    @Volatile
+    private var hotwords: String = HOTWORDS_FIXED.joinToString("\n")
     private var audioRecord: AudioRecord? = null
     private val audioEffects = mutableListOf<AudioEffect>()
     private var listenJob: Job? = null
-    private val vad = EnergyVad(threshold = VAD_THRESHOLD)
+    private val vad = EnergyVad(threshold = VAD_THRESHOLD, hangoverFrames = VAD_HANGOVER_FRAMES)
 
     /** 켜면 말소리가 있는 구간만 인식기에 넣는다. 조용할 때 CPU 를 쓰지 않는다. */
     @Volatile
@@ -88,8 +92,25 @@ class SherpaSpeechSource(
      */
     fun prepare() {
         if (recognizer != null) return
+        hotwords = buildHotwords()
         recognizer = OnlineRecognizer(assetManager = context.assets, config = buildConfig())
         Log.i(TAG, "인식기 준비 완료")
+    }
+
+    /**
+     * 고정 핫워드에 설치된 앱 라벨과 연락처 이름을 더한다. 앱을 시작할 때(prepare) 한 번 만든다.
+     * 연락처는 READ_CONTACTS 가 있을 때만 들어간다. 권한이 prepare 뒤에 허락되면 다음 prepare 부터 반영된다.
+     */
+    private fun buildHotwords(): String {
+        val known = HotwordBuilder.knownChars(context, TOKENS_ASSET)
+        val text = HotwordBuilder.build(
+            fixed = HOTWORDS_FIXED,
+            appLabels = HotwordBuilder.launcherLabels(context),
+            contactNames = HotwordBuilder.contactNames(context),
+            isKnownChar = known::contains,
+        )
+        Log.i(TAG, "핫워드 ${text.lines().size}개 (고정 ${HOTWORDS_FIXED.size})")
+        return text
     }
 
     override fun start() {
@@ -135,7 +156,7 @@ class SherpaSpeechSource(
     private fun listen(engine: OnlineRecognizer) {
         warnedSkipReasons.clear()
         // 핫워드는 스트림을 만들 때 넘긴다. 파일이 아니라 문자열로 준다.
-        val stream = engine.createStream(HOTWORDS)
+        val stream = engine.createStream(hotwords)
         val buffer = ShortArray((READ_INTERVAL_SECONDS * SAMPLE_RATE).toInt())
         // 말소리가 시작된 프레임은 이미 소리가 올라온 뒤라 첫 음절이 잘린다. 직전 프레임들을
         // 들고 있다가 문이 열릴 때 같이 넣는다.
@@ -150,10 +171,14 @@ class SherpaSpeechSource(
         // 직전에 로그로 남긴 중간 결과와 마이크 차단 여부. 같은 값을 프레임마다 반복해 찍지 않으려는 것이다.
         var lastLoggedText = ""
         var wasMuted = false
+        // 지금 문장의 첫 말소리 시각(측정 로그용). 0 이면 아직 말소리가 없다.
+        var utteranceStartMs = 0L
 
         // 한 발화가 끝났다. 이 값이 파이프라인을 돌리는 방아쇠다. 인식기 endpoint 와 VAD 문이 닫힌
         // 경우 둘 다 같은 흐름으로 끝내야 해서 한 곳에 둔다.
-        fun finishUtterance(text: String) {
+        fun finishUtterance(text: String, viaGate: Boolean) {
+            logUtteranceEnd(utteranceStartMs, viaGate, trailingQuietFrames(loud), lastLoggedText, text)
+            utteranceStartMs = 0L
             engine.reset(stream)
             lastLoggedText = ""
             val voice = speechOnly(utterance, loud)
@@ -186,6 +211,7 @@ class SherpaSpeechSource(
                     wasOpen = false
                     utterance.clear()
                     loud.clear()
+                    utteranceStartMs = 0L
                     continue
                 }
                 wasMuted = false
@@ -211,7 +237,7 @@ class SherpaSpeechSource(
                             }
                             val flushed = engine.getResult(stream).textWithSpacing()
                             if (debuggable) Log.d(TAG, "문이 닫혀 문장을 끝낸다: $flushed")
-                            finishUtterance(flushed.ifBlank { lastLoggedText })
+                            finishUtterance(flushed.ifBlank { lastLoggedText }, viaGate = true)
                         }
                         wasOpen = false
                         preRoll.addLast(samples)
@@ -226,7 +252,9 @@ class SherpaSpeechSource(
                 }
                 stream.acceptWaveform(samples, sampleRate = SAMPLE_RATE)
                 utterance += samples
-                loud += EnergyVad.rms(buffer, read) >= VAD_THRESHOLD
+                val isLoud = EnergyVad.rms(buffer, read) >= VAD_THRESHOLD
+                loud += isLoud
+                if (isLoud && utteranceStartMs == 0L) utteranceStartMs = System.currentTimeMillis()
                 // 끝나지 않는 소음에 메모리가 무한히 늘지 않게 한다. 30초를 넘으면 앞을 버린다.
                 if (utterance.size > MAX_UTTERANCE_FRAMES) {
                     utterance.removeAt(0)
@@ -242,7 +270,7 @@ class SherpaSpeechSource(
                     if (debuggable && text.isNotBlank()) Log.d(TAG, "중간: $text")
                 }
                 if (engine.isEndpoint(stream)) {
-                    finishUtterance(text)
+                    finishUtterance(text, viaGate = false)
                 } else if (text.isNotBlank()) {
                     emit(SpeechResult.Partial(text))
                 }
@@ -253,6 +281,22 @@ class SherpaSpeechSource(
         } finally {
             stream.release()
         }
+    }
+
+    /**
+     * 한 문장이 끝난 이유와 시각을 한 줄로 남긴다(측정용). 말소리가 한 번도 없던 문장은 남기지 않는다.
+     * 글자는 디버그 빌드에서만 넣는다.
+     */
+    private fun logUtteranceEnd(startMs: Long, viaGate: Boolean, quietFrames: Int, lastPartial: String, finalText: String) {
+        if (startMs == 0L) return
+        val endMs = System.currentTimeMillis()
+        val reason = classifyUtteranceEnd(viaGate, endMs - startMs, ENDPOINT_MAX_UTTERANCE_MS)
+        Log.i(
+            TAG,
+            formatUtteranceEndLine(
+                startMs, endMs, reason, quietFrames * FRAME_MS, lastPartial, finalText, showText = debuggable,
+            ),
+        )
     }
 
     /**
@@ -396,6 +440,18 @@ class SherpaSpeechSource(
 
         const val VAD_THRESHOLD = 0.015
 
+        // ---- 문장 끝을 정하는 값들 ----
+        // 소리가 멎은 뒤 VAD 문을 더 열어 두는 프레임 수(100ms 단위, 2.5초). 이 시간 동안 소리가 없으면 문이 닫히고
+        // 끝나지 않은 문장을 끝낸다. 인식기 끝점 규칙의 무음(buildConfig 의 rule2 2.0초)보다 길어야 한다.
+        // 말이 중간에서 잘리면 이 값과 rule2/rule1 을 같이 본다.
+        const val VAD_HANGOVER_FRAMES = 25
+
+        /** 한 프레임의 길이(ms). READ_INTERVAL_SECONDS 와 같다. */
+        const val FRAME_MS = 100L
+
+        /** 끝점 규칙 3 의 문장 최대 길이(20초). buildConfig 의 rule3 와 같아야 로그가 맞다. */
+        const val ENDPOINT_MAX_UTTERANCE_MS = 20_000L
+
         /** 한 문장으로 모아 둘 수 있는 최대 길이. 100ms 프레임 300개, 30초. */
         const val MAX_UTTERANCE_FRAMES = 300
 
@@ -417,13 +473,18 @@ class SherpaSpeechSource(
          * 앱 이름과 명령어처럼 항상 똑같이 나오는 단어만 넣는다. 책 제목은 넣지 않는다 —
          * 넣을 수 있는 책은 몇 권뿐인데 그 책들로 인식이 쏠려 나머지가 더 틀리게 된다.
          */
-        val HOTWORDS = listOf(
+        const val TOKENS_ASSET = "sherpa-onnx-streaming-zipformer-korean-2024-06-16/tokens.txt"
+
+        val HOTWORDS_FIXED = listOf(
             "교보문고", "알라딘", "유튜브", "네이버", "인스타그램",
             "로그인", "로그아웃", "검색", "구매", "주문",
             "장바구니", "회원가입", "결제", "취소", "재생",
             // 호출어는 학습 데이터에 없는 단어라 가중치를 따로 높게 준다(": 점수").
             "하이에이맥스 :3.5", "에이맥스 :3.0", "하이 :1.5",
-        ).joinToString("\n")
+            // AppLauncher 별칭 표의 나머지 한글 이름. 표가 비공개라 같은 이름을 여기에 적었다. 점수는 낮게 둔다.
+            "카카오톡 :1.5", "카톡 :1.5", "인스타 :1.5", "유튜브 뮤직 :1.5", "멜론 :1.5",
+            "쿠팡 :1.5", "메시지 :1.5", "문자 :1.5", "구글 :1.5",
+        )
     }
 }
 
