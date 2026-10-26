@@ -136,6 +136,24 @@ internal object KakaoShareRules {
         }
     }
 
+    /**
+     * 보내기 버튼을 누르기 전에 카톡 화면을 벗어나거나 공유 시트가 사라졌을 때 처음부터 다시 할지.
+     * 보내기를 누른 뒤([KakaoShareFlow.Phase.SENT])에는 절대 다시 하지 않는다. 이미 보내졌을 수 있어서 두 번 보내질 수 있다.
+     * 다시 하는 것은 한 번뿐이고, 전체 제한 시간이 [MIN_RETRY_REMAINING_MS] 이상 남았을 때만 한다.
+     *
+     * @param attemptsUsed 지금까지 다시 한 횟수
+     * @param remainingMs 전체 제한 시간 중 남은 시간
+     */
+    fun mayRetry(phase: KakaoShareFlow.Phase, attemptsUsed: Int, remainingMs: Long): Boolean =
+        phase != KakaoShareFlow.Phase.SENT && attemptsUsed < MAX_RETRIES && remainingMs >= MIN_RETRY_REMAINING_MS
+
+    /** 공유 시트의 요소가 안 보인 지 [SHEET_GONE_MS] 가 지났으면 시트가 사라진 것으로 본다(화면 전환 중 잠깐 비는 것은 넘긴다). */
+    fun sheetGone(sinceGoneMs: Long): Boolean = sinceGoneMs >= SHEET_GONE_MS
+
+    const val MAX_RETRIES = 1
+    const val MIN_RETRY_REMAINING_MS = 20_000L
+    const val SHEET_GONE_MS = 1_500L
+
     sealed interface OpenMove {
         data object Wait : OpenMove
 
@@ -321,11 +339,14 @@ internal class KakaoShareFlow(
     /** 정확히 같은 이름이 없을 때만 쓰는 넓은 판정. 없으면 쓰지 않는다. */
     private val looseMatch: KakaoShareRules.NameMatch? = null,
 ) {
-    private enum class Phase { OPEN, TYPE, RESULT, CLEAR, SCAN, BACK, CHECK, SENT }
+    internal enum class Phase { OPEN, TYPE, RESULT, CLEAR, SCAN, BACK, CHECK, SENT }
 
     private sealed interface Outcome {
         data object Wait : Outcome
         data object Done : Outcome
+
+        /** 보내기 전에 화면을 잃어서 처음부터 한 번 다시 한다. */
+        data object Restart : Outcome
         data class Fail(val message: String) : Outcome
     }
 
@@ -361,8 +382,15 @@ internal class KakaoShareFlow(
     ) {
         if (recipient.isBlank()) return onFailed("받는 사람이 비어 있습니다.")
         if (value.isBlank()) return onFailed("보낼 내용이 비어 있습니다.")
-        if (!startShare(value, fresh = false)) return onFailed("카카오톡 공유 화면을 열지 못했습니다.")
-        handler.post(Run(recipient, value, isCurrent, onDone, onFailed))
+        Log.i(TAG, "카톡 공유 시작")
+        try {
+            if (!startShare(value, fresh = false)) return onFailed("카카오톡 공유 화면을 열지 못했습니다.")
+            handler.post(Run(recipient, value, isCurrent, onDone, onFailed, attempt = 0, overallStart = SystemClock.uptimeMillis()))
+        } catch (error: Throwable) {
+            // 어떤 예외든 호출한 쪽이 끝나지 않는 채로 남지 않게 실패로 알린다.
+            Log.e(TAG, "카톡 공유를 시작하지 못했다", error)
+            onFailed("카톡 공유를 시작하지 못했습니다.")
+        }
     }
 
     /**
@@ -396,10 +424,18 @@ internal class KakaoShareFlow(
         private val isCurrent: () -> Boolean,
         private val onDone: () -> Unit,
         private val onFailed: (String) -> Unit,
+        private val attempt: Int,
+        overallStart: Long,
     ) : Runnable {
-        private val startedAt = SystemClock.uptimeMillis()
+        /** 전체 제한 시간의 시작. 다시 하는 실행은 처음 실행의 시작을 이어받아 전체가 한도를 넘지 않게 한다. */
+        private val startedAt = overallStart
         private var phase = Phase.OPEN
-        private var openedAt = startedAt
+        private var openedAt = SystemClock.uptimeMillis()
+        private var goneSince = 0L
+        private var finished = false
+
+        /** 이 실행이 예약한 모든 지연 작업의 표. 끝나면 한꺼번에 지워서 다음 실행에 새어 나가지 않게 한다. */
+        private val token = Any()
         private var retried = false
         private var phaseSince = startedAt
         private var typedAt = 0L
@@ -437,23 +473,86 @@ internal class KakaoShareFlow(
 
         private fun fail(message: String) = onFailed(message)
 
+        /** 성공이나 실패 콜백은 한 번만 부른다. 부르기 전에 예약한 작업과 클립보드를 정리한다. */
+        private fun finish(block: () -> Unit) {
+            if (finished) return
+            finished = true
+            handler.removeCallbacksAndMessages(token)
+            restoreClipboard()
+            block()
+        }
+
         override fun run() {
-            if (!isCurrent()) return
+            if (finished) return
+            if (!isCurrent()) {
+                // 계획이 취소됐다. 취소한 쪽이 이미 알고 있으니 콜백은 부르지 않는다.
+                Log.i(TAG, "카톡 공유 취소로 멈춤: $phase")
+                finished = true
+                handler.removeCallbacksAndMessages(token)
+                restoreClipboard()
+                return
+            }
             val now = SystemClock.uptimeMillis()
             val outcome = try {
                 advance(now)
-            } catch (_: RuntimeException) {
+            } catch (error: RuntimeException) {
+                Log.e(TAG, "카톡 공유 중 오류: $phase", error)
                 Outcome.Fail("화면 조작 중 오류가 발생했습니다.")
             }
             when (outcome) {
-                Outcome.Done -> onDone()
-                is Outcome.Fail -> fail(outcome.message)
+                Outcome.Done -> finish {
+                    Log.i(TAG, "카톡 공유 끝: 성공")
+                    onDone()
+                }
+                is Outcome.Fail -> finish {
+                    Log.i(TAG, "카톡 공유 끝: 실패(${outcome.message}) 단계=$phase")
+                    onFailed(outcome.message)
+                }
+                Outcome.Restart -> restart()
                 Outcome.Wait -> {
                     val deadline = if (phase == Phase.SENT) sentAt + VERIFY_MS else startedAt + TIMEOUT_MS
-                    if (now >= deadline) fail(timeoutMessage()) else handler.postDelayed(this, POLL_MS)
+                    if (now >= deadline) {
+                        finish {
+                            Log.i(TAG, "카톡 공유 끝: 시간 초과 단계=$phase")
+                            onFailed(timeoutMessage())
+                        }
+                    } else {
+                        if (phase == Phase.OPEN && now - lastBeatAt >= HEARTBEAT_MS) {
+                            lastBeatAt = now
+                            Log.i(TAG, "카톡 공유 화면을 기다리는 중 ${now - startedAt}ms")
+                        }
+                        handler.postDelayed(this, token, POLL_MS)
+                    }
                 }
             }
         }
+
+        private var lastBeatAt = 0L
+
+        /**
+         * 보내기 전에 화면을 잃었다. 인텐트를 새 task 로 다시 열고 처음부터 한 번 더 한다.
+         * 여기까지 온 것은 [KakaoShareRules.mayRetry] 가 허용한 경우뿐이다.
+         */
+        private fun restart() {
+            Log.i(TAG, "카톡 공유 화면을 잃어서 처음부터 다시 한다: 단계=$phase")
+            handler.removeCallbacksAndMessages(token)
+            restoreClipboard()
+            finished = true
+            val reopened = try {
+                startShare(value, fresh = true)
+            } catch (error: Throwable) {
+                false
+            }
+            if (!reopened) {
+                onFailed("카카오톡 공유 화면을 열지 못했습니다.")
+                return
+            }
+            handler.post(Run(recipient, value, isCurrent, onDone, onFailed, attempt + 1, startedAt))
+        }
+
+        /** 보내기 전이면 한 번만 다시 하고, 아니면 실패한다. */
+        private fun retryOrFail(message: String, now: Long): Outcome =
+            if (KakaoShareRules.mayRetry(phase, attempt, startedAt + TIMEOUT_MS - now)) Outcome.Restart else Outcome.Fail(message)
 
         private fun timeoutMessage(): String = when (phase) {
             Phase.OPEN -> "카카오톡 공유 화면이 열리지 않았습니다."
@@ -474,7 +573,7 @@ internal class KakaoShareFlow(
                 Log.i(TAG, "공유 화면이 안 떠서 홈으로 나갔다가 다시 연다")
                 service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
                 openedAt = now + HOME_WAIT_MS
-                handler.postDelayed({ if (isCurrent()) startShare(value, fresh = true) }, HOME_WAIT_MS)
+                handler.postDelayed({ if (isCurrent()) startShare(value, fresh = true) }, token, HOME_WAIT_MS)
                 Outcome.Wait
             }
             KakaoShareRules.OpenMove.Fail -> Outcome.Fail("카톡 공유 화면이 열리지 않아 보내지 않았습니다.")
@@ -491,10 +590,16 @@ internal class KakaoShareFlow(
                 return sent(read(root), now)
             }
             if (!inKakao) {
-                return if (phase == Phase.OPEN) Outcome.Wait else Outcome.Fail("카카오톡 화면을 벗어나 보내지 않았습니다.")
+                return if (phase == Phase.OPEN) Outcome.Wait else retryOrFail("카카오톡 화면을 벗어나 보내지 않았습니다.", now)
             }
             val snapshot = read(root)
-            if (!snapshot.pickerVisible) return Outcome.Wait
+            if (!snapshot.pickerVisible) {
+                // 공유 시트가 사라졌다. 잠깐 비는 것은 넘기고, 이어서 안 보이면 한 번 처음부터 다시 한다.
+                if (phase == Phase.OPEN) return Outcome.Wait
+                if (goneSince == 0L) goneSince = now
+                return if (KakaoShareRules.sheetGone(now - goneSince)) retryOrFail("카톡 공유 화면이 사라져 보내지 않았습니다.", now) else Outcome.Wait
+            }
+            goneSince = 0L
             if (phase == Phase.OPEN) goto(Phase.TYPE)
             return when (phase) {
                 Phase.TYPE -> type(snapshot, now)
@@ -551,16 +656,16 @@ internal class KakaoShareFlow(
                 KakaoShareRules.SearchStage.PASTE -> {
                     edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                     edit.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-                    handler.postDelayed({ restoreClipboard() }, CLIPBOARD_RESTORE_MS)
+                    handler.postDelayed({ restoreClipboard() }, token, CLIPBOARD_RESTORE_MS)
                 }
                 KakaoShareRules.SearchStage.FOCUS -> {
                     // 포커스 넣기 -> SET_TEXT -> 빼기 -> 다시 넣기 -> 빼기. 단계마다 화면이 반응할 틈을 준다.
                     edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                     edit.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    handler.postDelayed({ setText(edit, query) }, FOCUS_STEP_MS)
-                    handler.postDelayed({ edit.performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS) }, FOCUS_STEP_MS * 2)
-                    handler.postDelayed({ edit.performAction(AccessibilityNodeInfo.ACTION_CLICK) }, FOCUS_STEP_MS * 3)
-                    handler.postDelayed({ edit.performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS) }, FOCUS_STEP_MS * 4)
+                    handler.postDelayed({ setText(edit, query) }, token, FOCUS_STEP_MS)
+                    handler.postDelayed({ edit.performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS) }, token, FOCUS_STEP_MS * 2)
+                    handler.postDelayed({ edit.performAction(AccessibilityNodeInfo.ACTION_CLICK) }, token, FOCUS_STEP_MS * 3)
+                    handler.postDelayed({ edit.performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS) }, token, FOCUS_STEP_MS * 4)
                 }
                 KakaoShareRules.SearchStage.ENTER -> sendEnter(edit)
             }
@@ -862,6 +967,7 @@ internal class KakaoShareFlow(
         const val AMBIGUOUS_MS = 3_000L
         const val CHECK_GRACE_MS = 2_500L
         const val HOME_WAIT_MS = 800L
+        const val HEARTBEAT_MS = 5_000L
         const val CLIPBOARD_RESTORE_MS = 700L
         const val FOCUS_STEP_MS = 250L
         const val CLEAR_RETRY_MS = 800L

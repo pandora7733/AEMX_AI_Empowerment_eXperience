@@ -39,6 +39,8 @@ internal class ActionExecutor(
     }
 
     fun cancel() {
+        // 계획이 아무 말 없이 멈추는 것을 나중에 추적할 수 있게 남긴다(누가 불렀는지 호출 위치를 함께).
+        Log.i(TAG, "계획 취소: 실행 중=$isRunning", Throwable("cancel 호출 위치"))
         isRunning = false
         executionId++
         handler.removeCallbacksAndMessages(null)

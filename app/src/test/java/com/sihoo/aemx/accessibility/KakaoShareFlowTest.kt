@@ -239,6 +239,36 @@ class KakaoShareFlowTest {
         assertEquals(KakaoShareRules.OpenMove.Fail, KakaoShareRules.openMove(3_100, retried = true))
     }
 
+    private fun mayRetry(phase: KakaoShareFlow.Phase, used: Int = 0, remaining: Long = 60_000) =
+        KakaoShareRules.mayRetry(phase, used, remaining)
+
+    @Test
+    fun `보내기 전 단계에서는 한 번 다시 할 수 있다`() {
+        KakaoShareFlow.Phase.values().filter { it != KakaoShareFlow.Phase.SENT }.forEach { phase ->
+            assertTrue("$phase", mayRetry(phase))
+        }
+    }
+
+    @Test
+    fun `보내기를 누른 뒤에는 절대 다시 하지 않는다`() {
+        assertFalse(mayRetry(KakaoShareFlow.Phase.SENT))
+        assertFalse(mayRetry(KakaoShareFlow.Phase.SENT, remaining = 1_000_000))
+    }
+
+    @Test
+    fun `다시 하는 것은 한 번뿐이고 시간이 모자라면 하지 않는다`() {
+        assertFalse(mayRetry(KakaoShareFlow.Phase.CHECK, used = 1))
+        assertFalse(mayRetry(KakaoShareFlow.Phase.CHECK, remaining = 5_000))
+        assertTrue(mayRetry(KakaoShareFlow.Phase.CHECK, remaining = 20_000))
+    }
+
+    @Test
+    fun `공유 시트는 1_5초 넘게 안 보여야 사라진 것으로 본다`() {
+        assertFalse(KakaoShareRules.sheetGone(0))
+        assertFalse(KakaoShareRules.sheetGone(1_400))
+        assertTrue(KakaoShareRules.sheetGone(1_500))
+    }
+
     @Test
     fun `체크된 행의 이름이 다르면 보내지 않는다`() {
         assertTrue(verify(listOf(listRow("김영희", true))) is CheckVerdict.Reject)
