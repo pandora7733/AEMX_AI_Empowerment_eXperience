@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import java.util.ArrayDeque
 
 /**
@@ -119,7 +120,13 @@ internal object KakaoShareRules {
     ): RowPick {
         val first = pickRowFor(rows, wanted, match, loose)
         // 말한 이름으로 하나도 안 맞을 때만 숫자를 정리한 이름([alternate])으로 한 번 더 찾는다.
-        return if (first == RowPick.None && alternate != null) pickRowFor(rows, alternate, match, loose) else first
+        val second = if (first == RowPick.None && alternate != null) pickRowFor(rows, alternate, match, loose) else first
+        if (second != RowPick.None) return second
+        // 셋 다 안 맞을 때만 ㅐ/ㅔ, ㅒ/ㅖ 를 통일해([MessageRules.foldVowels]) 같은 순서로 한 번 더 찾는다.
+        val folded = NameMatch { w, s -> match.matches(MessageRules.foldVowels(w), MessageRules.foldVowels(s)) }
+        val foldedLoose = loose?.let { l -> NameMatch { w, s -> l.matches(MessageRules.foldVowels(w), MessageRules.foldVowels(s)) } }
+        val third = pickRowFor(rows, wanted, folded, foldedLoose)
+        return if (third == RowPick.None && alternate != null) pickRowFor(rows, alternate, folded, foldedLoose) else third
     }
 
     private fun pickRowFor(rows: List<RowInfo>, wanted: String, match: NameMatch, loose: NameMatch?): RowPick {
@@ -458,7 +465,16 @@ internal class KakaoShareFlow(
          * 검색란에는 이 이름을 넣는다(없으면 말한 이름). 검색에서 안 나와도 전체 목록 훑기에서 말한 이름으로 다시 찾는다.
          */
         private val alternate: String? = MessageRules.digitizeName(recipient).takeIf { it != recipient }
-        private val query: String = alternate ?: recipient
+        private var query: String = alternate ?: recipient
+
+        /**
+         * 검색해서 결과 행이 하나도 안 나왔을 때 다시 검색해 볼 이름들(ㅐ/ㅔ, ㅒ/ㅖ 를 바꾼 변형, 최대 4개, 원래 이름 제외).
+         * 하나씩 쓴다. 변형으로 찾은 행도 이름이 맞고 정확히 하나일 때만 누른다(고르는 규칙은 같다).
+         */
+        private val variants: List<String> = MessageRules.vowelVariants(query)
+        private var variantsUsed = 0
+        private var clearStartedAt = 0L
+        private var imeBacks = 0
 
         /** 누른 행의 실제 이름. 느슨하게 찾았을 때 칩·체크된 행도 이 이름으로 다시 확인한다. */
         private var chosenName: String? = null
@@ -620,7 +636,22 @@ internal class KakaoShareFlow(
             val edit = snapshot.editText ?: return Outcome.Wait
             if (readySince == 0L) readySince = now
             if (now - readySince < SETTLE_MS) return Outcome.Wait
-            if (!edit.isShowingHintText && !edit.text.isNullOrBlank()) setText(edit, "")
+            if (!edit.isShowingHintText && !edit.text.isNullOrBlank()) {
+                if (variantsUsed == 0) {
+                    setText(edit, "")
+                } else {
+                    // 변형 이름으로 다시 검색할 때는 앞 검색어를 실제로 지운 뒤에 시작한다.
+                    if (clearStartedAt == 0L) clearStartedAt = now
+                    if (now - clearStartedAt > CLEAR_GIVE_UP_MS) return Outcome.Fail("검색어를 지우지 못해 보내지 않았습니다.")
+                    if (now - clearedAt >= CLEAR_RETRY_MS) {
+                        clearedAt = now
+                        val button = snapshot.clearButton
+                        if (button != null) press(button) else setText(edit, "")
+                    }
+                    return Outcome.Wait
+                }
+            }
+            clearStartedAt = 0L
             putClipboard(query)
             if (!edit.performAction(AccessibilityNodeInfo.ACTION_CLICK)) edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
             stage = KakaoShareRules.SearchStage.OPEN
@@ -689,7 +720,18 @@ internal class KakaoShareFlow(
                 }
                 KakaoShareRules.SearchMove.GiveUp -> {
                     restoreClipboard()
-                    goto(Phase.CLEAR)
+                    // 결과 행이 하나도 없으면 ㅐ/ㅔ 를 바꾼 이름으로 한 번씩 다시 검색한다. 전체 목록 훑기에 쓸 시간은 남긴다.
+                    val remaining = startedAt + TIMEOUT_MS - now
+                    if (variantsUsed < variants.size && remaining >= VARIANT_MIN_REMAINING_MS) {
+                        query = variants[variantsUsed++]
+                        Log.i(TAG, "카톡 검색 결과가 없어 변형 이름으로 다시 검색한다 ($variantsUsed/${variants.size})")
+                        stage = null
+                        readySince = 0L
+                        stableKey = null
+                        goto(Phase.TYPE)
+                    } else {
+                        goto(Phase.CLEAR)
+                    }
                     return Outcome.Wait
                 }
             }
@@ -737,10 +779,28 @@ internal class KakaoShareFlow(
             if (now - clearedAt < CLEAR_RETRY_MS) return Outcome.Wait
             clearedAt = now
             val button = snapshot.clearButton
-            if (button != null) press(button) else snapshot.editText?.let { setText(it, "") }
+            val edit = snapshot.editText
+            val empty = edit == null || edit.isShowingHintText || edit.text.isNullOrBlank()
+            // 지우기 실패 원인을 다음 폰 테스트에서 가르려고 한 번에 한 줄 남긴다(이름과 글자는 남기지 않는다).
+            Log.i(
+                TAG,
+                "카톡 검색 지우기: 지우기버튼=${button != null} 입력란비움=$empty 검색행=${snapshot.searchRows.size} " +
+                    "목록행=${snapshot.listRows.size} 키보드=${imeVisible()}",
+            )
+            if (!empty) {
+                if (button != null) press(button) else edit?.let { setText(it, "") }
+            } else {
+                // 글자는 비었는데 전체 목록이 안 보이면 검색 모드가 남은 것이다. 입력란 포커스를 빼고, 키보드가 떠 있을 때만
+                // 뒤로가기를 한 번 보낸다(키보드가 먼저 받아서 공유 화면은 닫히지 않는다).
+                edit?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS)
+                if (imeVisible() && imeBacks++ < 1) service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            }
             if (now - phaseSince > CLEAR_GIVE_UP_MS) return Outcome.Fail("검색어를 지우지 못해 보내지 않았습니다.")
             return Outcome.Wait
         }
+
+        private fun imeVisible(): Boolean =
+            runCatching { service.windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } }.getOrDefault(false)
 
         /**
          * 전체 목록을 아래로 스크롤하며 행을 모은다. 끝에 닿아야(스크롤해도 행이 안 바뀌거나 스크롤이 거절됨)
@@ -972,6 +1032,9 @@ internal class KakaoShareFlow(
         const val FOCUS_STEP_MS = 250L
         const val CLEAR_RETRY_MS = 800L
         const val CLEAR_GIVE_UP_MS = 5_000L
+
+        /** 변형 이름으로 다시 검색하려면 전체 제한 시간이 이만큼은 남아 있어야 한다(전체 목록 훑기에 쓸 시간). */
+        const val VARIANT_MIN_REMAINING_MS = 30_000L
         const val SCROLL_SETTLE_MS = 900L
         const val BACK_EXTRA = 3
         const val CHECK_STABLE_MS = 600L

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 오버레이 캡슐(디자인 tokens.json dimension). -->
+    <dimen name="aemx_capsule_min_height">64dp</dimen>
+    <dimen name="aemx_capsule_radius">30dp</dimen>
+    <dimen name="aemx_side_inset">16dp</dimen>
+    <dimen name="aemx_touch_min">48dp</dimen>
+    <dimen name="aemx_logo_size">40dp</dimen>
+    <dimen name="aemx_space_8">8dp</dimen>
+    <dimen name="aemx_space_12">12dp</dimen>
+    <dimen name="aemx_stroke_width">1.5dp</dimen>
+    <dimen name="aemx_text_title">18sp</dimen>
+    <dimen name="aemx_text_label">16sp</dimen>
+    <dimen name="aemx_text_caption">14sp</dimen>
+</resources>

@@ -171,24 +171,47 @@ internal class ActionExecutor(
         lastProbeAt = now
         runCatching {
             val root = service.rootInActiveWindow
-            val windows = service.windows.joinToString { window ->
+            val own = service.packageName
+            // 우리 오버레이 창(캡슐)은 앱 화면이 아니므로 목록에서 뺀다. 몇 개였는지만 남긴다.
+            val all = service.windows
+            val shown = all.filterNot { NodeFilter.isOwnOverlay(it.type, it.root?.packageName, own) }
+            val windows = shown.joinToString { window ->
                 "type=${window.type} layer=${window.layer} active=${window.isActive} " +
                     "focused=${window.isFocused} pkg=${window.root?.packageName}"
             }
             Log.i(
                 TAG,
                 "앱 화면 대기: 기대=${appLauncher.resolve(app)} root=${root?.packageName}/${root?.className} " +
-                    "windows=[$windows]"
+                    "오버레이 제외=${all.size - shown.size} windows=[$windows]"
             )
+            logIfOverlayFront(root)
         }
     }
+
+    /**
+     * 맨 앞 창(rootInActiveWindow)이 우리 패키지면 남긴다. 오버레이는 포커스를 받지 않으니 앞에 나오면 안 되는데,
+     * 나온다면 패키지 비교(root.packageName)가 모든 단계를 NotReady 로 만든다. 실제로 그런지 폰 로그로 먼저
+     * 확인하려는 것이다(개발 화면이 앞일 때도 같은 로그가 나므로 로그만 보고 판단한다).
+     */
+    private fun logIfOverlayFront(root: AccessibilityNodeInfo?) {
+        if (!NodeFilter.isOwnPackage(root?.packageName, service.packageName)) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastOverlayLogAt < PROBE_INTERVAL_MS) return
+        lastOverlayLogAt = now
+        Log.w(TAG, "맨 앞 창이 우리 앱이다(오버레이가 앞이거나 개발 화면이 앞): root=${root?.className}")
+    }
+
+    private var lastOverlayLogAt = 0L
 
     private fun performUiAction(app: String, step: ActionStep): StepResult {
         val root = service.rootInActiveWindow ?: return StepResult.NotReady
         // Event package filters do not restrict rootInActiveWindow. Never act on another app.
         val appPackage = appLauncher.resolve(app)
             ?: return StepResult.Fatal("설치되지 않았거나 찾을 수 없는 앱입니다.")
-        if (root.packageName?.toString() != appPackage) return StepResult.NotReady
+        if (root.packageName?.toString() != appPackage) {
+            logIfOverlayFront(root)
+            return StepResult.NotReady
+        }
         return when (step.action) {
             ActionType.OPEN_APP, ActionType.SEARCH -> StepResult.Success
             ActionType.TAP -> {

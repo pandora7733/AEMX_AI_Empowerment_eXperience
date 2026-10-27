@@ -113,6 +113,12 @@ object WakeWordMatcher {
  *
  * 음성 모델을 올리지 않으므로 CPU 부담이 거의 없다. 조용한 곳을 가정한 값이라
  * 시끄러운 곳에서는 [threshold] 를 올려야 한다.
+ *
+ * [noiseMultiplier] 가 0 보다 크면 문턱을 주변 소음에 맞춘다. 최근 [NOISE_WINDOW_FRAMES] 프레임
+ * 소리 크기의 하위 [NOISE_PERCENTILE]% 지점(바닥 소음)에 배수를 곱해 [threshold]..[maxThreshold]
+ * 사이로 자른다. [threshold] 가 최소값이고, [maxThreshold] 는 조용히 말하는 사람이 안 잡히지 않게 하는 상한이다.
+ * 바닥은 문이 열려 있을 때도 갱신한다. 닫힌 때만 갱신하면 소음이 갑자기 커졌을 때 문이 영영 안 닫힌다.
+ * 대신 말이 5초 넘게 쉼 없이 이어지면 문턱이 상한까지 오를 수 있다.
  */
 class EnergyVad(
     private val threshold: Double = 0.015,
@@ -122,8 +128,23 @@ class EnergyVad(
      * 무음을 못 받아 문장이 끝나지 않는다.
      */
     private val hangoverFrames: Int = 25,
+    private val noiseMultiplier: Double = 0.0,
+    private val maxThreshold: Double = threshold,
 ) {
     private var remaining = 0
+    private val recent = ArrayDeque<Double>()
+
+    /** 지금 쓰는 문턱. 적응형이 아니면 [threshold] 와 같다. */
+    val currentThreshold: Double
+        get() {
+            if (noiseMultiplier <= 0.0 || recent.size < NOISE_MIN_FRAMES) return threshold
+            return (noiseFloor() * noiseMultiplier).coerceIn(threshold, maxOf(threshold, maxThreshold))
+        }
+
+    private fun noiseFloor(): Double {
+        val sorted = recent.sorted()
+        return sorted[(sorted.size * NOISE_PERCENTILE / 100).coerceAtMost(sorted.size - 1)]
+    }
 
     /** 마지막으로 잰 소리 크기. 문턱값을 정할 때 로그로 확인한다. */
     var lastRms: Double = 0.0
@@ -139,7 +160,11 @@ class EnergyVad(
         }
         val rms = Math.sqrt(sum / length)
         lastRms = rms
-        if (rms >= threshold) remaining = hangoverFrames else if (remaining > 0) remaining--
+        if (rms >= currentThreshold) remaining = hangoverFrames else if (remaining > 0) remaining--
+        if (noiseMultiplier > 0.0) {
+            recent.addLast(rms)
+            if (recent.size > NOISE_WINDOW_FRAMES) recent.removeFirst()
+        }
         return remaining > 0
     }
 
@@ -148,6 +173,11 @@ class EnergyVad(
     }
 
     companion object {
+        /** 바닥 소음을 재는 최근 프레임 수(100ms 단위, 5초). */
+        const val NOISE_WINDOW_FRAMES = 50
+        const val NOISE_MIN_FRAMES = 10
+        const val NOISE_PERCENTILE = 10
+
         /** 한 프레임의 소리 크기(RMS). */
         fun rms(frame: ShortArray, length: Int): Double {
             if (length <= 0) return 0.0

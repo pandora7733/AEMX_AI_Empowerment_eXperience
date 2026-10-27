@@ -49,7 +49,9 @@ data class AssistantStep(
     /** 끝난 뒤 결과를 말할 때 쓰는 문장("유튜브를 열었어요"). */
     val doneText: String,
     val status: StepStatus,
-    val reason: String? = null
+    val reason: String? = null,
+    /** 하는 중에 보이는 문장("유튜브를 여는 중…"). */
+    val progressText: String = ""
 )
 
 /** 관찰로 확인한 결과. [evidence] 가 비어 있으면 [AssistantPhase.Delivered] 다. */

@@ -64,3 +64,18 @@ internal fun formatUtteranceEndLine(
     return "문장 끝: 시작=${clockText(startMs)} 끝=${clockText(endMs)} 길이=${duration}ms " +
         "이유=${reason.label} 끝무음=${trailingQuietMs}ms 마지막중간=$partial 최종=$final"
 }
+
+/** 글자(한글, 영문, 숫자)가 이만큼 안 되면 명령이 아니라 추임새나 잡음이다. */
+private const val MIN_UTTERANCE_LETTERS = 2
+
+/** 두 글자여도 명령이 될 수 없는 추임새. */
+private val FILLER_WORDS = setOf("아니", "어머", "으음")
+
+/**
+ * 인식 결과가 오케스트레이터로 넘기지 않을 만큼 짧거나 비었는지.
+ * 빈 문장, 한 글자("어", "아"), 추임새("아니")는 호출어 대기 중이든 아니든 버린다.
+ */
+internal fun isDiscardableUtterance(text: String): Boolean {
+    val letters = text.filter { it.isLetterOrDigit() }
+    return letters.length < MIN_UTTERANCE_LETTERS || letters in FILLER_WORDS
+}

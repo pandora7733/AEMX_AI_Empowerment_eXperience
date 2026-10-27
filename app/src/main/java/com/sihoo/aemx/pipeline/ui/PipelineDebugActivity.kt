@@ -101,6 +101,7 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var wakeWordSwitch: CheckBox
     private lateinit var ownerOnlySwitch: CheckBox
     private lateinit var autoRunSwitch: CheckBox
+    private lateinit var overlaySwitch: CheckBox
     private lateinit var enrollButton: Button
     private val verifier by lazy { SpeakerVerifier(applicationContext) }
     private val enrolledVoices = ArrayList<FloatArray>()
@@ -118,6 +119,10 @@ class PipelineDebugActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(createContentView())
         resetPipeline()
+        // 캡슐의 중단 버튼은 의도만 보낸다. 명령을 소유한 이 화면의 오케스트레이터가 받아 멈춘다.
+        lifecycleScope.launch {
+            AssistantStore.shared.cancelRequests.collect { runId -> orchestrator.requestCancel(runId) }
+        }
         // 문자 보내기가 받는 사람을 연락처에서 찾는다. 거절해도 다른 기능에는 영향이 없다.
         if (savedInstanceState == null && ContextCompat.checkSelfPermission(
                 this, Manifest.permission.READ_CONTACTS,
@@ -611,6 +616,14 @@ class PipelineDebugActivity : AppCompatActivity() {
                 setText(R.string.pipeline_auto_run)
             }
             addView(autoRunSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            // 다른 앱 위에 뜨는 캡슐. 기본 켜짐이고, 끄면 캡슐만 사라지고 실행은 그대로다.
+            overlaySwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_overlay_toggle)
+                isChecked = AemxAccessibilityService.isOverlayEnabled()
+                setOnCheckedChangeListener { _, checked -> AemxAccessibilityService.setOverlayEnabled(checked) }
+            }
+            addView(overlaySwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
             wakeWordSwitch = CheckBox(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_use_wake_word)

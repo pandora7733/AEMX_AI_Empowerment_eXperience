@@ -371,4 +371,40 @@ class KakaoShareFlowTest {
         val rows = listOf(searchRow("21105홍길동"), searchRow("21105 홍길동"))
         assertEquals(RowPick.Ambiguous(2), KakaoShareRules.pickRow(rows, "이일일공오홍길동", match, loose, "21105홍길동"))
     }
+
+    @Test
+    fun `행 이름은 정확 일치가 없을 때만 ㅐ ㅔ 를 통일해 비교한다`() {
+        val rows = listOf(searchRow("배재준"), searchRow("김철수"))
+        assertEquals(RowPick.Found(0), KakaoShareRules.pickRow(rows, "배제준", match, loose))
+        // 정확히 같은 행이 있으면 그것만 본다.
+        val both = listOf(searchRow("배재준"), searchRow("배제준"))
+        assertEquals(RowPick.Found(1), KakaoShareRules.pickRow(both, "배제준", match, loose))
+    }
+
+    @Test
+    fun `통일로 찾은 행이 둘이면 모호하고 다른 자음이나 모음은 찾지 않는다`() {
+        val two = listOf(searchRow("배재준"), searchRow("배재 준", message = "안녕하세요"))
+        assertEquals(RowPick.Ambiguous(2), KakaoShareRules.pickRow(two, "배제준", match, loose))
+        assertEquals(RowPick.None, KakaoShareRules.pickRow(listOf(searchRow("패재준"), searchRow("배저준")), "배제준", match, loose))
+    }
+
+    @Test
+    fun `통일로 찾은 행이 단체방뿐이면 단체방만 있다고 한다`() {
+        val rows = listOf(searchRow("배재준", group = true, count = "5"))
+        assertEquals(RowPick.GroupOnly, KakaoShareRules.pickRow(rows, "배제준", match, loose))
+    }
+
+    @Test
+    fun `숫자를 바꾼 이름과 통일을 함께 써서 찾는다`() {
+        val rows = listOf(searchRow("21105배재준"))
+        assertEquals(RowPick.Found(0), KakaoShareRules.pickRow(rows, "이일일공오배제준", match, loose, "21105배제준"))
+    }
+
+    @Test
+    fun `전체 목록 훑기에서도 통일로 찾는다`() {
+        val scan = KakaoShareRules.ListScan()
+        scan.add(listOf(listRow("김철수", selected = false), listRow("배재준", selected = false)))
+        scan.markEnd()
+        assertEquals(RowPick.Found(1), scan.pick("배제준", match, loose))
+    }
 }

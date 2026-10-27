@@ -37,6 +37,7 @@
     <string name="pipeline_announce_needs_setup">먼저 준비가 필요합니다. 화면을 확인해 주세요</string>
     <string name="pipeline_announce_replanning">다시 시도합니다</string>
     <string name="pipeline_auto_run">말하면 바로 실행</string>
+    <string name="pipeline_overlay_toggle">오버레이 캡슐 보이기 (다른 앱 위에 상태와 중단 버튼)</string>
     <string name="pipeline_auto_run_busy">실행 중이라 새 명령을 무시했습니다: %1$s</string>
     <string name="pipeline_state_idle">대기 중</string>
     <string name="pipeline_use_real_llm">진짜 LLM 사용 (최초 1회 모델 1.2GB 다운로드, Wi-Fi 권장)</string>

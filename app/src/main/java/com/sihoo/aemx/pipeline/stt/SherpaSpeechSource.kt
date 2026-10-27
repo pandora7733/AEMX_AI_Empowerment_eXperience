@@ -56,7 +56,12 @@ class SherpaSpeechSource(
     private var audioRecord: AudioRecord? = null
     private val audioEffects = mutableListOf<AudioEffect>()
     private var listenJob: Job? = null
-    private val vad = EnergyVad(threshold = VAD_THRESHOLD, hangoverFrames = VAD_HANGOVER_FRAMES)
+    private val vad = EnergyVad(
+        threshold = VAD_MIN_THRESHOLD,
+        hangoverFrames = VAD_HANGOVER_FRAMES,
+        noiseMultiplier = VAD_NOISE_MULTIPLIER,
+        maxThreshold = VAD_MAX_THRESHOLD,
+    )
 
     /** 켜면 말소리가 있는 구간만 인식기에 넣는다. 조용할 때 CPU 를 쓰지 않는다. */
     @Volatile
@@ -163,7 +168,7 @@ class SherpaSpeechSource(
         val preRoll = ArrayDeque<FloatArray>()
         var wasOpen = false
         vad.reset()
-        var frames = 0
+        var gateLogged: Boolean? = null
         var peakRms = 0.0
         // 지금 말하고 있는 한 문장의 소리. 끝났을 때 누구 목소리인지 보려고 모아 둔다.
         val utterance = ArrayList<FloatArray>()
@@ -187,7 +192,7 @@ class SherpaSpeechSource(
             val sink = enrollmentSink
             if (sink != null) {
                 sink(voice)
-            } else if (text.isNotBlank() && isOwner(voice, text)) {
+            } else if (!isDiscardableUtterance(text) && isOwner(voice, text)) {
                 emit(SpeechResult.Final(text))
             }
         }
@@ -220,15 +225,17 @@ class SherpaSpeechSource(
                 if (useVad) {
                     val open = vad.accept(buffer, read)
                     peakRms = maxOf(peakRms, vad.lastRms)
-                    // 1초마다 그 사이 가장 컸던 소리를 남긴다. 문턱값이 맞는지 보는 용도다.
-                    if (++frames % 10 == 0) {
-                        Log.d(TAG, "소리 크기 최대 %.4f (문턱 %.4f) 문=%s".format(peakRms, VAD_THRESHOLD, open))
+                    // 문이 열리거나 닫힐 때만 그 사이 가장 컸던 소리를 남긴다. 문턱값이 맞는지 보는 용도다.
+                    // 1초마다 찍으면 logcat 버퍼가 금방 넘쳐 앞부분 로그가 지워진다.
+                    if (open != gateLogged) {
+                        Log.d(TAG, "소리 크기 최대 %.4f (문턱 %.4f) 문=%s".format(peakRms, vad.currentThreshold, open))
                         peakRms = 0.0
+                        gateLogged = open
                     }
                     if (!open) {
                         // 문이 닫히는 순간 끝나지 않은 문장이 남아 있으면 여기서 끝낸다. 문이 닫히면 인식기에
-                        // 무음이 더 들어가지 않아 endpoint 의 무음 길이(2.0초)가 채워지지 않고, 문장이 다음
-                        // 말소리까지 매달려 앞뒤 문장이 이어 붙는다. 문이 열려 있던 hangover(2.5초) 동안의
+                        // 무음이 더 들어가지 않아 endpoint 의 무음 길이(1.2초)가 채워지지 않고, 문장이 다음
+                        // 말소리까지 매달려 앞뒤 문장이 이어 붙는다. 문이 열려 있던 hangover(1.2초) 동안의
                         // 무음은 인식기 지연만큼 덜 세어져서 이 경우가 생긴다.
                         if (shouldFlushOnGateClose(wasOpen, lastLoggedText)) {
                             stream.acceptWaveform(FloatArray(FLUSH_SILENCE_SAMPLES), sampleRate = SAMPLE_RATE)
@@ -252,7 +259,7 @@ class SherpaSpeechSource(
                 }
                 stream.acceptWaveform(samples, sampleRate = SAMPLE_RATE)
                 utterance += samples
-                val isLoud = EnergyVad.rms(buffer, read) >= VAD_THRESHOLD
+                val isLoud = EnergyVad.rms(buffer, read) >= vad.currentThreshold
                 loud += isLoud
                 if (isLoud && utteranceStartMs == 0L) utteranceStartMs = System.currentTimeMillis()
                 // 끝나지 않는 소음에 메모리가 무한히 늘지 않게 한다. 30초를 넘으면 앞을 버린다.
@@ -406,12 +413,11 @@ class SherpaSpeechSource(
         val config = OnlineRecognizerConfig(
             featConfig = getFeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
             modelConfig = getModelConfig(type = KOREAN_STREAMING_ZIPFORMER)!!,
-            // 말이 끝났다고 보는 무음 길이를 기본 1.4초에서 2.0초로 늘렸다. 천천히
-            // 말하거나 중간에 쉬면 한 문장이 둘로 잘려서 "교보문고에서" / "로그인하고
-            // 싶어" 로 따로 인식됐다.
+            // 말이 끝났다고 보는 무음 길이. 기본 1.4초를 2.0초로 늘렸더니 폰에서 말이 끝나고 실행까지
+            // 2초 넘게 걸려 1.2초로 줄였다. 명령 중간에 쉬는 0.5~0.8초는 견딘다.
             endpointConfig = EndpointConfig(
-                rule1 = EndpointRule(false, 2.4f, 0.0f),
-                rule2 = EndpointRule(true, 2.0f, 0.0f),
+                rule1 = EndpointRule(false, ENDPOINT_RULE1_SECONDS, 0.0f),
+                rule2 = EndpointRule(true, ENDPOINT_RULE2_SECONDS, 0.0f),
                 rule3 = EndpointRule(false, 0.0f, 20.0f),
             ),
             enableEndpoint = true,
@@ -438,13 +444,24 @@ class SherpaSpeechSource(
         const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
 
-        const val VAD_THRESHOLD = 0.015
+        // ---- 소리 문턱 ----
+        // 사람 많은 실내에서 말하지 않을 때도 0.015~0.035 가 나왔고 실제 명령은 0.07~0.30 이었다.
+        // 최소 문턱을 0.025 로 올리고, 주변 바닥 소음의 1.8배로 따라 올리되 0.05 를 넘기지 않는다
+        // (조용히 말하는 사람이 안 잡히면 안 된다). 작은 목소리가 안 잡히면 최소값을 먼저 내린다.
+        const val VAD_MIN_THRESHOLD = 0.025
+        const val VAD_NOISE_MULTIPLIER = 1.8
+        const val VAD_MAX_THRESHOLD = 0.05
 
         // ---- 문장 끝을 정하는 값들 ----
-        // 소리가 멎은 뒤 VAD 문을 더 열어 두는 프레임 수(100ms 단위, 2.5초). 이 시간 동안 소리가 없으면 문이 닫히고
-        // 끝나지 않은 문장을 끝낸다. 인식기 끝점 규칙의 무음(buildConfig 의 rule2 2.0초)보다 길어야 한다.
+        // 소리가 멎은 뒤 VAD 문을 더 열어 두는 프레임 수(100ms 단위, 1.2초). 이 시간 동안 소리가 없으면 문이 닫히고
+        // 끝나지 않은 문장을 끝낸다. 인식기 끝점 규칙 rule2(글자 뒤 무음 1.2초)와 같다. 인식기 지연 때문에
+        // rule2 가 먼저 채워지지 않아도 문이 닫힐 때 무음을 밀어 넣어(FLUSH_SILENCE_SAMPLES) 끝낸다.
         // 말이 중간에서 잘리면 이 값과 rule2/rule1 을 같이 본다.
-        const val VAD_HANGOVER_FRAMES = 25
+        const val VAD_HANGOVER_FRAMES = 12
+
+        /** 끝점 규칙 1(글자 없이 무음)과 규칙 2(글자 뒤 무음)의 길이(초). */
+        const val ENDPOINT_RULE1_SECONDS = 1.5f
+        const val ENDPOINT_RULE2_SECONDS = 1.2f
 
         /** 한 프레임의 길이(ms). READ_INTERVAL_SECONDS 와 같다. */
         const val FRAME_MS = 100L
@@ -455,8 +472,8 @@ class SherpaSpeechSource(
         /** 한 문장으로 모아 둘 수 있는 최대 길이. 100ms 프레임 300개, 30초. */
         const val MAX_UTTERANCE_FRAMES = 300
 
-        /** 문이 닫힐 때 인식기에 밀어 넣는 무음 길이. endpoint 무음 규칙(2.0초)을 넘기는 2.5초다. */
-        const val FLUSH_SILENCE_SAMPLES = (2.5 * SAMPLE_RATE).toInt()
+        /** 문이 닫힐 때 인식기에 밀어 넣는 무음 길이. endpoint 무음 규칙(1.2초)을 넘기는 1.5초다. */
+        const val FLUSH_SILENCE_SAMPLES = (1.5 * SAMPLE_RATE).toInt()
 
         /** 문이 열리기 전 몇 프레임을 들고 있을지. 100ms 단위라 0.3초다. */
         const val PRE_ROLL_FRAMES = 3

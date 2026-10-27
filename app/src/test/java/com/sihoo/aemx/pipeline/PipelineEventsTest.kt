@@ -400,6 +400,26 @@ class PipelineEventsTest {
     }
 
     @Test
+    fun `지난 명령의 runId 로 온 중단은 지금 명령을 멈추지 않는다`() = runTest {
+        val observer = FakeScreenObserver(snapshot("홈"))
+        val orchestrator = build(
+            StubbornPlanner(loginPlan, latencyMs = 5_000), ScriptedExecutor(observer, emptyList()), observer
+        )
+        val events = collect(orchestrator)
+
+        orchestrator.submit("알라딘에서 로그인하고 싶어")
+        advanceTimeBy(100)
+        orchestrator.requestCancel("지난-명령")
+        advanceTimeBy(100)
+        assertEquals(listOf("RunStarted"), events.names())
+
+        orchestrator.requestCancel(orchestrator.currentRunId)
+        advanceTimeBy(100)
+        assertEquals(listOf("RunStarted", "CancelRequested"), events.names())
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `명령마다 runId 가 다르고 번호는 이어서 커진다`() = runTest {
         val observer = FakeScreenObserver(snapshot("쇼츠"))
         val plan = """{"app":"유튜브","steps":[{"action":"wait","value":"1s"}]}"""

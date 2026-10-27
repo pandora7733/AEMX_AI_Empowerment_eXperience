@@ -2,12 +2,15 @@ package com.sihoo.aemx.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Path
 import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import com.sihoo.aemx.AndroidTtsController
+import com.sihoo.aemx.assistant.overlay.AssistantOverlayController
 import java.lang.ref.WeakReference
 
 class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener {
@@ -25,6 +28,25 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         activeService = WeakReference(this)
         status = "실행 준비 완료"
         ttsController = AndroidTtsController(applicationContext) { }
+        overlay?.detach()
+        overlay = AssistantOverlayController(this).also {
+            it.setEnabled(overlayEnabled)
+            it.attach()
+        }
+    }
+
+    /** 다른 앱 위에 뜨는 캡슐. 서비스가 닫힐 때 꼭 떼어야 한다. */
+    private var overlay: AssistantOverlayController? = null
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        overlay?.onConfigurationChanged()
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        overlay?.detach()
+        overlay = null
+        return super.onUnbind(intent)
     }
 
     private fun isExecutorRunning(): Boolean = ::executor.isInitialized && executor.isRunning
@@ -50,6 +72,8 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
 
     override fun onDestroy() {
         if (::executor.isInitialized) executor.cancel()
+        overlay?.detach()
+        overlay = null
         ttsController?.shutdown()
         ttsController = null
         if (activeService?.get() === this) activeService = null
@@ -101,13 +125,7 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
     /** 화면의 (x, y) 픽셀을 짧게 탭한다. 노드가 눌 수 있다고 알리지 않을 때 쓴다. */
     internal fun tap(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
-        return dispatchGesture(
-            GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path, 0L, 60L))
-                .build(),
-            null,
-            null,
-        )
+        return dispatchWithPassThrough(path, 60L)
     }
 
     private fun swipeVertically(fromY: Float, toY: Float): Boolean {
@@ -117,13 +135,37 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
             moveTo(x, metrics.heightPixels * fromY)
             lineTo(x, metrics.heightPixels * toY)
         }
-        return dispatchGesture(
+        return dispatchWithPassThrough(path, 350L)
+    }
+
+    /**
+     * 좌표 제스처를 보낸다. 캡슐이 떠 있으면 제스처가 끝날 때까지 캡슐을 터치 통과로 바꾼다 — 캡슐 자리의
+     * 탭이나 쓸기가 캡슐에 막혀 아래 앱에 닿지 않기 때문이다. 창 설정이 반영될 시간을 주려고 캡슐이
+     * 떠 있을 때만 제스처를 조금 늦춰 시작한다.
+     */
+    private fun dispatchWithPassThrough(path: Path, durationMs: Long): Boolean {
+        val gate = overlay?.takeIf { it.isShowing }?.touchGate
+        gate?.begin()
+        val startDelay = if (gate != null) GESTURE_START_DELAY_MS else 0L
+        val callback = object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                gate?.end()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                gate?.end()
+            }
+        }
+        val sent = dispatchGesture(
             GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path, 0L, 350L))
+                .addStroke(GestureDescription.StrokeDescription(path, startDelay, durationMs))
                 .build(),
-            null,
+            callback,
             null,
         )
+        // 보내지도 못했으면 끝 콜백이 오지 않으니 바로 되돌린다.
+        if (!sent) gate?.end()
+        return sent
     }
 
     companion object {
@@ -143,6 +185,19 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         fun setPlanObserver(callback: ((PlanOutcome) -> Unit)?) {
             observer = callback
         }
+
+        /** 개발 화면의 "오버레이 캡슐 보이기". 서비스가 아직 없어도 값은 남아서 연결되면 적용된다. */
+        @Volatile private var overlayEnabled = true
+
+        fun isOverlayEnabled(): Boolean = overlayEnabled
+
+        fun setOverlayEnabled(enabled: Boolean) {
+            overlayEnabled = enabled
+            Handler(Looper.getMainLooper()).post { activeService?.get()?.overlay?.setEnabled(enabled) }
+        }
+
+        /** 창 설정이 반영되기를 기다리는 시간. 캡슐을 터치 통과로 바꾼 직후 제스처를 늦춰 시작한다. */
+        private const val GESTURE_START_DELAY_MS = 80L
 
         fun cancelActionPlan() {
             Handler(Looper.getMainLooper()).post { activeService?.get()?.cancelPlan() }

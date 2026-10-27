@@ -97,6 +97,10 @@ class PipelineOrchestrator(
     val isBusy: Boolean
         get() = runJob?.isActive == true
 
+    /** 가장 최근에 시작한 명령의 runId. 화면이 보낸 중단이 이 명령의 것인지 맞춰 볼 때 쓴다. */
+    val currentRunId: String?
+        get() = activeRun?.id
+
     // ---------------------------------------------------------------- 입력
 
     /** 마이크를 열고 STT 결과를 기다린다. 최종 결과가 나오면 곧바로 [submit] 한다. */
@@ -197,10 +201,12 @@ class PipelineOrchestrator(
      * [PipelineEvent.Cancelled] 는 명령 처리가 끝나고 실행모듈도 멈춘 것을 확인한 뒤에만 나간다.
      * LLM 추론 중이면 추론이 돌아올 때까지 기다렸다가 결과를 버리고 아무것도 실행하지 않은 채 끝낸다.
      */
-    fun requestCancel() {
+    fun requestCancel(runId: String? = null) {
         val job = runJob ?: return
         if (!job.isActive) return
         val run = activeRun ?: return
+        // 화면이 누른 중단이 지난 명령의 것이면(그 사이 새 명령이 시작됐다) 새 명령을 멈추지 않는다.
+        if (runId != null && runId != run.id) return
         append(PipelineLogEntry.Level.WARN, "중단을 요청했다. 멈췄는지 확인한다")
         job.cancel()
         beginCancelConfirmation(job, run)

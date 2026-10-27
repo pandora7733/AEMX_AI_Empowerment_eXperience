@@ -26,6 +26,26 @@ object StepLabelFormatter {
         }
     }
 
+    /** 단계를 하고 있는 동안 캡슐에 보이는 문장("'고양이' 검색 중…"). */
+    fun progressText(action: ActionType, target: String?, app: String): String {
+        val name = clean(target)
+        return when (action) {
+            ActionType.OPEN_APP -> {
+                val appName = name ?: clean(app) ?: "앱"
+                "$appName${eulReul(appName)} 여는 중…"
+            }
+            ActionType.TAP -> if (name != null) "'$name'${eulReul(name)} 누르는 중…" else "버튼을 누르는 중…"
+            ActionType.INPUT_TEXT -> "글자 입력 중…"
+            ActionType.SEARCH -> if (name != null) "'$name' 검색 중…" else "검색하는 중…"
+            ActionType.PLAY_FIRST -> "첫 영상을 재생하는 중…"
+            ActionType.NEXT_VIDEO -> "다음 영상으로 넘기는 중…"
+            ActionType.SCROLL -> if (isUp(target)) "위로 스크롤하는 중…" else "아래로 스크롤하는 중…"
+            ActionType.WAIT -> "잠시 기다리는 중…"
+            ActionType.SEND_MESSAGE -> "${recipient(name)}에게 ${messenger(app)} 보내는 중…"
+            ActionType.UNKNOWN -> "화면을 조작하는 중…"
+        }
+    }
+
     /** 단계를 끝낸 뒤 결과를 말하는 문장. 증거가 있을 때만 화면에 나간다. */
     fun doneText(action: ActionType, target: String?, app: String): String {
         val name = clean(target)

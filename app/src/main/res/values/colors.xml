@@ -7,4 +7,15 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 오버레이 캡슐(디자인 tokens.json 라이트). 같은 이름을 values-night 에서 다크로 바꾼다. -->
+    <color name="aemx_surface">#FFFFFFFF</color>
+    <color name="aemx_stroke">#FFE5E9F2</color>
+    <color name="aemx_text">#FF202838</color>
+    <color name="aemx_text_secondary">#FF586579</color>
+    <color name="aemx_action">#FF3553B4</color>
+    <color name="aemx_chip">#FFF1F4FA</color>
+    <color name="aemx_logo">#FF648BFF</color>
+    <color name="aemx_logo_end">#FF9878FF</color>
+    <color name="aemx_logo_text">#FF11141C</color>
 </resources>

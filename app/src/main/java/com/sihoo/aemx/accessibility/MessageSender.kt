@@ -86,6 +86,74 @@ internal object MessageRules {
         return if (raw.trim().startsWith("+82") && digits.length > 2) "0" + digits.drop(2) else digits
     }
 
+    private const val HANGUL_BASE = 0xAC00
+    private const val HANGUL_LAST = 0xD7A3
+    private const val JUNG_COUNT = 21
+    private const val JONG_COUNT = 28
+
+    // 중성 번호: ㅐ=1, ㅒ=3, ㅔ=5, ㅖ=7. 현대 발음에서 ㅐ와 ㅔ(ㅒ와 ㅖ)는 거의 구분되지 않는다.
+    private fun swapJung(jung: Int): Int? = when (jung) {
+        1 -> 5
+        5 -> 1
+        3 -> 7
+        7 -> 3
+        else -> null
+    }
+
+    /**
+     * 이름 비교용으로 중성 ㅔ→ㅐ, ㅖ→ㅒ 로 통일한다("배제준" -> "배재준", "예" -> "얘"). 한글 음절을 분해해 중성만
+     * 바꾸고 다시 조합한다. 이 둘 말고는 초성·종성·다른 모음을 절대 넓히지 않는다(ㅂ/ㅍ, ㅓ/ㅗ 등은 그대로).
+     * 한글 음절이 아닌 글자는 그대로 둔다.
+     */
+    fun foldVowels(name: String): String {
+        val out = StringBuilder(name.length)
+        for (c in name) {
+            val jung = jungOf(c)
+            out.append(if (jung == 5 || jung == 7) withJung(c, jung - 4) else c)
+        }
+        return out.toString()
+    }
+
+    /**
+     * 말한 이름에서 ㅐ/ㅔ(ㅒ/ㅖ)를 서로 바꾼 변형 이름. 원래 이름은 뺀다. 한 군데만 바꾼 것을 오른쪽부터(이름 쪽 음절이 성보다 헷갈리기 쉽다), 그다음 모두 바꾼 것,
+     * 나머지 조합 순으로 최대 [max] 개. 검색에서 아무것도 안 나올 때 이 이름들로 한 번씩 다시 검색한다.
+     */
+    fun vowelVariants(name: String, max: Int = MAX_VARIANTS): List<String> {
+        val positions = name.indices.filter { jungOf(name[it]).let { jung -> jung == 1 || jung == 3 || jung == 5 || jung == 7 } }
+            .take(MAX_VARIANT_POSITIONS)
+        if (positions.isEmpty()) return emptyList()
+        val subsets = (1 until (1 shl positions.size)).sortedWith(
+            compareBy<Int> {
+                val size = Integer.bitCount(it)
+                when (size) {
+                    1 -> 0
+                    positions.size -> 1
+                    else -> 1 + size
+                }
+            }.thenByDescending { Integer.numberOfTrailingZeros(it) }
+        )
+        return subsets.map { mask ->
+            val chars = name.toCharArray()
+            positions.forEachIndexed { slot, at ->
+                if (mask and (1 shl slot) != 0) chars[at] = withJung(chars[at], swapJung(jungOf(chars[at]))!!)
+            }
+            String(chars)
+        }.filter { it != name }.distinct().take(max)
+    }
+
+    private fun jungOf(c: Char): Int =
+        if (c.code in HANGUL_BASE..HANGUL_LAST) ((c.code - HANGUL_BASE) / JONG_COUNT) % JUNG_COUNT else -1
+
+    private fun withJung(c: Char, jung: Int): Char {
+        val code = c.code - HANGUL_BASE
+        val jong = code % JONG_COUNT
+        val cho = code / (JONG_COUNT * JUNG_COUNT)
+        return (HANGUL_BASE + (cho * JUNG_COUNT + jung) * JONG_COUNT + jong).toChar()
+    }
+
+    const val MAX_VARIANTS = 4
+    private const val MAX_VARIANT_POSITIONS = 6
+
     private val DIGIT_WORDS = mapOf(
         '공' to 0, '영' to 0, '일' to 1, '이' to 2, '삼' to 3, '사' to 4, '오' to 5,
         '육' to 6, '륙' to 6, '칠' to 7, '팔' to 8, '구' to 9,
@@ -191,21 +259,32 @@ internal object MessageRules {
     private fun namedRows(rows: List<ContactRow>, name: String): List<ContactRow> =
         rows.filter { sameText(it.name, name) }.ifEmpty { rows.filter { looselyNamed(it.name, name) } }
 
+    /** 중성 ㅔ/ㅐ, ㅖ/ㅒ 를 통일한([foldVowels]) 이름끼리 정확히, 없으면 느슨하게 비교한 행. */
+    private fun foldedRows(rows: List<ContactRow>, name: String): List<ContactRow> {
+        val wanted = foldVowels(name)
+        return rows.filter { sameText(foldVowels(it.name), wanted) }
+            .ifEmpty { rows.filter { looselyNamed(foldVowels(it.name), wanted) } }
+    }
+
     /**
      * 받는 사람이 한 명으로 정해지고 보낼 번호가 하나로 정해질 때만 [ContactPick.Found].
      *
      * - 이름이 정확히 같은 연락처가 있으면 그것만 본다. 없을 때만 "21105배재준" 같은 [looselyNamed] 를 본다.
      * - 그래도 없을 때만 말한 이름의 한글 숫자를 바꿔([digitizeName]) 같은 규칙으로 한 번 더 본다.
+     * - 셋 다 실패했을 때만 ㅐ/ㅔ, ㅒ/ㅖ 를 통일해([foldVowels]) 한 번 더 비교한다("배제준" 으로 "배재준" 을 찾는다).
      * - 이름이 같은 연락처가 여러 개여도 번호가 모두 같으면(구글·SIM 중복) 한 사람으로 본다.
      * - 번호가 다른 사람이 둘 이상이면 보내지 않는다([tooManyMessage]).
      * - 연락처 하나에 번호가 여러 개면 휴대전화가 정확히 하나일 때만 그걸 쓴다.
      * - 그 밖의 부분 일치는 쓰지 않는다. "철수" 로 "김철수" 에게 보내지 않는다.
      */
     fun pickContact(rows: List<ContactRow>, name: String): ContactPick {
+        val digits = digitizeName(name)
         val matching = namedRows(rows, name).ifEmpty {
             // 말한 이름으로 하나도 안 맞을 때만 한글 숫자를 아라비아 숫자로 바꾼 이름으로 한 번 더 찾는다.
-            val digits = digitizeName(name)
             if (digits == name) emptyList() else namedRows(rows, digits)
+        }.ifEmpty {
+            // 그래도 없을 때만 ㅐ/ㅔ 를 통일해 비교한다. 후보는 여전히 한 명이어야 한다.
+            foldedRows(rows, name).ifEmpty { if (digits == name) emptyList() else foldedRows(rows, digits) }
         }
         if (matching.isEmpty()) return ContactPick.Missing
         val shown = matching.first().name

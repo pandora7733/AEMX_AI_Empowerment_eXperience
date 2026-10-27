@@ -100,4 +100,31 @@ class WakeWordTest {
         assertTrue(vad.accept(quiet, quiet.size))
         assertFalse(vad.accept(quiet, quiet.size))
     }
+
+    private fun frame(amplitude: Int) = ShortArray(1600) { amplitude.toShort() }
+
+    @Test
+    fun `적응형 문턱은 주변 소음을 따라 오르되 상한을 넘지 않는다`() {
+        val vad = EnergyVad(threshold = 0.025, hangoverFrames = 2, noiseMultiplier = 1.8, maxThreshold = 0.05)
+        assertEquals(0.025, vad.currentThreshold, 1e-9)
+
+        // 바닥 소음 0.02 (32768 * 0.02 = 655). 문턱 0.025 아래라 문은 닫혀 있다.
+        repeat(20) { assertFalse(vad.accept(frame(655), 1600)) }
+        assertEquals(0.036, vad.currentThreshold, 0.001)
+        // 0.03 소음은 이제 말소리가 아니다.
+        assertFalse(vad.accept(frame(983), 1600))
+
+        // 소음이 아주 커져도 문턱은 0.05 에서 멈춘다.
+        repeat(60) { vad.accept(frame(3000), 1600) }
+        assertEquals(0.05, vad.currentThreshold, 1e-9)
+        // 실제 명령 크기(0.1)는 항상 잡힌다.
+        assertTrue(vad.accept(frame(3277), 1600))
+    }
+
+    @Test
+    fun `적응형을 끄면 문턱은 고정이다`() {
+        val vad = EnergyVad(threshold = 0.1, hangoverFrames = 2)
+        repeat(30) { vad.accept(frame(1000), 1600) }
+        assertEquals(0.1, vad.currentThreshold, 1e-9)
+    }
 }

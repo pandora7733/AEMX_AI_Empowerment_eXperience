@@ -346,4 +346,81 @@ class MessageSenderTest {
             MessageRules.pickContact(rows, "이일일공오배재준"),
         )
     }
+
+    @Test
+    fun `ㅔ 를 ㅐ 로 ㅖ 를 ㅒ 로 통일한다`() {
+        assertEquals("배재준", MessageRules.foldVowels("배제준"))
+        assertEquals("배재준", MessageRules.foldVowels("배재준"))
+        assertEquals("얘", MessageRules.foldVowels("예"))
+        assertEquals("얘기", MessageRules.foldVowels("예기"))
+        // 받침이 있는 음절도 받침을 지키고 중성만 바꾼다.
+        assertEquals("갠", MessageRules.foldVowels("겐"))
+    }
+
+    @Test
+    fun `통일은 다른 모음과 자음을 넓히지 않는다`() {
+        // ㅂ/ㅍ, ㅓ/ㅗ, ㅏ/ㅓ, ㅣ/ㅔ 는 그대로 둔다.
+        assertEquals("패재준", MessageRules.foldVowels("패제준"))
+        assertEquals("배저준", MessageRules.foldVowels("배저준"))
+        assertEquals("배조준", MessageRules.foldVowels("배조준"))
+        assertEquals("바자준", MessageRules.foldVowels("바자준"))
+        assertEquals("비지준", MessageRules.foldVowels("비지준"))
+        // 한글이 아닌 글자와 숫자는 그대로다.
+        assertEquals("Abc 123 ㅔ", MessageRules.foldVowels("Abc 123 ㅔ"))
+    }
+
+    @Test
+    fun `변형 이름은 ㅐ ㅔ 를 서로 바꾸고 원래 이름은 뺀다`() {
+        // "배" 도 ㅐ 라서 바꿀 수 있는 곳이 둘이다: 오른쪽 하나, 왼쪽 하나, 둘 다.
+        assertEquals(listOf("배재준", "베제준", "베재준"), MessageRules.vowelVariants("배제준"))
+        assertEquals(listOf("배제준", "베재준", "베제준"), MessageRules.vowelVariants("배재준"))
+        assertEquals(listOf("얘"), MessageRules.vowelVariants("예"))
+        assertEquals(listOf("김철수").filter { false }, MessageRules.vowelVariants("김철수"))
+        assertEquals(emptyList<String>(), MessageRules.vowelVariants("김철수"))
+    }
+
+    @Test
+    fun `변형 이름은 한 군데씩, 모두 바꾼 것, 나머지 조합 순으로 최대 네 개다`() {
+        // 두 군데: 하나씩 둘, 모두 바꾼 것 하나.
+        assertEquals(listOf("제재", "재제", "재재"), MessageRules.vowelVariants("제제"))
+        val three = MessageRules.vowelVariants("제제제")
+        assertEquals(4, three.size)
+        assertEquals(listOf("제제재", "제재제", "재제제", "재재재"), three)
+        assertFalse(three.contains("제제제"))
+    }
+
+    @Test
+    fun `연락처는 정확 일치와 느슨 일치가 통일보다 먼저다`() {
+        val rows = listOf(row(1, "배제준", "01011112222"), row(2, "배재준", "01033334444"))
+        // 말한 이름과 정확히 같은 연락처가 있으면 통일 비교를 보지 않는다.
+        assertEquals(ContactPick.Found("배제준", "01011112222"), MessageRules.pickContact(rows, "배제준"))
+        assertEquals(ContactPick.Found("배재준", "01033334444"), MessageRules.pickContact(rows, "배재준"))
+        // 느슨 일치(숫자가 붙은 이름)도 통일보다 먼저다.
+        val loose = listOf(row(1, "21105배제준", "01011112222"), row(2, "배재준", "01033334444"))
+        assertEquals(ContactPick.Found("21105배제준", "01011112222"), MessageRules.pickContact(loose, "배제준"))
+    }
+
+    @Test
+    fun `정확 느슨 숫자 정리가 모두 실패했을 때만 통일 비교로 찾는다`() {
+        val rows = listOf(row(1, "배재준", "01033334444"), row(2, "김철수", "01055556666"))
+        assertEquals(ContactPick.Found("배재준", "01033334444"), MessageRules.pickContact(rows, "배제준"))
+        // 숫자를 바꾼 이름과 통일을 함께 쓴다.
+        val numbered = listOf(row(3, "21105배재준", "01077778888"))
+        assertEquals(ContactPick.Found("21105배재준", "01077778888"), MessageRules.pickContact(numbered, "이일일공오배제준"))
+    }
+
+    @Test
+    fun `통일로 찾은 후보가 둘이면 보내지 않는다`() {
+        val rows = listOf(row(1, "배재준", "01011112222"), row(2, "배제준", "01033334444"))
+        // 말한 이름이 둘 중 하나와 정확히 같으면 그 사람이다. 정확 일치가 없는 이름은 통일로 둘 다 걸려 모호하다.
+        val both = listOf(row(1, "배재준", "01011112222"), row(2, "배재 준", "01033334444"))
+        assertTrue(MessageRules.pickContact(both, "배제준") is ContactPick.Ambiguous)
+        assertEquals(ContactPick.Found("배제준", "01033334444"), MessageRules.pickContact(rows, "배제준"))
+    }
+
+    @Test
+    fun `통일은 다른 자음이나 모음의 연락처를 찾지 않는다`() {
+        val rows = listOf(row(1, "패재준", "01011112222"), row(2, "배저준", "01033334444"), row(3, "배조준", "01055556666"))
+        assertEquals(ContactPick.Missing, MessageRules.pickContact(rows, "배제준"))
+    }
 }

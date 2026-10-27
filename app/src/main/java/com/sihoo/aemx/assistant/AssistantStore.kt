@@ -5,8 +5,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -35,6 +38,22 @@ class AssistantStore(scope: CoroutineScope) {
     /** 사건을 줄 세운다. 어느 스레드에서 불러도 된다. */
     fun post(event: PipelineEvent) {
         inbox.trySend(event)
+    }
+
+    private val _cancelRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /**
+     * 화면이 보낸 중단 의도. 값은 중단하려는 명령의 runId 다. 화면은 의도만 보내고, 실제로 멈추는 것은
+     * 명령을 소유한 쪽(지금은 개발 화면의 오케스트레이터)이 이 흐름을 받아 한다. 상태는 소유한 쪽이
+     * CancelRequested 를 내보내야 바뀐다 — 의도를 보냈다고 해서 곧바로 "중단하는 중"이 되지는 않는다.
+     */
+    val cancelRequests: SharedFlow<String> = _cancelRequests.asSharedFlow()
+
+    /** 지금 명령의 중단을 요청한다. 진행 중이 아니거나 이미 요청했으면 아무것도 하지 않는다. */
+    fun requestCancellation() {
+        val current = _state.value
+        if (current.phase == AssistantPhase.Idle || current.phase.isTerminal || current.cancellationRequested) return
+        _cancelRequests.tryEmit(current.runId)
     }
 
     companion object {

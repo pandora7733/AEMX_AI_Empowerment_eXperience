@@ -1,5 +1,6 @@
 package com.sihoo.aemx.pipeline
 
+import com.sihoo.aemx.pipeline.stt.isDiscardableUtterance
 import com.sihoo.aemx.pipeline.stt.UtteranceEnd
 import com.sihoo.aemx.pipeline.stt.classifyUtteranceEnd
 import com.sihoo.aemx.pipeline.stt.formatUtteranceEndLine
@@ -56,5 +57,21 @@ class UtteranceEndTest {
         assertFalse(line.contains("비밀번호"))
         assertTrue(line.contains("마지막중간=(4자)"))
         assertTrue(line.contains("최종=(5자)"))
+    }
+
+    @Test
+    fun `빈 문장과 한 글자와 추임새는 넘기지 않는다`() {
+        assertTrue(isDiscardableUtterance(""))
+        assertTrue(isDiscardableUtterance("  "))
+        assertTrue(isDiscardableUtterance("어"))
+        assertTrue(isDiscardableUtterance("아니"))
+        assertTrue(isDiscardableUtterance("어."))
+    }
+
+    @Test
+    fun `두 글자 이상의 말은 넘긴다`() {
+        assertFalse(isDiscardableUtterance("뒤로"))
+        assertFalse(isDiscardableUtterance("하이 에이맥스"))
+        assertFalse(isDiscardableUtterance("배재준한테 안녕 보내줘"))
     }
 }

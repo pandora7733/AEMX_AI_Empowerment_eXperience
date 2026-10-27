@@ -47,7 +47,8 @@ object AssistantReducer {
                         id = it.stepId,
                         label = StepLabelFormatter.label(it.action, it.target, it.app),
                         doneText = StepLabelFormatter.doneText(it.action, it.target, it.app),
-                        status = StepStatus.Pending
+                        status = StepStatus.Pending,
+                        progressText = StepLabelFormatter.progressText(it.action, it.target, it.app)
                     )
                 }
                 // 재분석 중이면 첫 단계가 시작할 때까지 재분석 표시를 둔다.
