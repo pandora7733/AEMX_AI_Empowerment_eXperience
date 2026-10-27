@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 알약 배지 배경 - 성공/활성 톤. "자동" 배지에 사용 -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-
-    <solid android:color="@color/color_success_bg" />
-
-    <corners android:radius="@dimen/radius_pill" />
-</shape>

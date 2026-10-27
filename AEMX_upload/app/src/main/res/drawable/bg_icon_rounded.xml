@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 리스트 행 아이콘 배경: 작은 라운드 사각. 최근 활동 아이콘 뒤에 사용 -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-
-    <solid android:color="@color/color_surface_variant" />
-
-    <corners android:radius="@dimen/radius_s" />
-</shape>

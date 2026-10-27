@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 알약(pill) 배지 배경 - 브랜드 톤. 강조 라벨에 사용 -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-
-    <solid android:color="@color/color_primary_container" />
-
-    <corners android:radius="@dimen/radius_pill" />
-</shape>

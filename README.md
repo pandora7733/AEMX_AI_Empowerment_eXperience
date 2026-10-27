@@ -36,8 +36,7 @@ AEMX_AI_Empowerment_eXperience/
 ├── STT/          음성 인식 참고 프로젝트 (독립 실행형)
 ├── TTS/          음성 출력 파트 문서
 ├── LLM/          의도 분석 참고 프로젝트 (독립 실행형) + 프롬프트·빌드 스크립트
-├── ACCESSIBILITY/ 화면 조작 파트 문서 + 개발용 기기 테스트 앱 (accessibility-device-tests)
-└── AEMX_upload/  제출용 자료
+└── ACCESSIBILITY/ 화면 조작 파트 문서 + 개발용 기기 테스트 앱 (accessibility-device-tests)
 ```
 
 모델 파일과 대용량 네이티브 라이브러리는 저장소에 커밋하지 않습니다. 각 파트의 setup 스크립트(`STT/setup_assets.sh`, `LLM/setup_llamademo.sh`)로 내려받습니다. 단위 테스트는 이 파일들 없이 돌아갑니다.
