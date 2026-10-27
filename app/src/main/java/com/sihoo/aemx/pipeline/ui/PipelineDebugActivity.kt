@@ -22,6 +22,7 @@ import com.sihoo.aemx.accessibility.AemxAccessibilityService
 import com.sihoo.aemx.accessibility.PlanOutcome
 import com.sihoo.aemx.pipeline.PipelineConfig
 import com.sihoo.aemx.pipeline.PipelineLogEntry
+import com.sihoo.aemx.assistant.AssistantStore
 import com.sihoo.aemx.pipeline.PipelineOrchestrator
 import com.sihoo.aemx.AndroidTtsController
 import com.sihoo.aemx.pipeline.PipelineState
@@ -298,6 +299,7 @@ class PipelineDebugActivity : AppCompatActivity() {
         collectJob = lifecycleScope.launch {
             launch { orchestrator.state.collect { render(it) } }
             launch { orchestrator.log.collect { entries -> renderLog(entries) } }
+            launch { orchestrator.events.collect { AssistantStore.shared.post(it) } }
         }
     }
 
@@ -324,6 +326,7 @@ class PipelineDebugActivity : AppCompatActivity() {
                 collectJob = lifecycleScope.launch {
                     launch { orchestrator.state.collect { render(it) } }
                     launch { orchestrator.log.collect { entries -> renderLog(entries) } }
+                    launch { orchestrator.events.collect { AssistantStore.shared.post(it) } }
                 }
                 stateView.text = getString(R.string.pipeline_llm_ready)
             } catch (e: Exception) {
@@ -380,6 +383,8 @@ class PipelineDebugActivity : AppCompatActivity() {
                 }
                 is PlanResult.EngineError ->
                     stateView.text = getString(R.string.pipeline_device_failed, result.message)
+                is PlanResult.Refused ->
+                    stateView.text = getString(R.string.pipeline_device_failed, result.message)
             }
             runButton.isEnabled = true
         }
@@ -414,6 +419,7 @@ class PipelineDebugActivity : AppCompatActivity() {
                 }
                 // StateFlow 는 구독하자마자 마지막 값을 준다. 지난 명령의 끝 상태를 다시 말하지 않게 건너뛴다.
                 launch { device.state.drop(1).collect { announce(it) } }
+                launch { device.events.collect { AssistantStore.shared.post(it) } }
                 launch { device.log.collect { entries -> renderLog(entries) } }
             }
         }

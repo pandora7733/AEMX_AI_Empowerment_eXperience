@@ -75,6 +75,8 @@ class AccessibilityStepExecutor(
 
     override fun isReady(): Boolean = bridge.isConnected()
 
+    override fun isIdle(): Boolean = !bridge.isRunning()
+
     override suspend fun execute(command: Command): ExecutionResult = lock.withLock {
         if (!bridge.isConnected()) {
             // JVM 단위테스트에는 android.util.Log 가 없어 던질 수 있다. 로그 때문에 결과가 바뀌면 안 된다.
@@ -131,7 +133,7 @@ class AccessibilityStepExecutor(
         is Command.SendMessage -> command.appName.takeIf { isSupportedApp(it) }
         // 첫 영상 재생을 받는 앱은 유튜브와 유튜브 뮤직뿐이다. 앞 화면이 유튜브 뮤직일 때만 그쪽으로 보내고,
         // 그 밖에는 앞 화면이나 직전 앱을 보지 않고 유튜브다. 서비스가 패키지를 비교하므로 이름이 틀리면 늘 NotReady 다.
-        Command.PlayFirst ->
+        Command.PlayFirst, is Command.PlayNth ->
             if (foregroundPackage() == AppLauncher.YOUTUBE_MUSIC_PACKAGE && isSupportedApp(YOUTUBE_MUSIC)) YOUTUBE_MUSIC
             else YOUTUBE
         else -> nameForPackage(foregroundPackage()) ?: currentApp
@@ -168,7 +170,7 @@ class AccessibilityStepExecutor(
          * 대상 못 찾음은 재분석이 가장 잘 먹히는 경우라 구분해 둘 값이 있다.
          */
         fun toResult(outcome: PlanOutcome, action: A11yType): ExecutionResult = when (outcome) {
-            is PlanOutcome.Completed -> ExecutionResult.Performed
+            is PlanOutcome.Completed -> ExecutionResult.Performed(outcome.evidence)
 
             is PlanOutcome.Failed ->
                 if (action in UI_ACTIONS && outcome.message.contains("찾지 못")) {

@@ -70,10 +70,10 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `서비스가 완료를 알리면 Performed 다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val result = executor(bridge).execute(Command.Search("유튜브", "노트북"))
 
-        assertEquals(ExecutionResult.Performed, result)
+        assertEquals(ExecutionResult.Performed(), result)
         // step 한 개짜리 계획이 제출됐다.
         val plan = JSONObject(bridge.submitted.single())
         assertEquals("유튜브", plan.getString("app"))
@@ -84,7 +84,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `첫 영상 재생은 앞 화면이 네이버여도 유튜브로 보낸다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         executor(bridge, foreground = "com.nhn.android.search").execute(Command.PlayFirst)
 
         assertEquals("유튜브", JSONObject(bridge.submitted.single()).getString("app"))
@@ -92,7 +92,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `첫 곡 재생은 앞 화면이 유튜브 뮤직이면 유튜브 뮤직으로 보낸다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         executor(bridge, foreground = "com.google.android.apps.youtube.music").execute(Command.PlayFirst)
 
         assertEquals("유튜브 뮤직", JSONObject(bridge.submitted.single()).getString("app"))
@@ -100,7 +100,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `첫 영상 재생은 앞 화면을 몰라도 직전 앱이 네이버여도 유튜브로 보낸다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val exec = executor(bridge, foreground = null)
         exec.execute(Command.Search("네이버", "노트북"))
         exec.execute(Command.PlayFirst)
@@ -120,7 +120,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `네이버 구글 유튜브 검색은 그 앱으로 제출한다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val exec = executor(bridge)
         listOf("네이버", "구글", "유튜브").forEach { exec.execute(Command.Search(it, "a")) }
 
@@ -152,7 +152,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `고정 표에 없는 앱의 LaunchApp 도 풀린 이름으로 제출된다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val resolver = AccessibilityAppResolver { name -> "com.kurly.android".takeIf { name == "마켓컬리" } }
         // 오케스트레이터가 이름을 패키지로 풀 때 기억한 이름을 서비스에 넘긴다.
         assertEquals("com.kurly.android", resolver.resolvePackage("마켓컬리"))
@@ -165,7 +165,7 @@ class AccessibilityStepExecutorTest {
         )
         val result = exec.execute(Command.LaunchApp("com.kurly.android"))
 
-        assertEquals(ExecutionResult.Performed, result)
+        assertEquals(ExecutionResult.Performed(), result)
         val plan = JSONObject(bridge.submitted.single())
         assertEquals("마켓컬리", plan.getString("app"))
         assertEquals("마켓컬리", plan.getJSONArray("steps").getJSONObject(0).getString("target"))
@@ -173,7 +173,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `풀린 적 없는 패키지의 LaunchApp 은 서비스에 제출하지 않고 실패한다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val result = executor(bridge).execute(Command.LaunchApp("com.unknown.app"))
 
         assertTrue(result is ExecutionResult.Failed)
@@ -211,7 +211,7 @@ class AccessibilityStepExecutorTest {
     @Test
     fun `끝나면 화면이 원래 걸어 둔 콜백으로 되돌린다`() = runTest {
         val original: (PlanOutcome) -> Unit = {}
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         executor(bridge, restore = { original }).execute(Command.Search("유튜브", "a"))
 
         assertSame(original, bridge.currentObserver)
@@ -219,7 +219,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `화면이 멈춰 있으면 끝나고 콜백을 걸지 않는다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         executor(bridge, restore = { null }).execute(Command.Search("유튜브", "a"))
 
         assertNull(bridge.currentObserver)
@@ -233,16 +233,16 @@ class AccessibilityStepExecutorTest {
             // 네이버가 앞으로 와서 개발 화면이 onStop 되는 상황.
             exec.setObserverIfIdle(null)
             // 서비스는 제출 뒤 지금 걸려 있는 콜백으로 끝을 알린다.
-            bridge.currentObserver?.invoke(PlanOutcome.Completed)
+            bridge.currentObserver?.invoke(PlanOutcome.Completed())
         })
         exec = executor(bridge)
 
-        assertEquals(ExecutionResult.Performed, exec.execute(Command.Search("유튜브", "a")))
+        assertEquals(ExecutionResult.Performed(), exec.execute(Command.Search("유튜브", "a")))
     }
 
     @Test
     fun `실행이 끝난 뒤에는 화면이 콜백을 바꿀 수 있다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val exec = executor(bridge)
         exec.execute(Command.Search("유튜브", "a"))
         val screenCallback: (PlanOutcome) -> Unit = {}
@@ -253,7 +253,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `앱 이름이 없는 명령은 맨 앞 화면의 앱으로 보낸다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         executor(bridge, foreground = "kr.co.aladin.third_shop").execute(Command.Tap("로그인"))
 
         assertEquals("알라딘", JSONObject(bridge.submitted.single()).getString("app"))
@@ -261,7 +261,7 @@ class AccessibilityStepExecutorTest {
 
     @Test
     fun `앞 화면을 모르면 직전에 연 앱을 쓴다`() = runTest {
-        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed) })
+        val bridge = FakeBridge(onSubmit = { _, obs -> obs?.invoke(PlanOutcome.Completed()) })
         val exec = executor(bridge, foreground = null)
         exec.execute(Command.LaunchApp("com.google.android.youtube"))
         exec.execute(Command.PlayFirst)

@@ -110,6 +110,15 @@ class ActionPlanParserTest {
     }
 
     @Test
+    fun `play_first accepts an ordinal value and rejects other values`() {
+        val ok = ActionPlanParser.parse("""{"app":"유튜브","steps":[{"action":"play_first","target":"두 번째 동영상","value":"2"}]}""")
+        assertEquals("2", ok.steps.single().value)
+        assertThrows(ActionPlanParseException::class.java) {
+            ActionPlanParser.parse("""{"app":"유튜브","steps":[{"action":"play_first","target":"첫 번째 동영상","value":"빨리"}]}""")
+        }
+    }
+
+    @Test
     fun `parses youtube music search and play_first`() {
         val plan = ActionPlanParser.parse(
             """{"app":"유튜브 뮤직","steps":[{"action":"search","target":"아이유"},{"action":"play_first","target":"첫 번째 노래"}]}""",

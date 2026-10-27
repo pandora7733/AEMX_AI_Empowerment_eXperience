@@ -10,6 +10,7 @@ import com.sihoo.aemx.pipeline.json.ActionPlanParser
 import com.sihoo.aemx.pipeline.json.ParseResult
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.PlanGenerator
+import com.sihoo.aemx.pipeline.model.ActionType
 import com.sihoo.aemx.pipeline.port.PlanRequest
 import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +64,24 @@ class LlamaPlanGenerator(
         // 엔진은 프로세스 하나에 하나뿐이다. 최근 앱 목록에서 앱을 지워도 접근성 서비스 때문에
         // 프로세스가 살아 있어서, 새 Activity 가 엔진이 이미 모델을 올린 상태로 prepare 를 부른다.
         // 그때 loadModel 을 또 부르면 "Cannot load model in ModelReady!" 로 실패한다.
+        // 상태를 읽은 뒤 동작하기까지 엔진이 바뀔 수 있어서(새 프로세스에서는 초기화가 비동기로 끝난다)
+        // 상태 예외가 나면 상태를 다시 읽어 한 번만 맞는 경로로 다시 해 본다.
+        var attempt = 0
+        while (true) {
+            try {
+                prepareOnce(modelFile, onProgress)
+                break
+            } catch (e: IllegalStateException) {
+                if (++attempt >= MAX_PREPARE_ATTEMPTS) throw e
+                Log.w(TAG, "엔진 상태가 바뀌어 상태를 다시 읽고 한 번 더 한다: ${e.message}")
+            }
+        }
+
+        prepared = true
+        onProgress(100, "준비 완료")
+    }
+
+    private suspend fun prepareOnce(modelFile: File, onProgress: (Int, String) -> Unit) {
         val state = settleState()
         when (val step = nextStep(state, enginePrimed)) {
             EngineStep.REUSE -> {
@@ -72,11 +91,15 @@ class LlamaPlanGenerator(
                 Log.i(TAG, "엔진에 모델이 이미 올라 있어 다시 올리지 않는다")
                 engine.resetConversation()
             }
+            EngineStep.WAIT -> throw IllegalStateException("엔진이 아직 초기화되지 않았다")
             EngineStep.LOAD, EngineStep.UNLOAD_THEN_LOAD -> {
                 if (step == EngineStep.UNLOAD_THEN_LOAD) {
                     // 올라가 있지만 시스템 프롬프트까지 끝났는지 모르거나(준비 도중 끊김) 오류 상태다.
-                    Log.i(TAG, "엔진 상태 ${state.javaClass.simpleName}: 내리고 다시 올린다")
-                    withContext(Dispatchers.IO) { engine.cleanUp() }
+                    // 내리기 직전에 다시 읽어, 그사이 Initialized 가 됐으면 내리지 않는다.
+                    if (engine.state.value !is InferenceEngine.State.Initialized) {
+                        Log.i(TAG, "엔진 상태 ${state.javaClass.simpleName}: 내리고 다시 올린다")
+                        withContext(Dispatchers.IO) { engine.cleanUp() }
+                    }
                 }
                 enginePrimed = false
                 onProgress(100, "모델 로딩 중...")
@@ -87,9 +110,6 @@ class LlamaPlanGenerator(
                 enginePrimed = true
             }
         }
-
-        prepared = true
-        onProgress(100, "준비 완료")
     }
 
     /** 이전 생성이나 로딩이 아직 끝나지 않았다면 끝나기를 기다린다(최대 [SETTLE_TIMEOUT_MS]). */
@@ -129,10 +149,33 @@ class LlamaPlanGenerator(
                 // 가드는 사용자가 문장 앞에서 앱을 직접 지목했을 때만 움직인다. 지목이 없는 문장의
                 // 재분석은 화면을 보고 앱을 바꿀 수 있으므로 결과를 그대로 둔다.
                 val plan = AppMentionGuard.apply(request.utterance, parsed.plan)
+                // "OO 켜서 … 검색해줘" 의 OO 가 바로 검색을 못 하는 앱이면 다른 앱으로 검색하지 않고 끝낸다.
+                AppMentionGuard.searchRefusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
                 // 보낼 내용이 사용자가 말한 글에 없으면 계획을 버려 다시 받는다. 메시지는 되돌릴 수 없다.
-                val checked = SendMessageGuard.check(request.utterance, plan)
+                // 잡담이나 받는 사람이 없는 말에 모델이 지어낸 send_message 는 다시 묻지 않고 끝낸다.
+                // 다시 물으면 모델이 또 지어낸다.
+                MessageChannelGuard.refusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
+                // 보내 달라는 말인데 send_message 가 없으면 tap 같은 엉뚱한 계획이다. 첫 계획은 한 번 더 받고,
+                // 재분석이나 형식 재요청에서도 또 그러면 더 묻지 않고 끝낸다.
+                if (MessageChannelGuard.asksToSend(request.utterance) &&
+                    plan.steps.none { it.action == ActionType.SEND_MESSAGE }
+                ) {
+                    return if (request.mode == PlanRequest.Mode.INITIAL) {
+                        PlanResult.Malformed(raw, "보내기 요청인데 send_message 가 없다")
+                    } else {
+                        PlanResult.Refused("메시지 보내기 계획을 만들지 못해 보내지 않았어요")
+                    }
+                }
+                // 수단이 다른 앱으로 나가면 되돌릴 수 없다. 지원하지 않는 수단(인스타 등)은 다시 묻지 않고 끝낸다.
+                // Malformed 는 JSON 재요청을 타므로 재시도 없이 바로 끝나는 Refused 로 낸다.
+                val channelChecked = when (val channel = MessageChannelGuard.apply(request.utterance, plan)) {
+                    is MessageChannelGuard.Result.Ok -> channel.plan
+                    is MessageChannelGuard.Result.Unsupported -> return PlanResult.Refused(channel.reason)
+                }
+                val checked = SendMessageGuard.check(request.utterance, channelChecked)
                     ?: return PlanResult.Malformed(raw, "send_message 의 value 가 사용자가 말한 내용에 없다")
-                PlanResult.Success(checked, raw, parsed.warnings)
+                // "두 번째 영상 틀어줘" 를 모델이 play_first 두 번으로 내면 하나로 합치고 순번을 value 로 채운다.
+                PlanResult.Success(PlayOrdinalGuard.apply(request.utterance, checked), raw, parsed.warnings)
             }
             is ParseResult.Failure -> PlanResult.Malformed(raw, parsed.reason)
         }
@@ -298,21 +341,26 @@ class LlamaPlanGenerator(
 
         private const val SETTLE_TIMEOUT_MS = 60_000L
 
-        internal enum class EngineStep { LOAD, REUSE, UNLOAD_THEN_LOAD }
+        internal enum class EngineStep { LOAD, REUSE, UNLOAD_THEN_LOAD, WAIT }
+
+        private const val MAX_PREPARE_ATTEMPTS = 2
 
         /**
          * 엔진 상태로 prepare 에서 할 일을 정한다.
          * 엔진이 모델 로딩과 시스템 프롬프트 처리까지 끝낸 채 대기 중([primed])이면 다시 올리지 않는다.
+         * 아직 초기화 전(Uninitialized)이면 기다려야 하고(내리기를 부르면 그사이 Initialized 가 되어 실패한다),
          * 처음 상태(Initialized)면 그냥 올리고, 그 밖에 모델이 올라가 있거나 오류면 내렸다가 올린다.
          */
         internal fun nextStep(state: InferenceEngine.State, primed: Boolean): EngineStep = when {
+            state is InferenceEngine.State.Uninitialized -> EngineStep.WAIT
             state is InferenceEngine.State.ModelReady && primed -> EngineStep.REUSE
             state is InferenceEngine.State.Initialized -> EngineStep.LOAD
             else -> EngineStep.UNLOAD_THEN_LOAD
         }
 
         private fun InferenceEngine.State.isBusy(): Boolean =
-            this is InferenceEngine.State.Initializing ||
+            this is InferenceEngine.State.Uninitialized ||
+                this is InferenceEngine.State.Initializing ||
                 this is InferenceEngine.State.LoadingModel ||
                 this is InferenceEngine.State.UnloadingModel ||
                 this is InferenceEngine.State.Benchmarking ||

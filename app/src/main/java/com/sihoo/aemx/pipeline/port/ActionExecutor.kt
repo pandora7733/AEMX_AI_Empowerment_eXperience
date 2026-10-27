@@ -21,6 +21,12 @@ interface ActionExecutor {
     fun isReady(): Boolean
 
     /**
+     * 실행모듈이 하던 동작을 멈췄는지. 중단을 요청한 뒤 정말 멈췄는지 확인하는 데 쓴다.
+     * 알 수 없으면 true(멈춘 것으로 본다).
+     */
+    fun isIdle(): Boolean = true
+
+    /**
      * 동작 하나를 수행한다.
      * 수행 "시도"까지만 책임지고, 화면 변화를 기다리지 않는다.
      */
@@ -53,6 +59,9 @@ interface ActionExecutor {
         /** 유튜브 검색 결과의 첫 번째 동영상을 재생한다. */
         data object PlayFirst : Command
 
+        /** 유튜브/유튜브 뮤직 검색 결과의 [ordinal]번째(2 이상) 항목을 재생한다. 첫 번째는 [PlayFirst]. */
+        data class PlayNth(val ordinal: Int) : Command
+
         /**
          * 쇼츠/릴스에서 다음 영상으로 넘긴다.
          * [delay] 가 있으면 그만큼 기다린 뒤 넘긴다("10s", "500ms", "3").
@@ -75,8 +84,12 @@ interface ActionExecutor {
 }
 
 sealed interface ExecutionResult {
-    /** 동작을 수행했다. 화면이 어떻게 됐는지는 오케스트레이터가 따로 확인한다. */
-    data object Performed : ExecutionResult
+    /**
+     * 동작을 수행했다. 화면이 어떻게 됐는지는 오케스트레이터가 따로 확인한다.
+     *
+     * @param evidence 실행모듈이 직접 확인한 결과(메시지 전송 확인 등). 없으면 null.
+     */
+    data class Performed(val evidence: String? = null) : ExecutionResult
 
     /** 지시한 대상을 화면에서 못 찾았다. 재분석 대상. */
     data class TargetNotFound(val description: String) : ExecutionResult

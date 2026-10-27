@@ -31,7 +31,8 @@ object ScreenVerifier {
             }
         }
 
-        if (expect.isEmpty) return Verdict.Match
+        // 기대 조건이 없으면 화면으로 확인한 것이 없으므로 증거도 없다.
+        if (expect.isEmpty) return Verdict.Match()
 
         expect.packageName?.let { wanted ->
             if (!wanted.equals(after.packageName, ignoreCase = true)) {
@@ -41,8 +42,14 @@ object ScreenVerifier {
             }
         }
 
+        var alreadyThere = false
         if (expect.requireScreenChange && before.signature() == after.signature()) {
-            return Verdict.Mismatch("화면이 전혀 바뀌지 않았다")
+            // 같은 검색 결과가 이미 떠 있으면 바뀔 것이 없다. 그 앱 화면이고 검색어가 보일 때만 통과다.
+            val ok = expect.unchangedOk
+            val shown = ok != null && ok.packageName.equals(after.packageName, ignoreCase = true) &&
+                ok.texts.any { after.containsText(it) }
+            if (!shown) return Verdict.Mismatch("화면이 전혀 바뀌지 않았다")
+            alreadyThere = true
         }
 
         if (expect.anyText.isNotEmpty() && expect.anyText.none { after.containsText(it) }) {
@@ -55,11 +62,27 @@ object ScreenVerifier {
             return Verdict.Mismatch("화면에 \"$forbidden\" 이 떠 있다")
         }
 
-        return Verdict.Match
+        return Verdict.Match(evidenceFor(expect, alreadyThere))
+    }
+
+    /**
+     * 통과한 조건을 사람이 읽는 증거 한 줄로. 화면 글자나 검색어는 담지 않는다(UI·로그로 흘러가도
+     * 사용자가 말한 내용이 새지 않게 어떤 조건을 확인했는지만 적는다).
+     */
+    private fun evidenceFor(expect: Expectation, alreadyThere: Boolean): String? {
+        val checked = buildList {
+            if (expect.packageName != null) add("앞 화면이 기대한 앱임")
+            if (alreadyThere) add("같은 검색 결과가 이미 떠 있음")
+            else if (expect.requireScreenChange) add("화면이 바뀜")
+            if (expect.anyText.isNotEmpty()) add("기대한 글자가 화면에 보임")
+            if (expect.absentText.isNotEmpty()) add("없어야 할 글자가 없음")
+        }
+        return checked.joinToString(", ").ifEmpty { null }
     }
 
     sealed interface Verdict {
-        data object Match : Verdict
+        /** @param evidence 화면에서 확인한 조건. 기대 조건이 없어 확인한 것이 없으면 null. */
+        data class Match(val evidence: String? = null) : Verdict
         data class Mismatch(val reason: String, val situation: KnownSituation? = null) : Verdict
     }
 }

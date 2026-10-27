@@ -33,7 +33,17 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         if (::executor.isInitialized) executor.onAccessibilityTreeChanged()
     }
 
+    /**
+     * 시스템이 접근성 피드백(음성 등)을 끊으라고 부르는 콜백이다. 사용자나 앱이 계획을 멈추라고 한 것이
+     * 아니므로 실행 중인 계획은 건드리지 않고 기록만 남긴다. 예전에는 여기서 계획을 취소해서, 오버레이나
+     * 다른 접근성 서비스가 끼어들 때 계획이 조용히 멈출 수 있었다. 계획을 멈추는 길은 [cancelPlan] 이다.
+     */
     override fun onInterrupt() {
+        Log.i(TAG, "onInterrupt: 시스템 요청이라 계획은 취소하지 않는다(실행 중=${isExecutorRunning()})")
+    }
+
+    /** 사용자나 앱이 요청한 취소. 실행 중인 계획을 멈춘다. */
+    internal fun cancelPlan() {
         if (::executor.isInitialized) executor.cancel()
         status = "실행 중단됨"
     }
@@ -67,11 +77,11 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         status = "${index + 1}단계: ${step.action.wireName}"
     }
 
-    override fun onCompleted(plan: ActionPlan) {
+    override fun onCompleted(plan: ActionPlan, evidence: String?) {
         status = "모든 UI 명령 전달 완료 (실제 결과 확인 필요)"
         Log.i(TAG, "Action Plan dispatched")
         if (announceCompletion) ttsController?.speak("화면 조작을 마쳤습니다. 결과를 확인해 주세요")
-        observer?.invoke(PlanOutcome.Completed)
+        observer?.invoke(PlanOutcome.Completed(evidence))
     }
 
     override fun onFailed(index: Int, step: ActionStep, message: String, screen: ScreenDescription) {
@@ -135,7 +145,7 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         }
 
         fun cancelActionPlan() {
-            Handler(Looper.getMainLooper()).post { activeService?.get()?.onInterrupt() }
+            Handler(Looper.getMainLooper()).post { activeService?.get()?.cancelPlan() }
         }
 
         /**

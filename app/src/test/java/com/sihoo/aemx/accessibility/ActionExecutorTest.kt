@@ -28,7 +28,7 @@ class ActionExecutorTest {
         var failureMessage: String? = null
         var failureScreen: ScreenDescription? = null
         override fun onStepStarted(index: Int, step: ActionStep) { started += index }
-        override fun onCompleted(plan: ActionPlan) { completed = true }
+        override fun onCompleted(plan: ActionPlan, evidence: String?) { completed = true }
         override fun onFailed(
             index: Int,
             step: ActionStep,

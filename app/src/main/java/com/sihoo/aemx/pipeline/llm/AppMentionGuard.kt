@@ -1,5 +1,6 @@
 package com.sihoo.aemx.pipeline.llm
 
+import com.sihoo.aemx.accessibility.AppLauncher
 import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ActionStep
 import com.sihoo.aemx.pipeline.model.ActionType
@@ -29,7 +30,7 @@ object AppMentionGuard {
         // 붙인 step 같은 군더더기를 낸 경우도 여기서 걷어 낸다.
         openOnlyApp(utterance)?.let { return openPlan(plan, it) }
 
-        val named = leadingApp(utterance)
+        val named = leadingApp(utterance, plan.app) ?: openThenApp(utterance)
         val app = named ?: plan.app
 
         // open_app 의 target 은 plan.app 과 같아야 실행모듈이 받아 준다. 모델이 target 만 깨뜨려 내면
@@ -43,7 +44,8 @@ object AppMentionGuard {
     }
 
     /** 문장 앞에서 "앱 + 에서/에/에서는/에는" 으로 지목한 앱의 정식 이름. */
-    internal fun leadingApp(utterance: String): String? {
+    internal fun leadingApp(utterance: String, planApp: String? = null): String? {
+        leadingName(utterance, planApp)?.let { return it.first }
         val text = utterance.trim()
         for ((alias, name) in ALIASES) {
             if (!text.startsWith(alias)) continue
@@ -51,6 +53,67 @@ object AppMentionGuard {
             if (PARTICLES.any { rest.startsWith(it) }) return name
         }
         return null
+    }
+
+    /**
+     * 문장 앞 한두 단어 + 조사("네이버 웹툰에서", "네이버에서")로 지목한 이름과, 그것이 별칭 표에 있는 이름인지.
+     * 별칭 표에 없는 이름은 "학교에서", "집에서" 처럼 앱이 아닌 말일 수 있어서 둘 중 하나일 때만 앱으로 본다.
+     * - 별칭으로 시작한다("네이버 웹툰", "구글 지도"). 긴 이름을 그대로 쓰므로 "네이버" 로 줄지 않는다.
+     * - 계획의 app 으로 시작한다([planApp] 이 "네이버" 이고 말한 이름이 "네이버 웹툰").
+     * 첫 단어에 조사가 붙어 있으면 그 단어까지만 이름이다("네이버에서 웹툰 …" 는 "네이버").
+     */
+    internal fun leadingName(utterance: String, planApp: String?): Pair<String, Boolean>? {
+        val words = utterance.trim().split(Regex("\\s+"))
+        val first = stripParticle(words[0])
+        val raw = when {
+            first != null -> first
+            words.size >= 2 -> stripParticle(words[1])?.let { "${words[0]} $it" } ?: return null
+            else -> return null
+        }
+        val name = cleanName(raw) ?: return null
+        val key = squashName(name)
+        if (ALIASES.any { squashName(it.second) == key }) return name to true
+        val knownPrefix = ALIASES.any { key.startsWith(squashName(it.first)) }
+        val planKey = planApp?.let { squashName(canonical(it) ?: it) }.orEmpty()
+        if (knownPrefix || (planKey.isNotEmpty() && key.length > planKey.length && key.startsWith(planKey))) return name to false
+        return null
+    }
+
+    private fun stripParticle(word: String): String? =
+        PARTICLES.firstOrNull { word.length > it.length && word.endsWith(it) }?.let { word.removeSuffix(it) }
+
+    private fun squashName(value: String) = value.filterNot(Char::isWhitespace).lowercase(java.util.Locale.ROOT)
+
+    /**
+     * "네이버 웹툰 켜서 OO 검색해줘" 처럼 앱을 열고 이어서 무언가 하는 말에서 앞의 앱 이름.
+     * "X (을/를) (앱) 켜서/열어서/실행해서/들어가서 …" 꼴이고, 이름 길이 상한은 [openOnlyApp] 과 같다.
+     * 별칭에 있으면 정식 이름, 없으면 말한 그대로("네이버 웹툰")라서 "네이버" 로 줄지 않는다.
+     */
+    internal fun openThenApp(utterance: String): String? {
+        val match = OPEN_THEN_PATTERN.find(utterance.trim()) ?: return null
+        return cleanName(match.groupValues[1])
+    }
+
+    /**
+     * [openThenApp] 으로 지목한 앱에서 바로 검색할 수 없는데 계획에 search 가 있으면 사용자에게 읽어 줄 이유.
+     * 엉뚱한 앱(네이버)으로 검색하지 않도록 계획을 버리게 한다. 아니면 null.
+     */
+    fun searchRefusal(utterance: String, plan: ActionPlan): String? {
+        // "OO 켜서" 로 지목했거나, "OO에서" 의 OO 가 별칭 표에 없는 긴 이름("네이버 웹툰")일 때만 본다.
+        val mentioned = openThenApp(utterance) != null || leadingName(utterance, null)?.second == false ||
+            leadingName(utterance, plan.app)?.second == false
+        if (!mentioned) return null
+        if (plan.steps.none { it.action == ActionType.SEARCH }) return null
+        if (AppLauncher.supportsDirectSearch(plan.app)) return null
+        return "${plan.app}에서는 아직 바로 검색할 수 없어요"
+    }
+
+    private fun cleanName(raw: String): String? {
+        var name = raw.trim()
+        name = name.removeSuffix("을").removeSuffix("를").trim().removeSuffix("앱").trim()
+        if (name.isEmpty() || name.length > 12 || name.split(' ').size > 2) return null
+        val key = name.lowercase(java.util.Locale.ROOT)
+        return ALIASES.firstOrNull { it.first == key }?.second ?: name
     }
 
     /** 앱 [name] 을 여는 step 하나짜리 계획. 이미 그 모양이면 그대로 돌려준다. */
@@ -69,11 +132,7 @@ object AppMentionGuard {
      */
     internal fun openOnlyApp(utterance: String): String? {
         val match = OPEN_PATTERN.find(utterance.trim()) ?: return null
-        var name = match.groupValues[1].trim()
-        name = name.removeSuffix("을").removeSuffix("를").trim().removeSuffix("앱").trim()
-        if (name.isEmpty() || name.length > 12 || name.split(' ').size > 2) return null
-        val key = name.lowercase(java.util.Locale.ROOT)
-        return ALIASES.firstOrNull { it.first == key }?.second ?: name
+        return cleanName(match.groupValues[1])
     }
 
     private fun canonical(app: String): String? {
@@ -89,13 +148,15 @@ object AppMentionGuard {
         "유튜브 뮤직" to "유튜브 뮤직", "유튜브뮤직" to "유튜브 뮤직", "유투브 뮤직" to "유튜브 뮤직", "유투브뮤직" to "유튜브 뮤직",
         "인스타그램" to "인스타그램", "인스타" to "인스타그램",
         "카카오톡" to "카카오톡", "카톡" to "카카오톡", "쿠팡" to "쿠팡",
-        "메시지" to "메시지", "문자" to "메시지",
+        "문자 메시지" to "메시지", "메시지" to "메시지", "문자" to "메시지",
         "교보문고" to "교보문고", "알라딘" to "알라딘",
         "네이버" to "네이버", "구글" to "구글",
         "유튜브" to "유튜브", "유투브" to "유튜브",
     )
 
     private val OPEN_PATTERN = Regex("^(.+?)\\s+(?:좀\\s+)?(?:열어|켜|실행해|실행|띄워)(?:\\s*(?:줘|줄래|주세요|봐|라))?요?[\\s.!?]*$")
+
+    private val OPEN_THEN_PATTERN = Regex("^(.+?)\\s+(?:켜서|켜고|열어서|열고|실행해서|실행하고|들어가서|띄워서)\\s*(.+)$")
 
     /** 긴 조사가 먼저 와야 "에서" 가 "에" 에 먼저 걸리지 않는다. */
     private val PARTICLES = listOf("에서는", "에서", "에는", "에")

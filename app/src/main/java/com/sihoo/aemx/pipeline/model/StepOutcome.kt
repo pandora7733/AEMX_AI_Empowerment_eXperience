@@ -7,7 +7,11 @@ sealed interface StepOutcome {
     val screen: ScreenSnapshot
 
     /** 기대한 대로 화면이 바뀌었다. */
-    data class Success(override val screen: ScreenSnapshot) : StepOutcome
+    data class Success(
+        override val screen: ScreenSnapshot,
+        /** 성공을 뒷받침하는 관찰(화면 검증, 전송 확인). 확인한 것이 없으면 null. */
+        val evidence: String? = null
+    ) : StepOutcome
 
     /** 실행은 됐는데 화면이 기대와 다르다. 재분석 대상. */
     data class Mismatch(

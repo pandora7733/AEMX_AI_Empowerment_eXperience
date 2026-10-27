@@ -23,4 +23,12 @@ class LlamaPrepareStepTest {
         assertEquals(EngineStep.UNLOAD_THEN_LOAD, LlamaPlanGenerator.nextStep(State.ModelReady, primed = false))
         assertEquals(EngineStep.UNLOAD_THEN_LOAD, LlamaPlanGenerator.nextStep(State.Error(RuntimeException()), primed = true))
     }
+
+    @Test
+    fun `초기화 전 상태는 내리지 않고 기다린다`() {
+        // 새 프로세스에서 엔진이 Uninitialized 일 때 내리기를 부르면 그사이 Initialized 가 되어
+        // "Cannot unload model in Initialized" 로 실패했다.
+        assertEquals(EngineStep.WAIT, LlamaPlanGenerator.nextStep(State.Uninitialized, primed = false))
+        assertEquals(EngineStep.WAIT, LlamaPlanGenerator.nextStep(State.Uninitialized, primed = true))
+    }
 }

@@ -55,6 +55,14 @@ class StepPlanFactoryTest {
     }
 
     @Test
+    fun `N번째 재생은 순번을 value 에 담아 파서를 통과한다`() {
+        val step = parse(Command.PlayNth(2), "유튜브").steps.single()
+        assertEquals(A11yType.PLAY_FIRST, step.action)
+        assertEquals("2", step.value)
+        assertEquals("3", parse(Command.PlayNth(3), "유튜브 뮤직").steps.single().value)
+    }
+
+    @Test
     fun `대상이 없는 동작도 파서를 통과한다`() {
         assertEquals(A11yType.PLAY_FIRST, parse(Command.PlayFirst, "유튜브").steps.single().action)
 

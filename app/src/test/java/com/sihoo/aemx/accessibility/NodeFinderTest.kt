@@ -172,6 +172,35 @@ class NodeFinderTest {
     }
 
     @Test
+    fun `N번째 영상은 광고를 빼고 센다`() {
+        val advert = sponsoredBlock(videoItem("노트북 특가 모음"))
+        val root = node().with(videoItem("첫 영상"), advert, videoItem("둘째 영상"), videoItem("셋째 영상"))
+
+        assertEquals("둘째 영상 - 3분 12초 - 동영상 재생", NodeFinder.findNthPlayable(root, 2)?.contentDescription)
+        assertEquals("셋째 영상 - 3분 12초 - 동영상 재생", NodeFinder.findNthPlayable(root, 3)?.contentDescription)
+        assertNull(NodeFinder.findNthPlayable(root, 4))
+    }
+
+    @Test
+    fun `N번째 영상은 Shorts 를 일반 영상이 있는 동안 세지 않는다`() {
+        val root = node().with(videoItem("쇼츠 하나", shorts = true), videoItem("첫 영상"), videoItem("둘째 영상"))
+
+        assertEquals("둘째 영상 - 3분 12초 - 동영상 재생", NodeFinder.findNthPlayable(root, 2)?.contentDescription)
+    }
+
+    @Test
+    fun `N번째 노래는 칩이 선택된 목록의 글자 있는 행만 센다`() {
+        val first = songRow("첫 곡")
+        val blank = songRow(null)
+        val second = songRow("둘째 곡")
+        val root = musicRoot(songChip(selected = true), first, blank, second)
+
+        assertEquals(second, NodeFinder.findNthSong(root, 2))
+        assertNull(NodeFinder.findNthSong(root, 3))
+        assertNull(NodeFinder.findNthSong(musicRoot(songChip(selected = false), first, second), 2))
+    }
+
+    @Test
     fun `채널 버튼이나 검색창은 영상으로 보지 않는다`() {
         // 예전 구현은 "라벨이 있는 첫 누를 수 있는 노드"를 골라서 검색창을 눌렀고,
         // 영상이 열리지 않은 채 성공으로 끝났다.

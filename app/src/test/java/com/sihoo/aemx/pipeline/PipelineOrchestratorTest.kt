@@ -7,7 +7,9 @@ import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.port.ActionExecutor
 import com.sihoo.aemx.pipeline.port.ExecutionResult
+import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
+import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -47,7 +49,7 @@ class PipelineOrchestratorTest {
             performed += command
             // null 이면 화면이 그대로다(=누른 게 아무 반응이 없었던 경우).
             if (next != null) observer.advanceTo(next)
-            return ExecutionResult.Performed
+            return ExecutionResult.Performed()
         }
     }
 
@@ -234,6 +236,30 @@ class PipelineOrchestratorTest {
         assertTrue((state as PipelineState.Failed).reason.contains("쿠팡"))
         assertEquals("재분석을 요청하면 안 된다", 1, planner.requests.size)
         assertTrue("실행모듈을 부르면 안 된다", executor.performed.isEmpty())
+    }
+
+    @Test
+    fun `가드가 거절하면 이유를 그대로 싣고 다시 묻지 않고 끝난다`() = runTest {
+        val requests = mutableListOf<PlanRequest>()
+        val planner = object : PlanGenerator {
+            override fun isReady() = true
+            override suspend fun generate(request: PlanRequest): PlanResult {
+                requests += request
+                return PlanResult.Refused("인스타그램 메시지는 아직 보낼 수 없어요")
+            }
+        }
+        val observer = FakeScreenObserver(snapshot("홈", pkg = "com.android.launcher"))
+        val executor = ScriptedExecutor(observer, emptyList())
+        val orchestrator = build(planner, executor, observer)
+
+        orchestrator.submit("김경환한테 인스타로 안녕이라고 보내줘")
+        advanceUntilIdle()
+
+        val state = orchestrator.state.value as PipelineState.Failed
+        assertEquals("인스타그램 메시지는 아직 보낼 수 없어요", state.reason)
+        assertTrue(state.speakReason)
+        assertEquals(1, requests.size)
+        assertTrue(executor.performed.isEmpty())
     }
 
     // ------------------------------------------------------------- 재분석
@@ -453,7 +479,7 @@ class PipelineOrchestratorTest {
      * 파이프라인이 한 발짝도 나아가지 않은 채 단언에 도달한다.
      */
     private fun kotlinx.coroutines.test.TestScope.build(
-        planner: FakePlanGenerator,
+        planner: PlanGenerator,
         executor: ActionExecutor,
         observer: FakeScreenObserver,
         config: PipelineConfig = PipelineConfig(quietPeriodMs = 10)

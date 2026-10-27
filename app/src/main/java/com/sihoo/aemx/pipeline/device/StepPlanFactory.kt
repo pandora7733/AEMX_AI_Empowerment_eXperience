@@ -61,6 +61,13 @@ internal object StepPlanFactory {
                 target = PLACEHOLDER_TARGET
             }
 
+            // 순번은 value 로 간다(서비스 규칙).
+            is Command.PlayNth -> {
+                action = A11yType.PLAY_FIRST
+                target = PLACEHOLDER_TARGET
+                value = command.ordinal.toString()
+            }
+
             is Command.NextVideo -> {
                 action = A11yType.NEXT_VIDEO
                 target = PLACEHOLDER_TARGET

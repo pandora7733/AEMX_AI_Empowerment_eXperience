@@ -2,6 +2,7 @@ package com.sihoo.aemx.pipeline
 
 import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
+import com.sihoo.aemx.pipeline.model.UnchangedOk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -15,7 +16,7 @@ class ScreenVerifierTest {
     @Test
     fun `기대가 비어 있으면 통과한다`() {
         val s = screen("아무 말")
-        assertEquals(ScreenVerifier.Verdict.Match, ScreenVerifier.verify(Expectation.NONE, s, s))
+        assertEquals(ScreenVerifier.Verdict.Match(), ScreenVerifier.verify(Expectation.NONE, s, s))
     }
 
     @Test
@@ -40,6 +41,46 @@ class ScreenVerifierTest {
         assertTrue((verdict as ScreenVerifier.Verdict.Mismatch).reason.contains("바뀌지 않았다"))
     }
 
+    private val searchPackage = "com.google.android.youtube"
+
+    private fun searchExpect() = Expectation(
+        requireScreenChange = true,
+        unchangedOk = UnchangedOk(searchPackage, listOf("페이커")),
+    )
+
+    @Test
+    fun `같은 검색 결과가 이미 떠 있으면 화면이 그대로여도 통과한다`() {
+        val same = screen("페이커", "T1 페이커 영상", pkg = searchPackage)
+        val verdict = ScreenVerifier.verify(searchExpect(), before = same, after = same)
+        assertTrue(verdict is ScreenVerifier.Verdict.Match)
+        assertEquals("같은 검색 결과가 이미 떠 있음", (verdict as ScreenVerifier.Verdict.Match).evidence)
+    }
+
+    @Test
+    fun `화면이 그대로인데 검색어가 안 보이면 실패한다`() {
+        val same = screen("홈", "인기 급상승", pkg = searchPackage)
+        val verdict = ScreenVerifier.verify(searchExpect(), before = same, after = same)
+        assertTrue(verdict is ScreenVerifier.Verdict.Mismatch)
+        assertTrue((verdict as ScreenVerifier.Verdict.Mismatch).reason.contains("바뀌지 않았다"))
+    }
+
+    @Test
+    fun `화면이 그대로이고 앱이 다르면 검색어가 보여도 실패한다`() {
+        val same = screen("페이커", pkg = "com.nhn.android.search")
+        val verdict = ScreenVerifier.verify(searchExpect(), before = same, after = same)
+        assertTrue(verdict is ScreenVerifier.Verdict.Mismatch)
+    }
+
+    @Test
+    fun `화면이 바뀐 검색은 증거에 화면이 바뀜을 남긴다`() {
+        val verdict = ScreenVerifier.verify(
+            searchExpect(),
+            before = screen("홈", pkg = searchPackage),
+            after = screen("페이커", pkg = searchPackage),
+        )
+        assertEquals("화면이 바뀜", (verdict as ScreenVerifier.Verdict.Match).evidence)
+    }
+
     @Test
     fun `화면이 바뀌면 화면 변화 기대를 만족한다`() {
         val verdict = ScreenVerifier.verify(
@@ -47,7 +88,7 @@ class ScreenVerifierTest {
             before = screen("로그인"),
             after = screen("아이디", "비밀번호")
         )
-        assertEquals(ScreenVerifier.Verdict.Match, verdict)
+        assertTrue(verdict is ScreenVerifier.Verdict.Match)
     }
 
     @Test
@@ -57,7 +98,7 @@ class ScreenVerifierTest {
             before = screen("검색창"),
             after = screen("검색창", "토지")
         )
-        assertEquals(ScreenVerifier.Verdict.Match, verdict)
+        assertTrue(verdict is ScreenVerifier.Verdict.Match)
     }
 
     // ------------------------------------------------ 흔한 실패 케이스
@@ -71,7 +112,7 @@ class ScreenVerifierTest {
             before = screen("홈", pkg = "com.android.launcher"),
             after = naver
         )
-        assertEquals(ScreenVerifier.Verdict.Match, verdict)
+        assertTrue(verdict is ScreenVerifier.Verdict.Match)
     }
 
     @Test
@@ -128,7 +169,7 @@ class ScreenVerifierTest {
         for (pkg in listOf("com.samsung.android.messaging", "com.google.android.apps.messaging", "com.kakao.talk")) {
             val list = screen("엄마", "인증번호 123456", "[Web발신]", pkg = pkg)
             assertNull(KnownSituation.detect(list))
-            assertEquals(ScreenVerifier.Verdict.Match, ScreenVerifier.verify(Expectation.NONE, list, list))
+            assertEquals(ScreenVerifier.Verdict.Match(), ScreenVerifier.verify(Expectation.NONE, list, list))
         }
     }
 

@@ -80,26 +80,39 @@ internal object NodeFinder {
      *
      * 유튜브 앱이 업데이트돼 문구가 바뀌면 [PLAY_MARKERS] 를 고쳐야 한다.
      */
-    fun findFirstPlayable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (root == null) return null
+    fun findFirstPlayable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? = findNthPlayable(root, 1)
+
+    /** [findFirstPlayable] 의 N번째(1부터). 광고와 Shorts 를 거르는 규칙은 그대로고 거른 뒤의 N번째다. */
+    fun findNthPlayable(root: AccessibilityNodeInfo?, n: Int): AccessibilityNodeInfo? =
+        playableItems(root).getOrNull(n - 1)
+
+    /**
+     * 지금 화면의 재생 가능한 항목을 위에서부터. 광고는 뺀다. Shorts 는 일반 영상이 하나도 없을 때만 쓴다.
+     * 같은 항목을 스크롤 전후로 알아보는 키는 [playableKey] 다.
+     */
+    fun playableItems(root: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
+        if (root == null) return emptyList()
         // 결과 목록 밖(검색창·재생 중인 미리보기·하단 탭)을 후보에서 아예 빼기 위해
         // 목록 컨테이너부터 찾는다.
         val container = resultList(root) ?: root
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(container) }
         var visited = 0
-        var shortsFallback: AccessibilityNodeInfo? = null
+        val videos = ArrayList<AccessibilityNodeInfo>()
+        val shorts = ArrayList<AccessibilityNodeInfo>()
 
         while (queue.isNotEmpty()) {
             if (++visited > 2_000) break
             val node = queue.removeFirst()
             if (isPlayableItem(node) && !isSponsored(node)) {
-                if (!isShorts(node)) return node
-                if (shortsFallback == null) shortsFallback = node
+                if (!isShorts(node)) videos += node else shorts += node
             }
             for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
-        return shortsFallback
+        return videos.ifEmpty { shorts }
     }
+
+    /** 유튜브 항목을 스크롤 전후로 알아보는 키. 항목의 content-desc(제목 포함). */
+    fun playableKey(node: AccessibilityNodeInfo): String = node.contentDescription?.toString()?.trim().orEmpty()
 
     /**
      * 유튜브 뮤직 검색 결과에서 맨 처음 나오는 노래를 고른다.
@@ -116,16 +129,37 @@ internal object NodeFinder {
      * 그래서 "노래" 칩이 선택된 상태에서만, 목록의 첫 행 중 `title` 글자가 있고 화면에 보이는 것을 고른다.
      * 칩이 없거나 선택 전이면 null 을 돌려 엉뚱한 걸 누르지 않는다. 칩은 [findSongFilterChip] 으로 찾는다.
      */
-    fun findFirstSong(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+    fun findFirstSong(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? = findNthSong(root, 1)
+
+    /** [findFirstSong] 의 N번째(1부터). 글자가 있고 보이는 노래 행만 센다. */
+    fun findNthSong(root: AccessibilityNodeInfo?, n: Int): AccessibilityNodeInfo? = songRows(root)?.getOrNull(n - 1)
+
+    /**
+     * "노래" 칩이 선택된 상태에서 목록의 노래 행을 위에서부터. 칩이 없거나 선택 전이거나 목록이 없으면 null
+     * (엉뚱한 걸 세지 않게). 같은 행을 스크롤 전후로 알아보는 키는 [songKey] 다.
+     */
+    fun songRows(root: AccessibilityNodeInfo?): List<AccessibilityNodeInfo>? {
         if (root == null) return null
         val chip = findSongFilterChip(root) ?: return null
         if (!isSelectedChip(chip)) return null
         val list = findById(root, SONG_LIST_ID_SUFFIX) ?: return null
-        for (index in 0 until list.childCount) {
-            val row = list.getChild(index) ?: continue
-            if (isSongRow(row)) return row
+        return (0 until list.childCount).mapNotNull { list.getChild(it) }.filter { isSongRow(it) }
+    }
+
+    /** 노래 행을 알아보는 키. 곡명(id 가 title 인 글자)에 부제(가수·시간)를 붙인다. 못 찾으면 빈 글자. */
+    fun songKey(row: AccessibilityNodeInfo): String {
+        val parts = ArrayList<String>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(row) }
+        var visited = 0
+        while (queue.isNotEmpty() && ++visited <= SONG_ROW_MAX_NODES) {
+            val node = queue.removeFirst()
+            val id = node.viewIdResourceName.orEmpty()
+            if ((id.endsWith(SONG_TITLE_ID_SUFFIX) || id.endsWith("/subtitle")) && !node.text.isNullOrBlank()) {
+                parts += node.text.toString().trim()
+            }
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
-        return null
+        return parts.joinToString("|")
     }
 
     /**

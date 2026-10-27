@@ -67,7 +67,7 @@ class FakePlanGenerator(
 class FakeActionExecutor(
     private var ready: Boolean = true,
     /** 특정 명령에 대해 실패를 흉내 내고 싶을 때. */
-    private val resultFor: (ActionExecutor.Command) -> ExecutionResult = { ExecutionResult.Performed }
+    private val resultFor: (ActionExecutor.Command) -> ExecutionResult = { ExecutionResult.Performed() }
 ) : ActionExecutor {
 
     val performed = mutableListOf<ActionExecutor.Command>()
@@ -106,7 +106,7 @@ class ScriptedActionExecutor(
         val next = screensAfterEach.getOrNull(performed.size)
         performed += command
         if (next != null) observer.advanceTo(next)
-        return ExecutionResult.Performed
+        return ExecutionResult.Performed()
     }
 }
 

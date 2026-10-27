@@ -256,6 +256,8 @@ internal class MessageSender(
     private val service: AemxAccessibilityService,
     private val handler: Handler,
     private val appLauncher: AppLauncher,
+    /** 전송을 확인한 순간(onDone 직전) 무엇으로 확인했는지 알린다. 패널의 성공 증거가 된다. */
+    private val onEvidence: (String) -> Unit = {},
 ) {
     fun send(
         app: String,
@@ -269,15 +271,20 @@ internal class MessageSender(
         val value = step.value
         if (value.isNullOrBlank()) return onFailed("보낼 내용이 비어 있습니다.")
         if (step.target.isBlank()) return onFailed("받는 사람이 비어 있습니다.")
+        // onDone 은 두 흐름 모두 전송을 확인한 뒤에만 불린다. 그 직전에 증거를 알린다.
+        val done = {
+            onEvidence(if (channel == MessageChannel.SMS) SMS_EVIDENCE else KAKAO_EVIDENCE)
+            onDone()
+        }
         when (channel) {
             MessageChannel.SMS ->
-                prepareSms(app, step.target, value, isCurrent, onDone, onFailed)?.let(handler::post)
+                prepareSms(app, step.target, value, isCurrent, done, onFailed)?.let(handler::post)
             // 카톡 26.9.1 부터 채팅방 화면의 접근성 노드가 비어서, 공유 인텐트로 보낸다.
             MessageChannel.KAKAO -> KakaoShareFlow(
                 service,
                 handler,
                 looseMatch = KakaoShareRules.NameMatch { wanted, shown -> MessageRules.looselyNamed(shown, wanted) },
-            ).send(step.target, value, isCurrent, onDone, onFailed)
+            ).send(step.target, value, isCurrent, done, onFailed)
         }
     }
 
@@ -552,6 +559,10 @@ internal class MessageSender(
 
         /** 화면 높이 대비 아래쪽 입력란 영역의 경계. */
         const val INPUT_AREA = 0.4
+
+        /** 성공 증거. 문자는 입력창이 비고 말풍선이 늘어난 것을, 카톡은 보낸 뒤 공유 화면이 닫힌 것을 확인했다. */
+        const val SMS_EVIDENCE = "입력창이 비고 보낸 말풍선이 늘어난 것을 확인함"
+        const val KAKAO_EVIDENCE = "보내기를 누르고 공유 화면이 닫힌 것을 확인함"
 
         const val SENT_UNVERIFIED = "보내기를 눌렀지만 보낸 말풍선을 확인하지 못했습니다. 이미 보냈을 수 있어 다시 보내지 않습니다."
 

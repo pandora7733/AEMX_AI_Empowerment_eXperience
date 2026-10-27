@@ -117,6 +117,11 @@ data class Expectation(
     val absentText: List<String> = emptyList(),
     /** 실행 전과 화면이 달라져 있어야 한다(누르면 무언가 반응해야 하는 경우). */
     val requireScreenChange: Boolean = false,
+    /**
+     * 화면이 안 바뀌었어도 통과시킬 조건. 같은 검색을 연달아 하면 결과 화면이 이미 떠 있어서
+     * 화면이 그대로인데, 그 앱 화면이고 검색어가 보이면 이미 도착한 것이다.
+     */
+    val unchangedOk: UnchangedOk? = null,
     /** 사람이 읽는 기대 설명. */
     val note: String = ""
 ) {
@@ -128,3 +133,6 @@ data class Expectation(
         val NONE = Expectation()
     }
 }
+
+/** 화면이 그대로여도 [packageName] 앱의 화면에 [texts] 중 하나가 보이면 이미 도착한 것으로 본다. */
+data class UnchangedOk(val packageName: String, val texts: List<String>)

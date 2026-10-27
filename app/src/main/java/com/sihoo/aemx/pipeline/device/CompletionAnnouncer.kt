@@ -30,7 +30,7 @@ data class AnnouncementTexts(
  */
 fun announcementFor(state: PipelineState, texts: AnnouncementTexts): String? = when (state) {
     is PipelineState.Finished -> texts.finished
-    is PipelineState.Failed -> texts.failed
+    is PipelineState.Failed -> if (state.speakReason) state.reason else texts.failed
     is PipelineState.NeedsUser -> texts.needsUser
     is PipelineState.NeedsSetup -> texts.needsSetup
     is PipelineState.Planning -> if (state.replanCount >= 1) texts.replanning else null

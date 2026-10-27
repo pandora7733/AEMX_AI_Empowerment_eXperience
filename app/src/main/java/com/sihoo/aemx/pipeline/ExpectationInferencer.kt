@@ -4,6 +4,7 @@ import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ActionStep
 import com.sihoo.aemx.pipeline.model.ActionType
 import com.sihoo.aemx.pipeline.model.Expectation
+import com.sihoo.aemx.pipeline.model.UnchangedOk
 import com.sihoo.aemx.pipeline.port.AppResolver
 
 /**
@@ -78,13 +79,23 @@ class ExpectationInferencer(
                 )
             }
 
-            // 검색은 결과 화면으로 넘어가므로 화면이 반드시 바뀐다.
-            ActionType.SEARCH -> step.copy(
-                expect = Expectation(
-                    requireScreenChange = true,
-                    note = "검색하면 결과 화면으로 넘어가야 한다"
+            // 검색은 결과 화면으로 넘어가므로 화면이 바뀐다. 다만 같은 검색을 연달아 하면 결과 화면이
+            // 이미 떠 있어 그대로이니, 그 앱 화면이고 검색어가 보이면 통과시킨다(앞부분만 본다).
+            ActionType.SEARCH -> {
+                val packageName = appResolver.resolvePackage(appName)
+                val probe = step.target?.trim().orEmpty().take(SEARCH_PROBE_LENGTH).trim()
+                step.copy(
+                    expect = Expectation(
+                        requireScreenChange = true,
+                        unchangedOk = if (packageName != null && probe.isNotEmpty()) {
+                            UnchangedOk(packageName, listOf(probe))
+                        } else {
+                            null
+                        },
+                        note = "검색하면 결과 화면으로 넘어가야 한다"
+                    )
                 )
-            )
+            }
 
             // 영상 재생과 다음 영상은 화면이 바뀌는 것 말고 확인할 방법이 마땅치 않다.
             // 재생이 실제로 시작됐는지는 접근성 정보로 알기 어렵다(ACCESSIBILITY/README.md).
@@ -127,5 +138,8 @@ class ExpectationInferencer(
 
         /** 입력 확인에 쓸 앞부분 길이. 너무 길게 잡으면 잘려 보일 때 오탐이 난다. */
         const val INPUT_PROBE_LENGTH = 6
+
+        /** 이미 떠 있는 검색 결과를 알아보는 검색어 앞부분 길이. */
+        const val SEARCH_PROBE_LENGTH = 8
     }
 }

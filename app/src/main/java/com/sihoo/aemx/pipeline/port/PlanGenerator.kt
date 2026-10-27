@@ -72,4 +72,10 @@ sealed interface PlanResult {
 
     /** 추론 자체가 실패했다(모델 미로딩, 메모리 부족 등). 재요청해도 소용없다. */
     data class EngineError(val message: String) : PlanResult
+
+    /**
+     * 가드가 계획을 거절했다. 재요청도 재분석도 하지 않고 바로 끝내며, [message] 는 접두어 없이
+     * 사용자에게 화면과 음성으로 그대로 알린다. 예: "인스타그램 메시지는 아직 보낼 수 없어요".
+     */
+    data class Refused(val message: String) : PlanResult
 }

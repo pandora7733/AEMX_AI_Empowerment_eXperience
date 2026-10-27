@@ -10,7 +10,8 @@ data class ActionPlan(
 
 /** 계획 하나를 끝까지 실행한 결과. 실패하면 그 시점 화면을 함께 돌려준다. */
 sealed interface PlanOutcome {
-    data object Completed : PlanOutcome
+    /** @param evidence 실행모듈이 직접 확인한 결과(메시지 전송 확인 등). 없으면 null. */
+    data class Completed(val evidence: String? = null) : PlanOutcome
 
     data class Failed(
         val stepIndex: Int,
@@ -120,7 +121,10 @@ object ActionPlanParser {
             throw ActionPlanParseException("steps[$index]의 target/value가 너무 깁니다.")
         }
         require(action != ActionType.SEARCH || value == null) { "search 검색어는 target에 넣어 주세요." }
-        require(action != ActionType.PLAY_FIRST || value == null) { "play_first에는 value를 사용하지 않습니다." }
+        // value 는 1부터 시작하는 순번(선택)이다. "2", "두 번째" 같은 꼴만 받는다.
+        require(action != ActionType.PLAY_FIRST || value == null || Ordinal.find(value) != null) {
+            "play_first의 value는 순번(예: 2)이어야 합니다."
+        }
         if (action == ActionType.NEXT_VIDEO && value != null) WaitDuration.millis(value)
         require(action != ActionType.SCROLL || target in setOf("up", "down", "forward", "backward")) {
             "scroll target은 up/down/forward/backward만 지원합니다."

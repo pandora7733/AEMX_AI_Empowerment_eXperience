@@ -29,6 +29,9 @@ interface PlanBridge {
 
     /** 돌고 있는 계획을 중단한다. */
     fun cancel()
+
+    /** 서비스가 지금 계획을 실행 중인지. 중단을 요청한 뒤 서비스가 멈췄는지 확인하는 데 쓴다. */
+    fun isRunning(): Boolean = false
 }
 
 /** [AemxAccessibilityService] 의 static 입구를 그대로 쓰는 실제 구현. */
@@ -42,4 +45,6 @@ object ServicePlanBridge : PlanBridge {
         AemxAccessibilityService.setPlanObserver(callback)
 
     override fun cancel() = AemxAccessibilityService.cancelActionPlan()
+
+    override fun isRunning(): Boolean = AemxAccessibilityService.isPlanRunning()
 }

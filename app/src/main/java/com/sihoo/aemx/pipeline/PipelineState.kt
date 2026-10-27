@@ -34,7 +34,11 @@ sealed interface PipelineState {
 
     data class Finished(val message: String) : PipelineState
 
-    data class Failed(val reason: String) : PipelineState
+    /**
+     * @param speakReason true 면 [reason] 이 사용자에게 읽어 줄 문장이다(가드의 거절 등).
+     *  false 면 개발자용 설명이라 음성은 고정 실패 문구만 말한다.
+     */
+    data class Failed(val reason: String, val speakReason: Boolean = false) : PipelineState
 }
 
 /** 화면에 그대로 찍어 주기 위한 진행 로그 한 줄. */
@@ -67,5 +71,14 @@ data class PipelineConfig(
      * 같은 화면에서 재분석이 이 횟수를 넘게 반복되면 진전이 없다고 보고 멈춘다.
      * 무한루프를 막는 마지막 안전장치다.
      */
-    val sameScreenReplanLimit: Int = 2
+    val sameScreenReplanLimit: Int = 2,
+
+    /**
+     * 중단을 요청한 뒤 명령 처리가 끝나기를 기다리는 최대 시간. LLM 추론은 도중에 멈출 수 없어
+     * 20~35초가 걸려 돌아와야 끝나므로 그보다 넉넉하다. 넘으면 중단을 확인하지 못한 것으로 본다.
+     */
+    val cancelJoinTimeoutMs: Long = 60_000L,
+
+    /** 명령 처리가 끝난 뒤 실행모듈(접근성 서비스)이 멈추기를 기다리는 최대 시간. */
+    val cancelConfirmTimeoutMs: Long = 5_000L
 )

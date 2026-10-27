@@ -21,6 +21,11 @@ class CompletionAnnouncerTest {
     private val screen = ScreenSnapshot(packageName = "pkg", className = null, texts = emptyList())
 
     @Test
+    fun `거절 이유가 있는 실패는 이유를 읽는다`() {
+        assertEquals("보낼 수 없어요", announcementFor(PipelineState.Failed("보낼 수 없어요", speakReason = true), texts))
+    }
+
+    @Test
     fun `최종 상태마다 맞는 문구를 말한다`() {
         assertEquals("끝", announcementFor(PipelineState.Finished("완료"), texts))
         assertEquals("실패", announcementFor(PipelineState.Failed("이유"), texts))

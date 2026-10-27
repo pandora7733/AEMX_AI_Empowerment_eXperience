@@ -114,9 +114,13 @@ class AppMentionGuardTest {
     }
 
     @Test
-    fun `앱 열기 말이어도 계획에 다른 동작이 있으면 건드리지 않는다`() {
-        val original = plan("쿠팡", "물티슈")
-        assertSame(original, AppMentionGuard.apply("넷플릭스 열어서 찾아줘", original))
+    fun `앱 열기 말 뒤에 다른 요청이 붙으면 앱만 바로잡고 나머지 step 은 둔다`() {
+        val fixed = AppMentionGuard.apply("넷플릭스 열어서 찾아줘", plan("쿠팡", "물티슈"))
+
+        assertEquals("넷플릭스", fixed.app)
+        assertEquals("넷플릭스", fixed.steps[0].target)
+        assertEquals("물티슈", fixed.steps[1].target)
+        assertEquals(2, fixed.steps.size)
     }
 
     @Test
@@ -170,5 +174,78 @@ class AppMentionGuardTest {
     fun `이미 open_app 하나뿐인 계획은 그대로 둔다`() {
         val original = openPlan("멜론")
         assertSame(original, AppMentionGuard.apply("멜론 열어줘", original))
+    }
+
+    @Test
+    fun `앱을 켜서 이어 하는 말은 긴 앱 이름을 그대로 따른다`() {
+        val fixed = AppMentionGuard.apply("네이버 웹툰 켜서 외모지상주의 검색해줘", plan("네이버", "외모지상주의"))
+
+        assertEquals("네이버 웹툰", fixed.app)
+        assertEquals("네이버 웹툰", fixed.steps[0].target)
+        assertEquals("외모지상주의", fixed.steps[1].target)
+        assertEquals("네이버 웹툰", AppMentionGuard.openThenApp("네이버 웹툰 켜서 외모지상주의 검색해줘"))
+        assertEquals("네이버 웹툰", AppMentionGuard.openThenApp("네이버 웹툰을 열어서 외모지상주의 검색해줘"))
+        assertEquals("네이버 웹툰", AppMentionGuard.openThenApp("네이버 웹툰 앱 들어가서 외모지상주의 검색해줘"))
+    }
+
+    @Test
+    fun `바로 검색할 수 없는 앱이면 이유를 남긴다`() {
+        val utterance = "네이버 웹툰 켜서 외모지상주의 검색해줘"
+        val fixed = AppMentionGuard.apply(utterance, plan("네이버", "외모지상주의"))
+
+        assertEquals("네이버 웹툰에서는 아직 바로 검색할 수 없어요", AppMentionGuard.searchRefusal(utterance, fixed))
+    }
+
+    @Test
+    fun `바로 검색할 수 있는 앱은 검색을 유지한다`() {
+        val original = plan("유튜브", "고양이")
+        assertSame(original, AppMentionGuard.apply("유튜브 켜서 고양이 검색해줘", original))
+        assertEquals(null, AppMentionGuard.searchRefusal("유튜브 켜서 고양이 검색해줘", original))
+        assertEquals(null, AppMentionGuard.searchRefusal("네이버 켜서 날씨 검색해줘", plan("네이버", "날씨")))
+    }
+
+    @Test
+    fun `네이버에서 검색과 일본어 문장은 그대로 둔다`() {
+        val naver = plan("네이버", "날씨")
+        assertSame(naver, AppMentionGuard.apply("네이버에서 날씨 검색해줘", naver))
+        assertEquals(null, AppMentionGuard.searchRefusal("네이버에서 날씨 검색해줘", naver))
+
+        val japanese = plan("네이버", "天気")
+        assertSame(japanese, AppMentionGuard.apply("ネイバーで天気を検索して。", japanese))
+        assertEquals(null, AppMentionGuard.searchRefusal("ネイバーで天気を検索して。", japanese))
+    }
+
+    @Test
+    fun `X에서 꼴도 긴 앱 이름을 그대로 따르고 검색 불가 앱이면 이유를 남긴다`() {
+        val utterance = "네이버 웹툰에서 외모지상주의 검색해줘"
+        val fixed = AppMentionGuard.apply(utterance, plan("네이버", "외모지상주의"))
+
+        assertEquals("네이버 웹툰", fixed.app)
+        assertEquals("네이버 웹툰", fixed.steps[0].target)
+        assertEquals("네이버 웹툰에서는 아직 바로 검색할 수 없어요", AppMentionGuard.searchRefusal(utterance, fixed))
+    }
+
+    @Test
+    fun `모델이 앱을 아예 다르게 내도 별칭으로 시작하는 긴 이름이면 바로잡는다`() {
+        assertEquals("네이버 웹툰", AppMentionGuard.apply("네이버 웹툰에서 외모지상주의 검색해줘", plan("유튜브", "x")).app)
+    }
+
+    @Test
+    fun `앱이 아닌 말은 앱으로 오해하지 않는다`() {
+        val tube = plan("유튜브", "배운 노래")
+        assertSame(tube, AppMentionGuard.apply("학교에서 배운 노래 유튜브에서 틀어줘", tube))
+        assertEquals(null, AppMentionGuard.searchRefusal("학교에서 배운 노래 유튜브에서 틀어줘", tube))
+
+        val home = plan("네이버", "맛집")
+        assertSame(home, AppMentionGuard.apply("집에서 가까운 맛집 검색해줘", home))
+        assertEquals(null, AppMentionGuard.leadingApp("학교에서 배운 노래", "네이버"))
+    }
+
+    @Test
+    fun `별칭 한 단어 뒤 조사는 전처럼 정식 이름으로 읽는다`() {
+        assertEquals("네이버", AppMentionGuard.leadingApp("네이버에서 날씨 검색해줘", "유튜브"))
+        assertEquals("인스타그램", AppMentionGuard.leadingApp("인스타에 오늘 올린 사진", null))
+        val naver = plan("네이버", "날씨")
+        assertEquals(null, AppMentionGuard.searchRefusal("네이버에서 날씨 검색해줘", naver))
     }
 }

@@ -14,7 +14,9 @@ internal class ActionExecutor(
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val appLauncher = AppLauncher(service)
-    private val messageSender = MessageSender(service, handler, appLauncher)
+    // 이번 계획이 끝나며 알릴, 실행모듈이 직접 확인한 결과(메시지 전송 확인). 계획을 시작할 때 비운다.
+    private var evidence: String? = null
+    private val messageSender = MessageSender(service, handler, appLauncher, onEvidence = { evidence = it })
     private var executionId = 0L
     // 메인 스레드에서 바뀌고 다른 스레드(파이프라인)가 읽는다.
     @Volatile
@@ -25,6 +27,7 @@ internal class ActionExecutor(
     fun execute(plan: ActionPlan) {
         check(!isRunning) { "이미 실행 중입니다. 먼저 중단해 주세요." }
         isRunning = true
+        evidence = null
         val currentId = ++executionId
         executeStep(plan, 0, currentId)
     }
@@ -53,11 +56,13 @@ internal class ActionExecutor(
         if (id != executionId) return
         if (index >= plan.steps.size) {
             isRunning = false
-            listener.onCompleted(plan)
+            listener.onCompleted(plan, evidence)
             return
         }
         val step = plan.steps[index]
         listener.onStepStarted(index, step)
+        // N번째 항목을 세는 기록은 step 마다 새로 시작한다.
+        ordinalTracker = null
         when (step.action) {
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
@@ -152,6 +157,7 @@ internal class ActionExecutor(
 
     private var lastProbeAt = 0L
     private var lastChipTapAt = 0L
+    private var ordinalTracker: OrdinalTracker? = null
 
     /**
      * 앱 화면이 뜨기를 기다리는 동안 1초마다 맨 앞 창이 무엇으로 보이는지 남긴다.
@@ -193,6 +199,8 @@ internal class ActionExecutor(
             }
             ActionType.INPUT_TEXT -> setText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
+                val ordinal = step.value?.let(Ordinal::find) ?: 1
+                if (ordinal > 1) return playNth(root, appPackage, ordinal)
                 val first = if (appPackage == AppLauncher.YOUTUBE_MUSIC_PACKAGE) {
                     NodeFinder.findFirstSong(root) ?: return tapSongChip(root)
                 } else {
@@ -231,6 +239,32 @@ internal class ActionExecutor(
             }
             else -> StepResult.Fatal("UI Action이 아닌 단계입니다: ${step.action.wireName}")
         }
+    }
+
+    /**
+     * N번째(2 이상) 항목을 누른다. 유튜브는 광고를 뺀 영상, 유튜브 뮤직은 "노래" 칩이 선택된 목록의 노래 행을 센다.
+     * 화면에 N번째가 안 보이면 한 번만 스크롤해서 이어 세고, 그래도 없으면 실패한다.
+     */
+    private fun playNth(root: AccessibilityNodeInfo, appPackage: String, ordinal: Int): StepResult {
+        val music = appPackage == AppLauncher.YOUTUBE_MUSIC_PACKAGE
+        val items = if (music) NodeFinder.songRows(root) ?: return tapSongChip(root) else NodeFinder.playableItems(root)
+        val tracker = ordinalTracker ?: OrdinalTracker(ordinal).also { ordinalTracker = it }
+        val now = SystemClock.uptimeMillis()
+        // 스크롤한 직후에는 목록이 움직이는 중이라 세지 않는다.
+        if (tracker.settling(now)) return StepResult.NotReady
+        if (items.isEmpty()) return StepResult.NotReady
+
+        val keys = items.map { if (music) NodeFinder.songKey(it) else NodeFinder.playableKey(it) }
+        tracker.pick(keys)?.let { position ->
+            return if (clickOrTap(items[position])) StepResult.Success else StepResult.NotReady
+        }
+        if (tracker.scrolled) return StepResult.Fatal("${ordinal}번째 항목을 찾지 못했습니다.")
+
+        tracker.markScrolled(now)
+        val node = findVerticallyScrollable(root, AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
+        val moved = node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id) == true ||
+            service.swipeUp()
+        return if (moved) StepResult.NotReady else StepResult.Fatal("${ordinal}번째 항목을 찾으려 스크롤하지 못했습니다.")
     }
 
     /**
@@ -306,7 +340,8 @@ internal class ActionExecutor(
 
     interface Listener {
         fun onStepStarted(index: Int, step: ActionStep)
-        fun onCompleted(plan: ActionPlan)
+        /** [evidence] 는 실행모듈이 직접 확인한 결과(메시지 전송 확인). 없으면 null. */
+        fun onCompleted(plan: ActionPlan, evidence: String?)
 
         /**
          * 단계 하나가 실패해 계획이 중단됐다.

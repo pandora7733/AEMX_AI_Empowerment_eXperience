@@ -10,7 +10,7 @@ action 종류:
 - tap: 현재 화면의 버튼/요소 누르기. target은 화면에 보일 정확한 이름
 - input_text: target 입력 필드에 value 입력. 교보문고/알라딘 화면 검색에 사용
 - search: 앱의 검색 화면을 직접 열기. 네이버/구글/유튜브/유튜브 뮤직만 지원하며 검색어는 target에 넣고 value는 쓰지 않음
-- play_first: 유튜브 또는 유튜브 뮤직 검색 결과의 첫 번째 재생 가능한 항목 실행. target은 "첫 번째 동영상"
+- play_first: 유튜브 또는 유튜브 뮤직 검색 결과의 첫 번째 재생 가능한 항목 실행. target은 "첫 번째 동영상", value에 1부터 시작하는 순번(선택)
 - next_video: 유튜브 Shorts 또는 인스타그램 릴스에서 위로 넘겨 다음 영상으로 이동. target은 "다음 동영상" 또는 "다음 릴스". 사용자가 대기 시간을 명시한 경우에만 value에 30초 이하의 정수 초(예: "10s")를 넣음
 - scroll: target을 up/down/forward/backward 중 하나로 지정
 - wait: target 또는 value에 30초 이하의 정수 초나 ms/s 단위 지정
