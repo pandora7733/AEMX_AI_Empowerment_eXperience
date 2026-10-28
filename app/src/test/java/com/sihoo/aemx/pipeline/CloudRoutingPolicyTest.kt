@@ -51,6 +51,9 @@ class CloudRoutingPolicyTest {
     fun `개인정보 화면은 재분석에도 올리지 않는다`() {
         assertFalse(CloudRoutingPolicy.mayUploadScreen("엄마한테 보내줘", "카카오톡"))
         assertFalse(CloudRoutingPolicy.mayUploadScreen("노래 틀어줘", "메시지"))
+        assertFalse(CloudRoutingPolicy.mayUploadScreen("노래 틀어줘", "com.kakao.talk"))
+        assertFalse(CloudRoutingPolicy.mayUploadScreen("노래 틀어줘", "com.samsung.android.messaging"))
         assertTrue(CloudRoutingPolicy.mayUploadScreen("고양이 영상 틀어줘", "유튜브"))
+        assertTrue(CloudRoutingPolicy.mayUploadScreen("고양이 영상 틀어줘", "com.google.android.youtube"))
     }
 }

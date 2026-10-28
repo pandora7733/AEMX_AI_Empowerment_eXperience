@@ -31,6 +31,8 @@ object CloudRoutingPolicy {
     private val PERSONAL_APP_KEYWORDS = listOf(
         "카카오톡", "카톡", "kakaotalk", "메시지", "문자", "message", "sms",
         "연락처", "주소록", "contacts", "전화", "phone",
+        // 재분석 화면은 한글 이름이 아니라 패키지명(com.kakao.talk, com.samsung.android.messaging …)으로 온다.
+        "kakao", "messaging", "mms", "dialer", "incallui",
     )
 
     /** 발화에 이 말이 있으면 계획과 무관하게 로컬. */

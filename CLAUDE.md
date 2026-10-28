@@ -72,9 +72,11 @@ E2E_TEST_PLAN.md          종단 시나리오 테스트 계획(브랜치 docs/e2
 
 진행 상황
 - [x] `pipeline/llm/CloudRoutingPolicy.kt` + `CloudRoutingPolicyTest.kt` (올림, **아직 빌드·테스트 안 해 봄**)
-- [ ] 클라우드 계획 생성기 어댑터(Groq, `PlanGenerator` 구현) + 테스트
-- [ ] 로컬/클라우드 선택 래퍼(실패 시 로컬 폴백)
-- [ ] `PipelineDebugActivity`에 키 입력 칸과 연결(생성자 조립이 이 파일에만 있다)
+- [x] `llm/CloudChatClient.kt`, `GroqChatClient.kt`(HTTP), `CloudPlanGenerator.kt`(+`PlanGuards`),
+      `HybridPlanGenerator.kt`(로컬 먼저 → 어려운 동작이면 클라우드, 실패·10초 초과면 로컬로 폴백)
+      + 테스트 `CloudPlanGeneratorTest`, `HybridPlanGeneratorTest` (올림, **빌드·테스트 안 해 봄**)
+- [ ] `PipelineDebugActivity`에 키 입력 칸·"클라우드 AI 사용" 체크 연결, `HybridPlanGenerator`로 감싸기
+      (`llmPlanner` 를 쓰는 곳: 322, 357, 405, 416줄 부근. 키 저장은 앱 전용 SharedPreferences)
 - [ ] 실기기에서 속도·성공률 측정(로컬 vs 클라우드)
 
 ## 그 밖에 남은 일
@@ -91,3 +93,9 @@ E2E_TEST_PLAN.md          종단 시나리오 테스트 계획(브랜치 docs/e2
 - `main`: 기준. 직접 푸시하지 않고 기능 브랜치 + PR로 작업한다.
 - `feature/cloud-routing`: 클라우드 연동(이 파일이 있는 곳).
 - `docs/sync-checklist`, `docs/e2e-test-plan`, `chore/remove-aemx-upload`: 각각 독립. PR 미생성.
+
+## 주의
+- `PlanGuards`(llm/CloudPlanGenerator.kt)는 `LlamaPlanGenerator.generate`의 가드 순서를 복사한 것이다.
+  가드를 고치면 둘 다 고친다. 로컬 테스트가 통과하면 로컬도 `PlanGuards`를 쓰게 합치는 게 좋다.
+- Groq 기본 모델 `llama-3.3-70b-versatile`은 바뀔 수 있다. 안 되면 콘솔 모델 목록에서 골라
+  `GroqChatClient.DEFAULT_MODEL`을 바꾼다.
