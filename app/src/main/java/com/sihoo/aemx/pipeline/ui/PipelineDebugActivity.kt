@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.text.InputType
 import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -38,6 +39,8 @@ import com.sihoo.aemx.pipeline.device.AppNames
 import com.sihoo.aemx.pipeline.device.announcementFor
 import com.sihoo.aemx.pipeline.device.ServicePlanBridge
 import com.sihoo.aemx.pipeline.device.ServiceScreenSource
+import com.sihoo.aemx.pipeline.llm.CloudSettings
+import com.sihoo.aemx.pipeline.llm.HybridPlanGenerator
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.port.SpeechResult
 import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
@@ -97,6 +100,10 @@ class PipelineDebugActivity : AppCompatActivity() {
      */
     private val deviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var llmPlanner: LlamaPlanGenerator? = null
+    private val cloudSettings by lazy { CloudSettings(applicationContext) }
+    private var hybridPlanner: HybridPlanGenerator? = null
+    private lateinit var cloudSwitch: CheckBox
+    private lateinit var cloudStatus: TextView
     private lateinit var listenButton: Button
     private lateinit var wakeWordSwitch: CheckBox
     private lateinit var ownerOnlySwitch: CheckBox
@@ -368,7 +375,7 @@ class PipelineDebugActivity : AppCompatActivity() {
         stateView.setText(R.string.pipeline_device_planning)
         lifecycleScope.launch {
             val result = withContext(Dispatchers.Default) {
-                planner.generate(PlanRequest(utterance = command, mode = PlanRequest.Mode.INITIAL))
+                planFor(planner).generate(PlanRequest(utterance = command, mode = PlanRequest.Mode.INITIAL))
             }
             when (result) {
                 is PlanResult.Success -> {
@@ -413,7 +420,7 @@ class PipelineDebugActivity : AppCompatActivity() {
         }
 
         if (announcer == null) announcer = AndroidTtsController(applicationContext) { }
-        val device = deviceOrchestrator ?: buildDeviceOrchestrator(planner).also { deviceOrchestrator = it }
+        val device = deviceOrchestrator ?: buildDeviceOrchestrator(planFor(planner)).also { deviceOrchestrator = it }
         // 다른 경로가 orchestrator 를 갈아 끼웠을 수 있으니, 이쪽이 아니면 화면 구독을 옮긴다.
         if (orchestrator !== device) {
             collectJob?.cancel()
@@ -429,6 +436,27 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
         }
         device.submit(command)
+    }
+
+    /**
+     * 로컬 계획 생성기를 클라우드 하이브리드로 감싼다. 설정(켜짐·키)은 명령마다 읽으므로
+     * 화면에서 바꾸면 다음 명령부터 바로 적용된다. 키가 없으면 로컬과 똑같이 동작한다.
+     */
+    private fun planFor(local: PlanGenerator): PlanGenerator =
+        hybridPlanner ?: HybridPlanGenerator(
+            local = local,
+            cloud = { cloudSettings.generatorOrNull() },
+            log = { Log.i(TAG, it) },
+        ).also { hybridPlanner = it }
+
+    private fun renderCloudStatus() {
+        cloudStatus.setText(
+            when {
+                !cloudSettings.enabled -> R.string.pipeline_cloud_status_off
+                !cloudSettings.hasKey -> R.string.pipeline_cloud_status_no_key
+                else -> R.string.pipeline_cloud_status_on
+            },
+        )
     }
 
     /** 명령이 끝나 최종 상태가 되거나 재분석에 들어가면 말한다. 오케스트레이터 경로에서만 불린다(가짜 경로는 말하지 않는다). */
@@ -604,6 +632,45 @@ class PipelineDebugActivity : AppCompatActivity() {
                 setText(R.string.pipeline_use_orchestrator)
             }
             addView(orchestratorSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            // AEMX: 어려운 동작(영상 재생·탭·입력)만 클라우드 AI 로 처리한다. 키는 이 기기에만 저장된다.
+            cloudSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_cloud_toggle)
+                isChecked = cloudSettings.enabled
+                setOnCheckedChangeListener { _, checked ->
+                    cloudSettings.enabled = checked
+                    renderCloudStatus()
+                }
+            }
+            addView(cloudSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            val keyLayout = TextInputLayout(this@PipelineDebugActivity).apply {
+                setHint(R.string.pipeline_cloud_key_hint)
+            }
+            val keyInput = TextInputEditText(keyLayout.context).apply {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                // 저장된 키는 화면에 다시 보여 주지 않는다. 비워 두고 저장하면 키를 지운다.
+            }
+            keyLayout.addView(keyInput, matchWidthWrapHeight())
+            addView(keyLayout, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            addView(Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_cloud_key_save)
+                setOnClickListener {
+                    val typed = keyInput.text?.toString().orEmpty().trim()
+                    cloudSettings.apiKey = typed
+                    keyInput.setText("")
+                    renderCloudStatus()
+                    stateView.setText(
+                        if (typed.isBlank()) R.string.pipeline_cloud_key_cleared
+                        else R.string.pipeline_cloud_key_saved,
+                    )
+                }
+            }, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            cloudStatus = TextView(this@PipelineDebugActivity)
+            addView(cloudStatus, matchWidthWrapHeight().apply { topMargin = spacing })
+            renderCloudStatus()
 
             runButton = Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_run)

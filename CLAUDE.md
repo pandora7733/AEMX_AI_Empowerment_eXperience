@@ -75,8 +75,9 @@ E2E_TEST_PLAN.md          종단 시나리오 테스트 계획(브랜치 docs/e2
 - [x] `llm/CloudChatClient.kt`, `GroqChatClient.kt`(HTTP), `CloudPlanGenerator.kt`(+`PlanGuards`),
       `HybridPlanGenerator.kt`(로컬 먼저 → 어려운 동작이면 클라우드, 실패·10초 초과면 로컬로 폴백)
       + 테스트 `CloudPlanGeneratorTest`, `HybridPlanGeneratorTest` (올림, **빌드·테스트 안 해 봄**)
-- [ ] `PipelineDebugActivity`에 키 입력 칸·"클라우드 AI 사용" 체크 연결, `HybridPlanGenerator`로 감싸기
-      (`llmPlanner` 를 쓰는 곳: 322, 357, 405, 416줄 부근. 키 저장은 앱 전용 SharedPreferences)
+- [x] `llm/CloudSettings.kt`(키·켜짐 저장, 앱 전용 SharedPreferences) + `PipelineDebugActivity`에
+      키 입력 칸·저장 버튼·"클라우드 AI 사용"(기본 켜짐)·상태 표시, 하이브리드 래퍼 연결(`planFor`)
+      (올림, **빌드·실기기 확인 안 해 봄**). 키 입력은 디버그 빌드 "AEMX 개발" 화면에서만 가능.
 - [ ] 실기기에서 속도·성공률 측정(로컬 vs 클라우드)
 
 ## 그 밖에 남은 일
@@ -99,3 +100,5 @@ E2E_TEST_PLAN.md          종단 시나리오 테스트 계획(브랜치 docs/e2
   가드를 고치면 둘 다 고친다. 로컬 테스트가 통과하면 로컬도 `PlanGuards`를 쓰게 합치는 게 좋다.
 - Groq 기본 모델 `llama-3.3-70b-versatile`은 바뀔 수 있다. 안 되면 콘솔 모델 목록에서 골라
   `GroqChatClient.DEFAULT_MODEL`을 바꾼다.
+- 릴리스 APK에는 키 입력 화면이 없다(디버그 화면 전용). 키를 APK에 내장할지는 미결정 —
+  내장하면 APK에서 꺼낼 수 있다. 기본은 "내장하지 않음".
