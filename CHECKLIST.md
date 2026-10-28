@@ -52,7 +52,11 @@
 | `[x]` | 호출어 "하이 에이맥스" | `WakeWordSpeechSource` (`pipeline/stt/WakeWord.kt`) | STT 글자로 맞춰 보는 방식이라 오인식 변형을 보정한다. 호출어가 없는 말은 버린다 |
 | `[x]` | 내 목소리만 듣기 (화자 확인) | `SpeakerVerifier` | 등록한 목소리와의 유사도로 판정. 기준값은 기본값 0.5 다 |
 | `[x]` | 메시지 보내기 (카카오톡·문자) | `send_message`, `MessageSender`, `KakaoShareFlow`, `SendMessageGuard` | 받는 사람이 정확히 한 명일 때만 보낸다. 보낸 메시지는 되돌릴 수 없어 테스트용 연락처로만 확인한다 |
-| `[x]` | 다른 앱 위 상태 캡슐 (오버레이) | `AssistantOverlayController` | 진행 상태와 중단 버튼 |
+| `[x]` | 오버레이 0단계: 상태 뼈대 | `assistant/` (`AssistantUiState`, `AssistantReducer`, `AssistantStore`, `StepLabelFormatter`), `PipelineEvent` | 코드와 단위 테스트까지 완료. 중단 요청과 확인을 나누고 증거 없는 완료는 "명령을 전달했어요"로 낸다 |
+| `[~]` | 오버레이 1단계: 다른 앱 위 접힌 캡슐 | `AssistantOverlayController` | 폰에서 확인한 것은 캡슐 위치(아래)와 캡슐이 뜬 채 카톡 공유 성공. 아직 못 본 것은 캡슐 밖 스크롤 통과, 중단 버튼, TalkBack, 다크 전환이다 |
+| `[ ]` | 오버레이 2~4단계 | 디자인 토큰과 라이트·다크, 듣는 중 파형(2단계), 펼친 패널과 이어하기(3단계), 모션(4단계) | 아직 안 했다 |
+| `[~]` | 유튜브 뮤직 첫 곡 재생, 유튜브 N번째 재생 | `play_first` 의 순번(value), `PlayOrdinalGuard` | 코드와 테스트는 있다. 노래 칩 좌표 탭과 N번째가 맞는 항목인지는 폰에서 아직 못 봤다 |
+| `[~]` | 말 끝 판정 새 값 | `UtteranceEnd`, `EnergyVad` | rule2 1.2초, rule1 1.5초, VAD hangover 1.2초 등. 음성으로는 아직 확인 못 했고 말이 느리면 중간에 잘릴 수 있다 |
 | `[x]` | 앱 열기 확장 | `AppLauncher` | 유튜브 뮤직, 멜론, 쿠팡, 문자 앱. 설치된 앱의 이름으로도 연다 |
 
 ---
