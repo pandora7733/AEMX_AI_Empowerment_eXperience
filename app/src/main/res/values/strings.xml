@@ -42,12 +42,12 @@
     <string name="pipeline_state_idle">대기 중</string>
     <string name="pipeline_use_real_llm">진짜 LLM 사용 (최초 1회 모델 1.2GB 다운로드, Wi-Fi 권장)</string>
     <string name="pipeline_cloud_toggle">클라우드 AI 사용 (어려운 동작만, 개인정보는 기기에서만 처리)</string>
-    <string name="pipeline_cloud_key_hint">Groq API 키 (이 기기에만 저장)</string>
+    <string name="pipeline_cloud_key_hint">Groq API 키 (선택: 비우면 빌드에 넣은 키 사용)</string>
     <string name="pipeline_cloud_key_save">키 저장</string>
     <string name="pipeline_cloud_key_saved">키를 저장했습니다.</string>
-    <string name="pipeline_cloud_key_cleared">키를 지웠습니다. 클라우드는 쓰지 않습니다.</string>
+    <string name="pipeline_cloud_key_cleared">직접 입력한 키를 지웠습니다.</string>
     <string name="pipeline_cloud_status_on">클라우드: 사용 가능 (어려운 동작만 클라우드로 처리)</string>
-    <string name="pipeline_cloud_status_no_key">클라우드: 키 없음 (기기에서만 처리)</string>
+    <string name="pipeline_cloud_status_no_key">클라우드: 키 없음 (기기에서만 처리). 빌드할 때 local.properties 에 GROQ_API_KEY 를 넣거나 여기에 입력</string>
     <string name="pipeline_cloud_status_off">클라우드: 꺼짐 (기기에서만 처리)</string>
     <string name="pipeline_llm_ready">LLM 준비 완료. 명령을 실행하세요.</string>
     <string name="pipeline_llm_failed">LLM 준비 실패: %1$s</string>

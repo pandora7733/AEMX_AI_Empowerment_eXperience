@@ -2,11 +2,13 @@ package com.sihoo.aemx.pipeline.llm
 
 import android.content.Context
 import android.util.Log
+import com.sihoo.aemx.BuildConfig
 
 /**
- * 클라우드 AI 설정. 키는 이 기기의 앱 전용 저장소에만 둔다(레포·APK 에 넣지 않는다).
+ * 클라우드 AI 설정.
  *
- * 앱 전용 저장소는 다른 앱이 읽을 수 없지만 암호화는 아니다. 개인 키를 넣은 기기를 남에게 주지 않는다.
+ * 키는 두 군데서 온다. 평소에는 빌드할 때 넣은 키([BuildConfig.GROQ_API_KEY], 소스·레포에는 없음)를 쓰고,
+ * 디버그 화면에서 직접 입력하면 그 키가 우선한다(이 기기의 앱 전용 저장소, 암호화는 아님).
  */
 class CloudSettings(private val context: Context) {
 
@@ -21,13 +23,19 @@ class CloudSettings(private val context: Context) {
         get() = prefs.getString(KEY_API_KEY, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_API_KEY, value.trim()).apply()
 
-    val hasKey: Boolean get() = apiKey.isNotBlank()
+    /**
+     * 실제로 쓰는 키. 화면에서 입력한 키가 있으면 그것이 우선이고, 없으면 빌드할 때 넣은 키를 쓴다.
+     * 둘 다 없으면 빈 값이라 클라우드를 쓰지 않는다.
+     */
+    private val effectiveKey: String get() = apiKey.ifBlank { BuildConfig.GROQ_API_KEY }
+
+    val hasKey: Boolean get() = effectiveKey.isNotBlank()
 
     /** 지금 쓸 수 있으면 클라우드 계획 생성기, 꺼져 있거나 키가 없으면 null. */
     fun generatorOrNull(): CloudPlanGenerator? {
         if (!enabled || !hasKey) return null
         return CloudPlanGenerator(
-            client = GroqChatClient(apiKey = apiKey),
+            client = GroqChatClient(apiKey = effectiveKey),
             systemPrompt = AemxPrompts.systemPrompt(context),
             log = { Log.i(TAG, it) },
         )
