@@ -4,6 +4,7 @@ import android.util.Log
 import com.sihoo.aemx.accessibility.AppLauncher
 import com.sihoo.aemx.accessibility.PlanOutcome
 import com.sihoo.aemx.accessibility.WaitDuration
+import com.sihoo.aemx.pipeline.AppAvailability
 import com.sihoo.aemx.pipeline.port.ActionExecutor
 import com.sihoo.aemx.pipeline.port.ActionExecutor.Command
 import com.sihoo.aemx.pipeline.port.ExecutionResult
@@ -89,8 +90,11 @@ class AccessibilityStepExecutor(
             return ExecutionResult.Failed("${command.appName}에서는 바로 검색할 수 없다(네이버, 구글, 유튜브만 지원한다)")
         }
 
-        val app = resolveApp(command)
-            ?: return ExecutionResult.Failed("조작할 앱을 알 수 없다(접근성 서비스가 지원하지 않는 앱이거나 맨 앞 화면이 아니다)")
+        val app = resolveApp(command) ?: return ExecutionResult.Failed(
+            // 맨 앞이 우리 앱 화면이면 그 화면을 조작하지 않는다(개발 화면 스크롤 같은 재분석 결과를 막는다).
+            if (isOwnApp(foregroundPackage())) AppAvailability.OWN_APP_SCREEN_MESSAGE
+            else "조작할 앱을 알 수 없다(접근성 서비스가 지원하지 않는 앱이거나 맨 앞 화면이 아니다)",
+        )
 
         val built = try {
             StepPlanFactory.build(command, app)
@@ -131,13 +135,19 @@ class AccessibilityStepExecutor(
         is Command.LaunchApp -> nameForPackage(command.packageName)
         is Command.Search -> command.appName.takeIf { isSupportedApp(it) }
         is Command.SendMessage -> command.appName.takeIf { isSupportedApp(it) }
+        // 영상 열기는 유튜브 앱에서만 한다.
+        is Command.OpenVideo -> YOUTUBE
         // 첫 영상 재생을 받는 앱은 유튜브와 유튜브 뮤직뿐이다. 앞 화면이 유튜브 뮤직일 때만 그쪽으로 보내고,
         // 그 밖에는 앞 화면이나 직전 앱을 보지 않고 유튜브다. 서비스가 패키지를 비교하므로 이름이 틀리면 늘 NotReady 다.
         Command.PlayFirst, is Command.PlayNth ->
             if (foregroundPackage() == AppLauncher.YOUTUBE_MUSIC_PACKAGE && isSupportedApp(YOUTUBE_MUSIC)) YOUTUBE_MUSIC
             else YOUTUBE
-        else -> nameForPackage(foregroundPackage()) ?: currentApp
+        // 우리 앱이 맨 앞이면 그 앱을 대상으로 삼지 않는다(직전 앱으로도 넘기지 않는다).
+        else -> if (isOwnApp(foregroundPackage())) null else nameForPackage(foregroundPackage()) ?: currentApp
     }
+
+    /** 우리 앱 패키지(디버그 빌드의 접미사도 포함). */
+    private fun isOwnApp(pkg: String?): Boolean = pkg?.startsWith(OWN_PACKAGE) == true
 
     /**
      * 서비스 쪽 자체 제한시간(앱 열기 15초+안정 3초, 그 외 8초, 그 뒤 화면 정착 1.5초)보다
@@ -160,6 +170,9 @@ class AccessibilityStepExecutor(
         const val SEND_MESSAGE_TIMEOUT_MS = 55_000L
         private const val TAG = "AccessibilityStepExecutor"
         private const val YOUTUBE = "유튜브"
+
+        /** 우리 앱의 패키지 머리. 디버그 빌드는 접미사가 붙을 수 있어 앞부분으로 본다. */
+        private const val OWN_PACKAGE = "com.sihoo.aemx"
         private const val YOUTUBE_MUSIC = "유튜브 뮤직"
 
         /**

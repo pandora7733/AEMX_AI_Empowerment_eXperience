@@ -20,6 +20,20 @@ val groqApiKey: String = run {
     (fromEnv ?: fromFile ?: "").trim().replace("\\", "").replace("\"", "")
 }
 
+/**
+ * YouTube Data API 키. GROQ 키와 같은 순서로 읽는다: 환경변수 YOUTUBE_API_KEY -> local.properties -> 없으면 빈 값(API 꺼짐).
+ * 소스·로그·테스트에는 쓰지 않는다.
+ */
+val youtubeApiKey: String = run {
+    val fromEnv = System.getenv("YOUTUBE_API_KEY")
+    val fromFile = Properties().let { props ->
+        val file = rootProject.file("local.properties")
+        if (file.exists()) file.inputStream().use { props.load(it) }
+        props.getProperty("YOUTUBE_API_KEY")
+    }
+    (fromEnv ?: fromFile ?: "").trim().replace("\\", "").replace("\"", "")
+}
+
 /** 빌드할 때 만들어 넣는 에셋이 모이는 곳. 아래 copySystemPrompt 참고. */
 val generatedAssetsDir = layout.buildDirectory.dir("generated/aemxAssets")
 
@@ -41,6 +55,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
+        buildConfigField("String", "YOUTUBE_API_KEY", "\"$youtubeApiKey\"")
 
         // llama.cpp .so 가 arm64-v8a 만 있다. 다른 ABI 를 함께 선언하면 안드로이드가
         // 그쪽을 앱의 ABI 로 골라 arm64 폴더를 통째로 무시하는 일이 생긴다(LLM/README.md 참고).

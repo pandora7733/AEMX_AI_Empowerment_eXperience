@@ -68,6 +68,11 @@ internal object StepPlanFactory {
                 value = command.ordinal.toString()
             }
 
+            is Command.OpenVideo -> {
+                action = A11yType.OPEN_VIDEO
+                target = command.videoId
+            }
+
             is Command.NextVideo -> {
                 action = A11yType.NEXT_VIDEO
                 target = PLACEHOLDER_TARGET

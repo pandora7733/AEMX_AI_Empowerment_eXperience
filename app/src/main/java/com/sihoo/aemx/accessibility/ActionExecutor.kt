@@ -64,6 +64,8 @@ internal class ActionExecutor(
         listener.onStepStarted(index, step)
         // N번째 항목을 세는 기록은 step 마다 새로 시작한다.
         ordinalTracker = null
+        shortsSince = 0L
+        shortsScrolled = false
         when (step.action) {
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
@@ -77,6 +79,11 @@ internal class ActionExecutor(
                 val delayMs = step.value?.let(WaitDuration::millis) ?: 0L
                 handler.postDelayed({ retryUntilReady(plan, index, id) }, delayMs)
             }
+            // 영상 id 로 유튜브 영상 화면을 바로 연다. 검색과 스크롤을 거치지 않는다.
+            ActionType.OPEN_VIDEO -> appLauncher.openVideo(step.target).fold(
+                onSuccess = { retryUntilReady(plan, index, id) },
+                onFailure = { fail(index, step, it.message ?: "영상 열기 실패", id) },
+            )
             ActionType.WAIT -> {
                 val delayMs = WaitDuration.millis(step.value ?: step.target)
                 handler.postDelayed({ executeStep(plan, index + 1, id) }, delayMs)
@@ -98,6 +105,7 @@ internal class ActionExecutor(
         val deadline = SystemClock.uptimeMillis() +
             if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) OPEN_APP_TIMEOUT_MS else ACTION_TIMEOUT_MS
         var foregroundSince = 0L
+        var popupDismisses = 0
         lateinit var attempt: Runnable
         attempt = Runnable {
             if (id != executionId) return@Runnable
@@ -109,6 +117,15 @@ internal class ActionExecutor(
             }
             if (observed == StepResult.NotReady && step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) {
                 probeForeground(plan.app)
+            }
+            // 열기 뒤에 뜬 광고·안내 팝업, 또는 누를 대상을 못 찾은 조작 앞의 팝업을 먼저 닫는다. 한 단계에서 최대 2번.
+            val popupCheckHere = (step.action == ActionType.OPEN_APP && observed == StepResult.Success) ||
+                (step.action in setOf(ActionType.TAP, ActionType.INPUT_TEXT) && observed == StepResult.NotReady)
+            if (popupCheckHere && popupDismisses < MAX_POPUP_DISMISSES && tryDismissPopup(plan.app, step)) {
+                popupDismisses++
+                pendingRetry = attempt
+                handler.postDelayed(attempt, RETRY_INTERVAL_MS)
+                return@Runnable
             }
             val result = if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH) && observed == StepResult.Success) {
                 val now = SystemClock.uptimeMillis()
@@ -161,6 +178,10 @@ internal class ActionExecutor(
     private var lastProbeAt = 0L
     private var lastChipTapAt = 0L
     private var ordinalTracker: OrdinalTracker? = null
+
+    /** 쇼츠만 보이는 화면에서 기다리기 시작한 때와 한 번 스크롤했는지. 단계마다 새로 시작한다. */
+    private var shortsSince = 0L
+    private var shortsScrolled = false
 
     /**
      * 앱 화면이 뜨기를 기다리는 동안 1초마다 맨 앞 창이 무엇으로 보이는지 남긴다.
@@ -216,7 +237,7 @@ internal class ActionExecutor(
             return StepResult.NotReady
         }
         return when (step.action) {
-            ActionType.OPEN_APP -> StepResult.Success
+            ActionType.OPEN_APP, ActionType.OPEN_VIDEO -> StepResult.Success
             // 검색은 이번 검색어가 화면에 보일 때만 성공이다. 같은 앱의 옛 검색 결과도 앱 화면이라 패키지만으로는 구별되지 않는다.
             ActionType.SEARCH ->
                 if (TextMatch.queryVisible(visibleTexts(root), step.target.orEmpty())) StepResult.Success
@@ -230,13 +251,14 @@ internal class ActionExecutor(
             ActionType.INPUT_TEXT -> setText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
                 val ordinal = step.value?.let(Ordinal::find) ?: 1
-                if (ordinal > 1) return playNth(root, appPackage, ordinal)
+                if (ordinal > 1) return playNth(root, appPackage, ordinal, includeShorts = wantsShorts(step))
                 val first = if (appPackage == AppLauncher.YOUTUBE_MUSIC_PACKAGE) {
                     NodeFinder.findFirstSong(root) ?: return tapSongChip(root)
                 } else {
-                    NodeFinder.findFirstPlayable(root)
+                    NodeFinder.findFirstPlayable(root, includeShorts = wantsShorts(step))
+                        ?: return shortsOnlyFallback(root, wantsShorts(step))
                 }
-                val node = first ?: return StepResult.NotReady
+                val node = first
                 // 유튜브 뮤직 행은 눌 수 있다고 알리는 노드가 없어서(dump 확인) 노드 클릭이 안 되면 좌표 탭으로 넘어간다.
                 if (clickOrTap(node)) StepResult.Success else StepResult.NotReady
             }
@@ -275,9 +297,34 @@ internal class ActionExecutor(
      * N번째(2 이상) 항목을 누른다. 유튜브는 광고를 뺀 영상, 유튜브 뮤직은 "노래" 칩이 선택된 목록의 노래 행을 센다.
      * 화면에 N번째가 안 보이면 한 번만 스크롤해서 이어 세고, 그래도 없으면 실패한다.
      */
-    private fun playNth(root: AccessibilityNodeInfo, appPackage: String, ordinal: Int): StepResult {
+    /** 사용자가 쇼츠를 말한 명령인가. 쇼츠는 그때만 고른다(일반 영상을 우선한다). */
+    private fun wantsShorts(step: ActionStep): Boolean =
+        step.target.orEmpty().let { it.contains("쇼츠") || it.contains("shorts", ignoreCase = true) }
+
+    /**
+     * 화면에 일반 영상은 없고 쇼츠만 보일 때. 바로 쇼츠를 누르지 않는다. 일반 영상이 그려지길 [SHORTS_WAIT_MS] 기다리고,
+     * 그래도 없으면 한 번 스크롤한 뒤 다시 기다린다. 그래도 없을 때만 쇼츠를 누른다.
+     */
+    private fun shortsOnlyFallback(root: AccessibilityNodeInfo, wantsShorts: Boolean): StepResult {
+        if (wantsShorts) return StepResult.NotReady
+        val shorts = NodeFinder.playableItems(root, includeShorts = true)
+        if (shorts.isEmpty()) return StepResult.NotReady
+        val now = SystemClock.uptimeMillis()
+        if (shortsSince == 0L) shortsSince = now
+        if (now - shortsSince < SHORTS_WAIT_MS) return StepResult.NotReady
+        if (!shortsScrolled) {
+            shortsScrolled = true
+            shortsSince = now
+            val list = findVerticallyScrollable(root, AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
+            list?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id)
+            return StepResult.NotReady
+        }
+        return if (clickOrTap(shorts[0])) StepResult.Success else StepResult.NotReady
+    }
+
+    private fun playNth(root: AccessibilityNodeInfo, appPackage: String, ordinal: Int, includeShorts: Boolean): StepResult {
         val music = appPackage == AppLauncher.YOUTUBE_MUSIC_PACKAGE
-        val items = if (music) NodeFinder.songRows(root) ?: return tapSongChip(root) else NodeFinder.playableItems(root)
+        val items = if (music) NodeFinder.songRows(root) ?: return tapSongChip(root) else NodeFinder.playableItems(root, includeShorts)
         val tracker = ordinalTracker ?: OrdinalTracker(ordinal).also { ordinalTracker = it }
         val now = SystemClock.uptimeMillis()
         // 스크롤한 직후에는 목록이 움직이는 중이라 세지 않는다.
@@ -288,7 +335,10 @@ internal class ActionExecutor(
         tracker.pick(keys)?.let { position ->
             return if (clickOrTap(items[position])) StepResult.Success else StepResult.NotReady
         }
-        if (tracker.scrolled) return StepResult.Fatal("${ordinal}번째 항목을 찾지 못했습니다.")
+        // 스크롤했는데 처음 보는 항목이 없으면 목록 끝까지 본 것이다. 스크롤 상한에 닿아도 같다.
+        if (tracker.noNewSinceLastScroll() || tracker.scrollCount >= MAX_NTH_SCROLLS) {
+            return StepResult.Fatal("${ordinal}번째 항목을 찾지 못했습니다.")
+        }
 
         tracker.markScrolled(now)
         val node = findVerticallyScrollable(root, AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN)
@@ -389,6 +439,42 @@ internal class ActionExecutor(
         data class Fatal(val message: String) : StepResult
     }
 
+    /**
+     * 대상 앱 화면에 닫을 수 있는 팝업 버튼이 있으면 누른다. 누르면 true.
+     * 대상 앱의 창이 앞에 있을 때만 본다(권한 대화상자 등 다른 창은 건드리지 않는다). 고르는 규칙은 [PopupDismiss].
+     */
+    private fun tryDismissPopup(app: String, step: ActionStep): Boolean {
+        val root = service.rootInActiveWindow ?: return false
+        val appPackage = appLauncher.resolve(app) ?: return false
+        if (root.packageName?.toString() != appPackage) return false
+
+        val candidates = mutableListOf<PopupDismiss.Candidate>()
+        val clickables = mutableListOf<AccessibilityNodeInfo?>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        while (queue.isNotEmpty() && visited < MAX_TEXT_NODES) {
+            val node = queue.removeFirst()
+            visited++
+            val label = node.text?.toString()
+            val description = node.contentDescription?.toString()
+            if (label != null || description != null) {
+                val clickable = NodeFinder.clickableAncestor(node)
+                candidates += PopupDismiss.Candidate(
+                    label = label,
+                    description = description,
+                    actionable = clickable != null && node.isVisibleToUser && node.isEnabled,
+                )
+                clickables += clickable
+            }
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+        }
+
+        val index = PopupDismiss.choose(candidates) ?: return false
+        val clicked = clickables[index]?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        if (clicked) Log.i(TAG, "팝업 닫기: ${step.action.name} 단계 앞에서 닫을 버튼을 눌렀다")
+        return clicked
+    }
+
     /** 화면의 글자와 설명(content-desc)을 모은다. 검색어 확인에 쓴다. 노드 수는 상한으로 자른다. */
     private fun visibleTexts(root: AccessibilityNodeInfo): List<String> {
         val out = mutableListOf<String>()
@@ -404,6 +490,13 @@ internal class ActionExecutor(
 
     private companion object {
         const val MAX_TEXT_NODES = 600
+        const val MAX_POPUP_DISMISSES = 2
+
+        /** N번째 항목을 찾으려 한 단계 안에서 스크롤하는 상한. 유튜브 결과는 쇼츠·광고가 섞여 화면마다 몇 개뿐이다. */
+        const val MAX_NTH_SCROLLS = 3
+
+        /** 쇼츠만 보일 때 일반 영상이 그려지길 기다리는 시간. */
+        const val SHORTS_WAIT_MS = 1_500L
         const val ACTION_TIMEOUT_MS = 8_000L
         private const val TAG = "AemxActionExecutor"
         const val PROBE_INTERVAL_MS = 1_000L

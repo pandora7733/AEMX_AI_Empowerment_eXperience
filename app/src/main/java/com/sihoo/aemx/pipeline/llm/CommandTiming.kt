@@ -20,6 +20,7 @@ class CommandTiming(
 ) {
     private var planDoneMs: Long? = null
     private var route: RouteReport? = null
+    private var apiNote: String? = null
     private var finished = false
 
     @Synchronized
@@ -27,6 +28,12 @@ class CommandTiming(
         if (planDoneMs != null) return
         planDoneMs = atMs
         route = report
+    }
+
+    /** 유튜브 API 검색을 부른 기록. 걸린 시간과 결과가 있었는지를 계획 줄에 붙인다. */
+    @Synchronized
+    fun youtubeApi(elapsedMs: Long, hit: Boolean) {
+        apiNote = if (hit) "유튜브 API ${seconds(elapsedMs)}" else "유튜브 API 실패 ${seconds(elapsedMs)}"
     }
 
     /**
@@ -45,6 +52,7 @@ class CommandTiming(
             route = route,
             outcome = outcome,
             fromSpeech = fromSpeech,
+            apiNote = apiNote,
         )
     }
 }
@@ -60,9 +68,11 @@ internal fun formatTimingLine(
     route: RouteReport?,
     outcome: CommandOutcome,
     fromSpeech: Boolean,
+    apiNote: String? = null,
 ): String {
     val basis = if (fromSpeech) "말 끝부터" else "글 입력, 계획 시작부터"
-    return "명령 끝까지 ${seconds(totalMs)} = 계획 ${seconds(planMs)}(${routeLabel(route)})" +
+    val label = routeLabel(route) + (apiNote?.let { ", $it" } ?: "")
+    return "명령 끝까지 ${seconds(totalMs)} = 계획 ${seconds(planMs)}($label)" +
         " + 실행 ${seconds(execMs)}, 결과 ${outcome.label} [$basis]"
 }
 

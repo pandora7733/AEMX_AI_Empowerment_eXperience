@@ -119,6 +119,8 @@ internal object PlanGuards {
     ): PlanResult {
         val plan = AppMentionGuard.apply(request.utterance, parsedPlan)
         AppMentionGuard.searchRefusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
+        // 받는 사람을 발화에서 못 뽑거나 둘이면 누구에게 보낼지 확실하지 않으니 보내지 않는다.
+        SendMessageGuard.recipientRefusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
         MessageChannelGuard.refusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
         if (MessageChannelGuard.asksToSend(request.utterance) &&
             plan.steps.none { it.action == ActionType.SEND_MESSAGE }

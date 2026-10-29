@@ -1,6 +1,7 @@
 package com.sihoo.aemx.accessibility
 
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
@@ -67,22 +68,44 @@ internal class AppLauncher(private val context: Context) {
         context.startActivity(launchIntent)
     }
 
+    /** 유튜브 영상 하나를 유튜브 앱으로 연다. 영상 id 형식이 아니면 열지 않는다. */
+    fun openVideo(videoId: String): Result<Unit> = runCatching {
+        require(isVideoId(videoId)) { "영상 id 형식이 아닙니다." }
+        val uri = Uri.parse("https://www.youtube.com/watch?v=$videoId")
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage(YOUTUBE_PACKAGE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
     fun search(appName: String, query: String): Result<Unit> = runCatching {
         require(query.isNotBlank()) { "검색어가 비어 있습니다." }
         val found = resolution(appName)
         val packageName = found.packageName ?: error(found.reason ?: "지원하지 않는 앱입니다.")
-        val uri = when (packageName) {
-            NAVER_PACKAGE -> Uri.parse("https://search.naver.com/search.naver?query=${Uri.encode(query)}")
-            GOOGLE_PACKAGE -> Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")
-            YOUTUBE_PACKAGE -> Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(query)}")
-            // 유튜브 뮤직 앱이 music.youtube.com 링크를 받는다(실기기에서 확인 필요).
-            YOUTUBE_MUSIC_PACKAGE -> Uri.parse("https://music.youtube.com/search?q=${Uri.encode(query)}")
-            else -> error("이 앱은 직접 검색 실행을 지원하지 않습니다.")
+        val routes = SearchRoutes.routes(packageName, query)
+        if (routes.isEmpty()) error("이 앱은 직접 검색 실행을 지원하지 않습니다.")
+        // 앞의 방법이 받을 앱이 없으면(ActivityNotFoundException) 다음 방법으로 넘어간다. 모두 실패하면 마지막 원인을 알린다.
+        var lastError: Exception? = null
+        for (route in routes) {
+            try {
+                context.startActivity(route.toIntent().apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                return@runCatching
+            } catch (e: ActivityNotFoundException) {
+                lastError = e
+            }
         }
-        context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+        throw lastError ?: IllegalStateException("검색을 열 방법이 없습니다.")
+    }
+
+    private fun SearchRoutes.Route.toIntent(): Intent = when (this) {
+        is SearchRoutes.Route.View -> Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+            packageName?.let { setPackage(it) }
+        }
+        is SearchRoutes.Route.WebSearch -> Intent(Intent.ACTION_WEB_SEARCH).apply {
+            // SearchManager.QUERY 와 같은 키.
+            putExtra("query", query)
             setPackage(packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+        }
     }
 
     companion object {
@@ -163,6 +186,11 @@ internal class AppLauncher(private val context: Context) {
 
         /** 고정 표에서만 찾는다. 컨텍스트가 없는 곳(계획 파서 등)에서 쓴다. 설치된 앱까지 찾으려면 [resolve]. */
         fun packageFor(value: String): String? = PACKAGE_NAMES[normalizeName(value)]
+
+        /** 유튜브 영상 id 형식(영문·숫자·_·-, 6~20자). 그 밖의 문자는 주소에 넣지 않는다. */
+        fun isVideoId(value: String): Boolean = VIDEO_ID.matches(value)
+
+        private val VIDEO_ID = Regex("[A-Za-z0-9_-]{6,20}")
 
         fun supportsDirectSearch(value: String): Boolean = packageFor(value) in setOf(
             NAVER_PACKAGE, GOOGLE_PACKAGE, YOUTUBE_PACKAGE, YOUTUBE_MUSIC_PACKAGE,

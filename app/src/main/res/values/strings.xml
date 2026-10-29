@@ -55,6 +55,10 @@
     <string name="pipeline_cloud_model_saved">클라우드 모델을 저장했습니다. 비우면 기본 모델을 씁니다.</string>
     <string name="pipeline_route_none">처리: 아직 명령이 없습니다</string>
     <string name="pipeline_timing_none">시간: 아직 끝난 명령이 없습니다</string>
+    <string name="pipeline_youtube_toggle">유튜브 API 사용 (검색 후 N번째 영상을 바로 연다)</string>
+    <string name="pipeline_youtube_status_on">유튜브 API: 사용 가능</string>
+    <string name="pipeline_youtube_status_off">유튜브 API: 꺼짐 (화면 검색으로 연다)</string>
+    <string name="pipeline_youtube_status_no_key">유튜브 API: 키 없음 (화면 검색으로 연다)</string>
     <string name="pipeline_cloud_settings_show">클라우드 설정 펼치기</string>
     <string name="pipeline_cloud_settings_hide">클라우드 설정 접기</string>
     <string name="pipeline_llm_ready">LLM 준비 완료. 명령을 실행하세요.</string>

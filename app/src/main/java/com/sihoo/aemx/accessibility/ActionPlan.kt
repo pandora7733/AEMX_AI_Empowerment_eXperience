@@ -38,7 +38,10 @@ enum class ActionType(val wireName: String) {
     WAIT("wait"),
 
     /** 카카오톡·문자로 메시지를 보낸다. target 은 받는 사람, value 는 사용자가 말한 내용. */
-    SEND_MESSAGE("send_message");
+    SEND_MESSAGE("send_message"),
+
+    /** 유튜브 영상 하나를 바로 연다. target 은 영상 id(YouTube Data API 로 미리 찾은 것). */
+    OPEN_VIDEO("open_video");
 
     companion object {
         fun fromWireName(value: String): ActionType = entries.firstOrNull { it.wireName == value }
@@ -83,6 +86,12 @@ object ActionPlanParser {
                     require(action != ActionType.NEXT_VIDEO || AppLauncher.packageFor(app) in setOf(
                         AppLauncher.YOUTUBE_PACKAGE, AppLauncher.INSTAGRAM_PACKAGE,
                     )) { "next_video는 유튜브와 인스타그램에서만 지원합니다." }
+                    require(action != ActionType.OPEN_VIDEO || AppLauncher.packageFor(app) == AppLauncher.YOUTUBE_PACKAGE) {
+                        "open_video는 유튜브에서만 지원합니다."
+                    }
+                    require(action != ActionType.OPEN_VIDEO || AppLauncher.isVideoId(target)) {
+                        "open_video의 target은 유튜브 영상 id여야 합니다."
+                    }
                     add(ActionStep(action, target, value))
                 }
             }

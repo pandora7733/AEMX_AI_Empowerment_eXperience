@@ -29,6 +29,15 @@ import java.util.ArrayDeque
  *   content-desc 로는 이름 다음 조각이 "6"(숫자만)이거나 "오픈채팅 29명" 모양이다.
  */
 internal object KakaoShareRules {
+    /**
+     * 검색어 지우기가 끝났는가. 입력란이 비었고 지우기 버튼도 사라졌으면 끝이다. 그때 남아 있는 검색 행은
+     * 이전 검색 결과라서 무시한다(전체 목록 훑기로 넘어간다). 지우기 버튼이 남아 있으면 아직이다.
+     */
+    fun clearDone(inputEmpty: Boolean, clearButtonVisible: Boolean): Boolean = inputEmpty && !clearButtonVisible
+
+    /** 끝까지 받는 사람을 찾지 못했을 때의 안내. 이름은 화면과 음성 안내에만 나간다(logcat 은 가린다). */
+    fun notFoundMessage(name: String): String = "$name 님을 카카오톡에서 찾지 못했어요"
+
     /** (찾는 이름, 화면에 보이는 이름) -> 같은 사람인가. */
     fun interface NameMatch {
         fun matches(wanted: String, shown: String): Boolean
@@ -573,7 +582,7 @@ internal class KakaoShareFlow(
         private fun timeoutMessage(): String = when (phase) {
             Phase.OPEN -> "카카오톡 공유 화면이 열리지 않았습니다."
             Phase.TYPE -> "카카오톡 공유 화면의 검색란을 찾지 못했습니다."
-            Phase.RESULT -> "카카오톡 공유 화면에서 \"$recipient\" 을(를) 찾지 못했습니다."
+            Phase.RESULT -> KakaoShareRules.notFoundMessage(recipient)
             Phase.CLEAR -> "검색어를 지우지 못해 보내지 않았습니다."
             Phase.SCAN -> "카카오톡 전체 목록을 훑다가 시간이 다 되어 보내지 않았습니다."
             Phase.BACK -> "찾은 \"$recipient\" 행으로 돌아가지 못해 보내지 않았습니다."
@@ -787,6 +796,11 @@ internal class KakaoShareFlow(
                 "카톡 검색 지우기: 지우기버튼=${button != null} 입력란비움=$empty 검색행=${snapshot.searchRows.size} " +
                     "목록행=${snapshot.listRows.size} 키보드=${imeVisible()}",
             )
+            // 입력란이 비었고 지우기 버튼도 없으면 지우기는 끝났다. 남은 검색 행은 이전 결과이니 무시하고 훑기로 간다.
+            if (KakaoShareRules.clearDone(empty, button != null)) {
+                goto(Phase.SCAN)
+                return Outcome.Wait
+            }
             if (!empty) {
                 if (button != null) press(button) else edit?.let { setText(it, "") }
             } else {
@@ -822,7 +836,7 @@ internal class KakaoShareFlow(
                 return Outcome.Fail("목록이 길어 \"$recipient\" 이(가) 한 명뿐인지 끝까지 확인하지 못해 보내지 않았습니다.")
             }
             return when (val pick = scan.pick(recipient, nameMatch, looseMatch, alternate)) {
-                KakaoShareRules.RowPick.None -> Outcome.Fail("카카오톡 목록에서 \"$recipient\" 을(를) 찾지 못했습니다.")
+                KakaoShareRules.RowPick.None -> Outcome.Fail(KakaoShareRules.notFoundMessage(recipient))
                 KakaoShareRules.RowPick.GroupOnly -> Outcome.Fail("\"$recipient\" 은(는) 단체방뿐이라 보내지 않았습니다.")
                 is KakaoShareRules.RowPick.Ambiguous -> Outcome.Fail(MessageRules.tooManyMessage(recipient, pick.count))
                 is KakaoShareRules.RowPick.Found -> {

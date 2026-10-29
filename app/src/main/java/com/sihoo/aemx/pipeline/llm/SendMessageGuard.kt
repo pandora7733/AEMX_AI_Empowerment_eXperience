@@ -21,13 +21,25 @@ import com.sihoo.aemx.pipeline.model.ActionType
  */
 object SendMessageGuard {
 
+    /**
+     * 로그 통로. 받는 사람을 바로잡은 기록을 logcat(AemxMessageGuard)으로 보낸다. 이름은 글자 수만 남긴다.
+     * 화면에서 한 번 정해 두면 된다. 기본은 아무것도 하지 않는다.
+     */
+    @Volatile
+    var logSink: (String) -> Unit = {}
+
     /** 계획을 써도 되면 (필요하면 바로잡은) 계획, 버려야 하면 null. */
     fun check(utterance: String, plan: ActionPlan): ActionPlan? {
         if (plan.steps.none { it.action == ActionType.SEND_MESSAGE }) return plan
+        // 받는 사람은 발화에서 정한다. 모델이 고른 이름은 참고만 하고, 발화에서 못 뽑으면 보내지 않는다.
+        val who = recipientOf(utterance) ?: return null
 
         val app = appName(plan.app)
-        val steps = plan.steps.map { step ->
-            if (step.action != ActionType.SEND_MESSAGE) return@map step
+        val steps = plan.steps.map { original ->
+            if (original.action != ActionType.SEND_MESSAGE) return@map original
+            val modelTarget = original.target?.trim().orEmpty()
+            if (modelTarget != who) logSink("받는 사람 교정: 모델 ${modelTarget.length}자 -> 발화 ${who.length}자")
+            val step = original.copy(target = who)
             val value = step.value?.trim().orEmpty()
             val said = extractContent(utterance, step.target) ?: extractLoose(utterance, step.target)
             when {
@@ -40,6 +52,33 @@ object SendMessageGuard {
         }
         if (app == plan.app && steps == plan.steps) return plan
         return plan.copy(app = app, steps = steps)
+    }
+
+    /**
+     * 받는 사람을 발화에서 뽑지 못했거나 둘 이상이면 거절 문장. 보낼 수 있으면 null.
+     * 계획에 보내기가 없으면 상관없이 null.
+     */
+    fun recipientRefusal(utterance: String, plan: ActionPlan): String? {
+        if (plan.steps.none { it.action == ActionType.SEND_MESSAGE }) return null
+        return if (recipientOf(utterance) == null) "누구에게 보낼지 확실하지 않아 보내지 않았어요" else null
+    }
+
+    /**
+     * 발화에서 받는 사람을 뽑는다. "X한테", "X에게", "X께" 에서 X 를 쓴다(조사 앞 어절). 앞에 붙은 수단 말
+     * ("카톡으로", "문자로")은 받는 사람이 아니다. 뽑은 이름이 정확히 하나일 때만 돌려준다.
+     * 없거나 둘 이상이면 null.
+     */
+    internal fun recipientOf(utterance: String): String? {
+        val tokens = utterance.trim().split(Regex("\\s+")).map { it.trim(*PUNCTUATION) }
+        val names = tokens.mapIndexedNotNull { index, token ->
+            val stem = when {
+                // "배재준 한테" 처럼 조사가 떨어져 있으면 앞 어절이 받는 사람이다.
+                token in RECIPIENT_PARTICLES && index > 0 -> tokens[index - 1]
+                else -> RECIPIENT_TOKEN.find(token)?.groupValues?.get(1)
+            }
+            stem?.takeIf { it.isNotBlank() && !isChannelWord(it) && !CHANNEL.containsMatchIn(it) }
+        }
+        return names.distinct().singleOrNull()
     }
 
     internal fun appName(app: String): String = when (app.trim()) {
@@ -105,4 +144,9 @@ object SendMessageGuard {
 
     /** 긴 조사가 먼저 와야 한다. */
     private val RECIPIENT_PARTICLES = listOf("에게", "한테", "께")
+
+    /** "서우진한테" 처럼 어절 끝이 받는 사람 조사인 꼴. 앞부분이 받는 사람이다. */
+    private val RECIPIENT_TOKEN = Regex("^(.+?)(?:한테|에게|께)$")
+
+    private val PUNCTUATION = charArrayOf(',', '.', '?', '!', '~', '"', '\'', '“', '”')
 }

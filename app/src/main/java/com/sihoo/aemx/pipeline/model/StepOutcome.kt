@@ -30,8 +30,10 @@ sealed interface StepOutcome {
     data class ExecutorError(
         override val screen: ScreenSnapshot,
         val message: String,
-        /** 재분석해도 풀릴 수 없는 실패(설치되지 않은 앱 등). true 면 바로 포기한다. */
-        val unrecoverable: Boolean = false
+        /** 재분석해도 풀릴 수 없는 실패(설치되지 않은 앱, 없는 N번째 영상 등). true 면 바로 포기한다. */
+        val unrecoverable: Boolean = false,
+        /** 포기할 때 이유를 사용자에게 소리로도 알릴지. 안내 문장으로 읽을 만한 실패에만 true. */
+        val speakReason: Boolean = false,
     ) : StepOutcome
 
     /** 사람이 직접 처리해야 한다(캡차·2단계 인증). 자동 재시도하지 않는다. */

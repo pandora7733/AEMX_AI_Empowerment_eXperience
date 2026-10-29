@@ -80,17 +80,19 @@ internal object NodeFinder {
      *
      * 유튜브 앱이 업데이트돼 문구가 바뀌면 [PLAY_MARKERS] 를 고쳐야 한다.
      */
-    fun findFirstPlayable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? = findNthPlayable(root, 1)
+    fun findFirstPlayable(root: AccessibilityNodeInfo?, includeShorts: Boolean = false): AccessibilityNodeInfo? =
+        findNthPlayable(root, 1, includeShorts)
 
-    /** [findFirstPlayable] 의 N번째(1부터). 광고와 Shorts 를 거르는 규칙은 그대로고 거른 뒤의 N번째다. */
-    fun findNthPlayable(root: AccessibilityNodeInfo?, n: Int): AccessibilityNodeInfo? =
-        playableItems(root).getOrNull(n - 1)
+    /** [findFirstPlayable] 의 N번째(1부터). 광고를 거른 뒤의 N번째다. Shorts 는 [includeShorts] 일 때만 세운다. */
+    fun findNthPlayable(root: AccessibilityNodeInfo?, n: Int, includeShorts: Boolean = false): AccessibilityNodeInfo? =
+        playableItems(root, includeShorts).getOrNull(n - 1)
 
     /**
-     * 지금 화면의 재생 가능한 항목을 위에서부터. 광고는 뺀다. Shorts 는 일반 영상이 하나도 없을 때만 쓴다.
-     * 같은 항목을 스크롤 전후로 알아보는 키는 [playableKey] 다.
+     * 지금 화면의 재생 가능한 항목을 위에서부터. 광고는 뺀다.
+     * Shorts 는 [includeShorts] 가 참일 때만, 그리고 일반 영상이 하나도 없을 때만 쓴다(사용자가 쇼츠를 말한 명령).
+     * 그 밖에는 일반 영상만 센다. 같은 항목을 스크롤 전후로 알아보는 키는 [playableKey] 다.
      */
-    fun playableItems(root: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
+    fun playableItems(root: AccessibilityNodeInfo?, includeShorts: Boolean = false): List<AccessibilityNodeInfo> {
         if (root == null) return emptyList()
         // 결과 목록 밖(검색창·재생 중인 미리보기·하단 탭)을 후보에서 아예 빼기 위해
         // 목록 컨테이너부터 찾는다.
@@ -108,7 +110,7 @@ internal object NodeFinder {
             }
             for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
         }
-        return videos.ifEmpty { shorts }
+        return if (includeShorts) videos.ifEmpty { shorts } else videos
     }
 
     /** 유튜브 항목을 스크롤 전후로 알아보는 키. 항목의 content-desc(제목 포함). */

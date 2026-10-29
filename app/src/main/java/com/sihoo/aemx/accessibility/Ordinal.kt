@@ -53,8 +53,13 @@ internal object Ordinal {
 internal class OrdinalTracker(private val n: Int) {
     private val seen = ArrayList<String>()
     private var scrolledAt = 0L
+    private var scrolls = 0
+    private var seenAtLastScroll = 0
 
-    val scrolled: Boolean get() = scrolledAt != 0L
+    val scrolled: Boolean get() = scrolls > 0
+
+    /** 지금까지 한 스크롤 횟수. 한 단계 안에서 이어 센다. */
+    val scrollCount: Int get() = scrolls
 
     /** @return [visible] 안에서 N번째 항목의 자리. 아직 N개를 못 세었거나 N번째가 화면 밖이면 null. */
     fun pick(visible: List<String>): Int? {
@@ -65,7 +70,12 @@ internal class OrdinalTracker(private val n: Int) {
 
     fun markScrolled(now: Long) {
         scrolledAt = now
+        scrolls++
+        seenAtLastScroll = seen.size
     }
+
+    /** 마지막 스크롤 뒤에 처음 보는 항목이 하나도 없었는가. 그러면 목록 끝까지 본 것이다. [pick] 뒤에 부른다. */
+    fun noNewSinceLastScroll(): Boolean = scrolls > 0 && seen.size == seenAtLastScroll
 
     /** 스크롤하고 화면이 자리 잡기를 기다리는 중인가. */
     fun settling(now: Long): Boolean = scrolled && now - scrolledAt < SETTLE_MS

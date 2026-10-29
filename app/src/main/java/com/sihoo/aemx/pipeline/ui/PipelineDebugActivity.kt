@@ -30,6 +30,9 @@ import com.sihoo.aemx.pipeline.PipelineOrchestrator
 import com.sihoo.aemx.AndroidTtsController
 import com.sihoo.aemx.pipeline.PipelineState
 import com.sihoo.aemx.pipeline.PlanStepPruner
+import com.sihoo.aemx.pipeline.youtube.YouTubeSearch
+import com.sihoo.aemx.pipeline.youtube.YouTubeSearchClient
+import com.sihoo.aemx.pipeline.youtube.YouTubeShortcut
 import com.sihoo.aemx.pipeline.fake.FakeAppResolver
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
@@ -110,6 +113,7 @@ class PipelineDebugActivity : AppCompatActivity() {
     private lateinit var cloudSwitch: CheckBox
     private lateinit var cloudStatus: TextView
     private lateinit var routeView: TextView
+    private lateinit var youtubeStatus: TextView
     private lateinit var timingView: TextView
     /** 지금 도는 명령의 시각. 계획 콜백은 백그라운드 스레드에서 오므로 volatile. */
     @Volatile
@@ -143,6 +147,8 @@ class PipelineDebugActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 받는 사람을 바로잡은 기록은 logcat 으로 남긴다(이름은 글자 수만).
+        com.sihoo.aemx.pipeline.llm.SendMessageGuard.logSink = { Log.i("AemxMessageGuard", it) }
         setContentView(createContentView())
         resetPipeline()
         // 캡슐의 중단 버튼은 의도만 보낸다. 명령을 소유한 이 화면의 오케스트레이터가 받아 멈춘다.
@@ -431,8 +437,10 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             when (result) {
                 is PlanResult.Success -> {
-                    // 오케스트레이터 경로와 같은 후처리(시간만 드는 앱 열기 제거)를 거친 뒤 보낸다.
-                    val json = PlanStepPruner.prune(result.plan).toWireJson()
+                    // 오케스트레이터 경로와 같은 후처리(시간만 드는 앱 열기 제거, 유튜브 API 로 영상 열기)를 거친 뒤 보낸다.
+                    val pruned = PlanStepPruner.prune(result.plan)
+                    val plan = youtubeSearchOrNull()?.let { YouTubeShortcut.rewrite(pruned, command, it) } ?: pruned
+                    val json = plan.toWireJson()
                     Log.i(TAG, "실기기 실행 계획: $json")
                     logView.text = json
                     AemxAccessibilityService.submitActionPlan(json).fold(
@@ -517,6 +525,35 @@ class PipelineDebugActivity : AppCompatActivity() {
             },
         ).also { hybridPlanner = it }
 
+    /**
+     * 유튜브 검색을 YouTube Data API 로 미리 푸는 통로. 설정이 꺼졌거나 키가 없으면 null(화면 검색 경로).
+     * 한도 초과 기억은 [YouTubeQuota.shared] 가 맡는다. 시간은 명령의 타이머에 "유튜브 API" 로 붙인다.
+     */
+    private fun youtubeSearchOrNull(): YouTubeSearch? {
+        if (!cloudSettings.youtubeApiEnabled || !cloudSettings.hasYoutubeKey) return null
+        val client = YouTubeSearchClient(
+            apiKey = cloudSettings.youtubeKey,
+            log = { Log.i("YouTubeApi", it) },
+        )
+        return { query, maxResults ->
+            val started = SystemClock.elapsedRealtime()
+            val ids = client.search(query, maxResults)
+            currentTiming?.youtubeApi(SystemClock.elapsedRealtime() - started, hit = ids != null)
+            ids
+        }
+    }
+
+    private fun renderYoutubeStatus() {
+        if (!::youtubeStatus.isInitialized) return
+        youtubeStatus.setText(
+            when {
+                !cloudSettings.hasYoutubeKey -> R.string.pipeline_youtube_status_no_key
+                !cloudSettings.youtubeApiEnabled -> R.string.pipeline_youtube_status_off
+                else -> R.string.pipeline_youtube_status_on
+            },
+        )
+    }
+
     private fun renderCloudStatus() {
         cloudStatus.setText(
             when {
@@ -559,7 +596,9 @@ class PipelineDebugActivity : AppCompatActivity() {
             executor = executor,
             screenObserver = screenObserver,
             appResolver = appResolver,
-            scope = deviceScope
+            scope = deviceScope,
+            logSink = { Log.i("AemxOrchestrator", it) },
+            youtubeSearch = { youtubeSearchOrNull() },
         )
     }
 
@@ -613,7 +652,8 @@ class PipelineDebugActivity : AppCompatActivity() {
             screenObserver = observer,
             appResolver = FakeAppResolver(),
             scope = lifecycleScope,
-            config = PipelineConfig(quietPeriodMs = 300)
+            config = PipelineConfig(quietPeriodMs = 300),
+            logSink = { Log.i("AemxOrchestrator", it) },
         )
     }
 
@@ -747,6 +787,20 @@ class PipelineDebugActivity : AppCompatActivity() {
                 }
             }
             addView(cloudSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            // 유튜브 검색 결과의 N번째 영상을 YouTube Data API 로 바로 연다. 끄면 화면 검색과 스크롤로 찾는다.
+            val youtubeSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_youtube_toggle)
+                isChecked = cloudSettings.youtubeApiEnabled
+                setOnCheckedChangeListener { _, checked ->
+                    cloudSettings.youtubeApiEnabled = checked
+                    renderYoutubeStatus()
+                }
+            }
+            addView(youtubeSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+            youtubeStatus = TextView(this@PipelineDebugActivity)
+            addView(youtubeStatus, matchWidthWrapHeight().apply { topMargin = spacing })
+            renderYoutubeStatus()
 
             // 키·모델 입력은 평소에 필요 없다(키는 빌드에 들어 있다). 펼칠 때만 보여 준다.
             val cloudSection = LinearLayout(this@PipelineDebugActivity).apply {

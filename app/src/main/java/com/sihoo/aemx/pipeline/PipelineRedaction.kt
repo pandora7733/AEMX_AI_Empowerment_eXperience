@@ -24,6 +24,19 @@ object PipelineRedaction {
             "\"value\": \"***(" + match.groupValues[1].length + "자)\""
         }
 
+    private val TARGET_FIELD = Regex(""""target"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+
+    /**
+     * logcat 용: 보내기가 들어 있는 계획 JSON 은 받는 사람(target)도 길이만 남긴다. 개발 화면에는 원문이 그대로 간다.
+     * 보내기가 없는 계획은 target 이 앱 이름이나 검색어라 그대로 둔다.
+     */
+    fun maskSendTargets(raw: String): String {
+        if (!raw.contains("send_message")) return raw
+        return TARGET_FIELD.replace(raw) { match ->
+            "\"target\": \"***(" + match.groupValues[1].length + "자)\""
+        }
+    }
+
     /**
      * 디버그 빌드인지. 사용자 문장 같은 원문 로그는 디버그에서만 남기려고 쓴다(이슈 #16).
      * BuildConfig 는 이 모듈에서 켜 두지 않아 앱의 debuggable 플래그를 본다.

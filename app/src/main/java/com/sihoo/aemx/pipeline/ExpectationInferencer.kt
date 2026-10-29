@@ -97,6 +97,15 @@ class ExpectationInferencer(
                 )
             }
 
+            // 영상 열기는 유튜브 앱 화면으로 바뀌어야 한다. 재생 화면 글자는 믿기 어려워 앱과 화면 변화만 본다.
+            ActionType.OPEN_VIDEO -> step.copy(
+                expect = Expectation(
+                    packageName = appResolver.resolvePackage(appName),
+                    requireScreenChange = true,
+                    note = "유튜브 영상 화면으로 넘어가야 한다"
+                )
+            )
+
             // 영상 재생과 다음 영상은 화면이 바뀌는 것 말고 확인할 방법이 마땅치 않다.
             // 재생이 실제로 시작됐는지는 접근성 정보로 알기 어렵다(ACCESSIBILITY/README.md).
             ActionType.PLAY_FIRST, ActionType.NEXT_VIDEO -> step.copy(

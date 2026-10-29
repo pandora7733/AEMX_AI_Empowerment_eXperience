@@ -11,6 +11,8 @@ import com.sihoo.aemx.pipeline.model.StepOutcome
 import com.sihoo.aemx.pipeline.port.ActionExecutor
 import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.TextMatch
+import com.sihoo.aemx.pipeline.youtube.YouTubeSearch
+import com.sihoo.aemx.pipeline.youtube.YouTubeShortcut
 import com.sihoo.aemx.pipeline.port.AppResolver
 
 import com.sihoo.aemx.pipeline.port.ExecutionResult
@@ -66,7 +68,11 @@ class PipelineOrchestrator(
     private val speech: SpeechSource? = null,
     private val config: PipelineConfig = PipelineConfig(),
     /** LLM 추론과 실행은 메인스레드를 막으면 안 된다. */
-    private val worker: CoroutineDispatcher = Dispatchers.Default
+    private val worker: CoroutineDispatcher = Dispatchers.Default,
+    /** 판단 기록을 logcat 으로 보내는 통로. 개발 화면 로그와 같은 내용이지만 사용자 발화와 보내기 내용은 가린다. */
+    private val logSink: (String) -> Unit = {},
+    /** 유튜브 API 검색 통로를 명령마다 얻는다. 설정이 꺼져 있거나 키가 없으면 null. */
+    private val youtubeSearch: () -> YouTubeSearch? = { null },
 ) {
 
     private val inferencer = ExpectationInferencer(appResolver)
@@ -247,7 +253,7 @@ class PipelineOrchestrator(
     // ------------------------------------------------------------ 본체 루프
 
     private suspend fun runCommand(utterance: String, run: Run) {
-        append(PipelineLogEntry.Level.INFO, "명령: $utterance")
+        append(PipelineLogEntry.Level.INFO, "명령: $utterance", sensitive = true)
 
         if (!executor.isReady()) {
             _state.value = PipelineState.NeedsSetup("접근성 서비스가 꺼져 있다")
@@ -288,7 +294,7 @@ class PipelineOrchestrator(
             val step = plan.steps[stepIndex]
             val stepId = stepIdOf(run, stepIndex)
             _state.value = PipelineState.Executing(step, stepIndex + 1, plan.steps.size)
-            append(PipelineLogEntry.Level.STEP, step.describe())
+            append(PipelineLogEntry.Level.STEP, step.describe(), sensitive = step.action == ActionType.SEND_MESSAGE)
             emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
 
             val outcome = performAndVerify(step, plan.app, lastSearchQuery)
@@ -322,13 +328,24 @@ class PipelineOrchestrator(
                     emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.Failed, failure) }
 
                     if (outcome is StepOutcome.ExecutorError && outcome.unrecoverable) {
-                        fail(outcome.message, run)
+                        // 이유를 소리로 알릴 만한 실패만(앱 없음, N번째 없음) 이유를 읽는다. 나머지는 기존처럼 일반 안내로 끝낸다.
+                        // 보내기 실패 문장에는 받는 사람 이름이 들어갈 수 있어서 logcat 에는 길이만 남긴다.
+                        fail(
+                            outcome.message,
+                            run,
+                            speakReason = outcome.speakReason,
+                            sensitive = step.action == ActionType.SEND_MESSAGE,
+                        )
                         return
                     }
 
                     val current = outcome.screen
                     val reason = history.last().toPromptLine()
-                    append(PipelineLogEntry.Level.WARN, "예상과 다름 -> 재분석: $reason")
+                    append(
+                        PipelineLogEntry.Level.WARN,
+                        "예상과 다름 -> 재분석: $reason",
+                        sensitive = history.last().step.action == ActionType.SEND_MESSAGE,
+                    )
 
                     replans++
                     if (replans > config.maxReplans) {
@@ -408,23 +425,46 @@ class PipelineOrchestrator(
             when (val result = withContext(worker) { executor.execute(command) }) {
                 is ExecutionResult.Performed -> executorEvidence = result.evidence
 
-                is ExecutionResult.TargetNotFound ->
+                is ExecutionResult.TargetNotFound -> {
+                    // N번째 영상이 없으면 재분석은 스크롤된 화면부터 처음으로 다시 세서 같은 실패를 되풀이한다.
+                    // 실행 단계에서 끝까지 세었으므로 재분석하지 않고 안내로 끝낸다.
+                    if (command is ActionExecutor.Command.PlayNth) {
+                        return StepOutcome.ExecutorError(
+                            screenObserver.capture() ?: before,
+                            nthNotFoundMessage(command.ordinal, appName),
+                            unrecoverable = true,
+                            speakReason = true,
+                        )
+                    }
                     return StepOutcome.ExecutorError(
                         screenObserver.capture() ?: before,
                         "대상을 찾지 못했다(${result.description})"
                     )
+                }
 
                 is ExecutionResult.NotReady ->
                     return StepOutcome.ExecutorError(before, result.message)
 
-                is ExecutionResult.Failed ->
+                is ExecutionResult.Failed -> {
+                    // 앱이 없거나 열 화면이 없으면 화면을 다시 봐도 풀리지 않는다. 설치되지 않았다고 알리고 끝낸다.
+                    if (step.action == ActionType.OPEN_APP && AppAvailability.isNotInstalled(result.message)) {
+                        return StepOutcome.ExecutorError(
+                            before,
+                            AppAvailability.userMessage(step.target ?: appName),
+                            unrecoverable = true,
+                            speakReason = true,
+                        )
+                    }
                     return StepOutcome.ExecutorError(
                         screenObserver.capture() ?: before,
                         result.message,
                         // 메시지는 보냈을 수도 있고, 받는 사람을 못 정한 것은 재분석으로 풀리지 않는다.
                         // 모델이 다른 조작을 지어내거나 같은 메시지를 또 보내지 않도록 바로 포기한다.
-                        unrecoverable = step.action == ActionType.SEND_MESSAGE
+                        // 우리 앱 화면을 조작하려던 계획은 재분석해도 같은 일을 되풀이하므로 바로 끝낸다.
+                        unrecoverable = step.action == ActionType.SEND_MESSAGE ||
+                            result.message == AppAvailability.OWN_APP_SCREEN_MESSAGE,
                     )
+                }
 
                 is ExecutionResult.Unsupported ->
                     return StepOutcome.Mismatch(
@@ -475,8 +515,9 @@ class PipelineOrchestrator(
                         // 재분석하면 엉뚱한 버튼을 누르며 시간만 쓰므로 바로 포기한다.
                         StepOutcome.ExecutorError(
                             screen,
-                            "\"$wanted\" 앱을 기기에서 찾지 못했다",
-                            unrecoverable = true
+                            AppAvailability.userMessage(wanted),
+                            unrecoverable = true,
+                            speakReason = true,
                         )
                     }
                 } else {
@@ -489,6 +530,16 @@ class PipelineOrchestrator(
                 if (label.isNullOrBlank()) {
                     CommandMapping.Rejected { screen ->
                         StepOutcome.Mismatch(screen, "누를 대상이 지정되지 않았다")
+                    }
+                } else if (TapTargetRules.isPositional(label)) {
+                    // "첫 번째 결과", "가장 위 항목" 은 화면 글자로 찾을 수 없다. 재분석해도 되풀이되니 바로 알리고 끝낸다.
+                    CommandMapping.Rejected { screen ->
+                        StepOutcome.ExecutorError(
+                            screen,
+                            TapTargetRules.POSITIONAL_MESSAGE,
+                            unrecoverable = true,
+                            speakReason = true,
+                        )
                     }
                 } else {
                     CommandMapping.Ready(ActionExecutor.Command.Tap(label))
@@ -525,6 +576,9 @@ class PipelineOrchestrator(
 
             ActionType.NEXT_VIDEO ->
                 CommandMapping.Ready(ActionExecutor.Command.NextVideo(step.value))
+
+            ActionType.OPEN_VIDEO ->
+                CommandMapping.Ready(ActionExecutor.Command.OpenVideo(step.target.orEmpty()))
 
             ActionType.SCROLL ->
                 CommandMapping.Ready(
@@ -655,7 +709,14 @@ class PipelineOrchestrator(
 
                     // 뒤의 동작이 앱을 함께 여는 "앱 열기"는 뺀다. LLM 이 주지 않는 기대치는 그다음에 채운다.
                     val pruned = PlanStepPruner.prune(result.plan)
-                    val enriched = inferencer.enrich(pruned)
+                    // 유튜브 검색 후 N번째 재생은 YouTube Data API 로 영상 id 를 미리 찾아 바로 연다(처음 계획에만).
+                    val shortcut = if (request.mode == PlanRequest.Mode.INITIAL) {
+                        youtubeSearch()?.let { YouTubeShortcut.rewrite(pruned, request.utterance, it) } ?: pruned
+                    } else {
+                        pruned
+                    }
+                    if (shortcut !== pruned) append(PipelineLogEntry.Level.INFO, "유튜브 API 로 영상을 바로 연다")
+                    val enriched = inferencer.enrich(shortcut)
                     append(
                         PipelineLogEntry.Level.INFO,
                         "계획 ${enriched.steps.size}단계를 받았다 (대상 앱: ${enriched.app})"
@@ -698,8 +759,8 @@ class PipelineOrchestrator(
         emit(run) { id, seq -> PipelineEvent.ResultVerified(id, seq, evidence) }
     }
 
-    private fun fail(reason: String, run: Run, speakReason: Boolean = false) {
-        append(PipelineLogEntry.Level.ERROR, reason)
+    private fun fail(reason: String, run: Run, speakReason: Boolean = false, sensitive: Boolean = false) {
+        append(PipelineLogEntry.Level.ERROR, reason, sensitive = sensitive)
         _state.value = PipelineState.Failed(reason, speakReason)
         emit(run) { id, seq -> PipelineEvent.Failed(id, seq, reason) }
     }
@@ -756,13 +817,23 @@ class PipelineOrchestrator(
 
     private fun newRunId(): String = UUID.randomUUID().toString().take(8)
 
-    private fun append(level: PipelineLogEntry.Level, message: String) {
+    /**
+     * 개발 화면 로그에 한 줄을 더하고, [logSink] 로 logcat 에도 보낸다. [sensitive] 는 사용자 발화나 받는 사람이
+     * 들어간 줄이라 logcat 에서는 길이만 남긴다(개발 화면에는 그대로 보인다).
+     */
+    private fun append(level: PipelineLogEntry.Level, message: String, sensitive: Boolean = false) {
         _log.value = (_log.value + PipelineLogEntry(level, message)).takeLast(MAX_LOG_ENTRIES)
+        val logged = when {
+            sensitive -> "***(${message.length}자)"
+            level == PipelineLogEntry.Level.JSON -> PipelineRedaction.maskSendTargets(message)
+            else -> message
+        }
+        logSink("[${level.name}] $logged")
     }
 
     private data class SettleResult(val snapshot: ScreenSnapshot, val settled: Boolean)
 
-    private companion object {
+    internal companion object {
         const val MAX_LOG_ENTRIES = 200
 
         /** 사건 흐름의 여유 칸. 한 명령이 내는 사건은 수십 개 안쪽이라 구독자가 잠깐 늦어도 넘치지 않는다. */
@@ -774,6 +845,10 @@ class PipelineOrchestrator(
         /** 재생 전에 검색 결과 화면을 기다리는 상한과 간격. 검색 단계가 이미 검색어를 확인했으면 바로 통과한다. */
         const val PLAY_QUERY_WAIT_MS = 2_000L
         const val PLAY_QUERY_POLL_MS = 250L
+
+        /** N번째 영상(노래)이 없을 때 사용자에게 알리는 문장. 유튜브 뮤직이면 노래라고 부른다. */
+        fun nthNotFoundMessage(ordinal: Int, appName: String): String =
+            if (appName.contains("뮤직")) "${ordinal}번째 노래를 찾지 못했어요" else "${ordinal}번째 영상을 찾지 못했어요"
 
         /**
          * 사건 번호. 오케스트레이터를 새로 만들어도 이어서 커진다(개발 화면이 자주 갈아 끼운다).

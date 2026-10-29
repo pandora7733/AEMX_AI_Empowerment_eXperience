@@ -31,6 +31,16 @@ class CloudSettings(private val context: Context) {
 
     val hasKey: Boolean get() = effectiveKey.isNotBlank()
 
+    /** 유튜브 검색 결과를 YouTube Data API 로 미리 찾아 바로 여는지. 켜짐이 기본이고, 키가 없으면 쓰지 않는다. */
+    var youtubeApiEnabled: Boolean
+        get() = prefs.getBoolean(KEY_YOUTUBE_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_YOUTUBE_ENABLED, value).apply()
+
+    /** 빌드할 때 넣은 YouTube 키가 있는지. 키 값은 화면에도 로그에도 내보내지 않는다. */
+    val youtubeKey: String get() = BuildConfig.YOUTUBE_API_KEY
+
+    val hasYoutubeKey: Boolean get() = youtubeKey.isNotBlank()
+
     /** 직접 정한 모델 이름. 비어 있으면 [effectiveModel] 이 기본 모델을 쓴다. */
     var model: String
         get() = prefs.getString(KEY_MODEL, "").orEmpty()
@@ -59,5 +69,6 @@ class CloudSettings(private val context: Context) {
         const val KEY_API_KEY = "api_key"
         const val KEY_ENABLED = "enabled"
         const val KEY_MODEL = "model"
+        const val KEY_YOUTUBE_ENABLED = "youtube_enabled"
     }
 }
