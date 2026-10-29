@@ -107,7 +107,10 @@ class PipelineOrchestratorTest {
         val observer = FakeScreenObserver(snapshot("유튜브", "홈"))
         val executor = ScriptedExecutor(
             observer,
-            listOf(snapshot("고양이 영상", "검색결과"), snapshot("재생 중", "고양이 영상"))
+            listOf(
+                snapshot("고양이 영상", "검색결과", pkg = "com.example.fake.youtube"),
+                snapshot("재생 중", "고양이 영상", pkg = "com.example.fake.youtube"),
+            )
         )
         val orchestrator = build(FakePlanGenerator(listOf(plan)), executor, observer)
 
@@ -204,7 +207,8 @@ class PipelineOrchestratorTest {
         val executor = ScriptedExecutor(
             observer,
             listOf(
-                snapshot("유튜브", "홈", pkg = yt),
+                // 검색 결과 화면: 이번 검색어("맛집")가 보여야 검색이 성공한다. 열기는 검색에 합쳐져 빠졌다.
+                snapshot(*top.toTypedArray(), "맛집 검색결과", pkg = yt),
                 snapshot(*top.toTypedArray(), "아래 결과 A", pkg = yt),
                 snapshot(*top.toTypedArray(), "아래 결과 B", pkg = yt)   // 앞 10개가 같다
             )
@@ -217,7 +221,8 @@ class PipelineOrchestratorTest {
 
         assertTrue("상태가 ${orchestrator.state.value} 였다", orchestrator.state.value is PipelineState.Finished)
         assertEquals("재분석을 요청하면 안 된다", 1, planner.requests.size)
-        assertEquals(3, executor.performed.size)
+        // 유튜브 열기는 검색이 함께 여니 빠지고, 검색과 스크롤 두 단계만 실행된다.
+        assertEquals(2, executor.performed.size)
     }
 
     @Test

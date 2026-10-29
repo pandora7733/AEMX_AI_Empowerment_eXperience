@@ -31,12 +31,8 @@ data class ScreenSnapshot(
     }
 
     /** 화면에 이 문자열이 (부분일치로) 보이는지. */
-    fun containsText(needle: String): Boolean {
-        val target = needle.trim()
-        if (target.isEmpty()) return false
-        return texts.any { it.contains(target, ignoreCase = true) } ||
-            clickableLabels.any { it.contains(target, ignoreCase = true) }
-    }
+    fun containsText(needle: String): Boolean =
+        texts.any { TextMatch.contains(it, needle) } || clickableLabels.any { TextMatch.contains(it, needle) }
 
     /**
      * LLM 에 넘길 요약 문자열.

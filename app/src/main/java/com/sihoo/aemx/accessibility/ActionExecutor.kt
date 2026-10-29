@@ -7,6 +7,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import com.sihoo.aemx.pipeline.model.TextMatch
 
 internal class ActionExecutor(
     private val service: AemxAccessibilityService,
@@ -112,7 +113,9 @@ internal class ActionExecutor(
             val result = if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH) && observed == StepResult.Success) {
                 val now = SystemClock.uptimeMillis()
                 if (foregroundSince == 0L) foregroundSince = now
-                if (now - foregroundSince >= OPEN_APP_STABLE_MS) StepResult.Success else StepResult.NotReady
+                // 검색은 검색어가 보이는 것으로 충분하니 안정 대기를 기다리지 않는다. 열기는 앱이 잠시 앞에 머물러야 한다.
+                if (step.action == ActionType.SEARCH || now - foregroundSince >= OPEN_APP_STABLE_MS) StepResult.Success
+                else StepResult.NotReady
             } else {
                 if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) foregroundSince = 0L
                 observed
@@ -124,10 +127,10 @@ internal class ActionExecutor(
                 is StepResult.Fatal -> fail(index, step, result.message, id)
                 StepResult.NotReady -> {
                     if (SystemClock.uptimeMillis() >= deadline) {
-                        val message = if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) {
-                            "앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요."
-                        } else {
-                            "대상 화면 또는 조작 가능한 요소를 8초 안에 찾지 못했습니다."
+                        val message = when (step.action) {
+                            ActionType.SEARCH -> "검색 결과 화면에 검색어가 보이지 않았습니다."
+                            ActionType.OPEN_APP -> "앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요."
+                            else -> "대상 화면 또는 조작 가능한 요소를 8초 안에 찾지 못했습니다."
                         }
                         fail(index, step, message, id)
                     } else {
@@ -213,7 +216,11 @@ internal class ActionExecutor(
             return StepResult.NotReady
         }
         return when (step.action) {
-            ActionType.OPEN_APP, ActionType.SEARCH -> StepResult.Success
+            ActionType.OPEN_APP -> StepResult.Success
+            // 검색은 이번 검색어가 화면에 보일 때만 성공이다. 같은 앱의 옛 검색 결과도 앱 화면이라 패키지만으로는 구별되지 않는다.
+            ActionType.SEARCH ->
+                if (TextMatch.queryVisible(visibleTexts(root), step.target.orEmpty())) StepResult.Success
+                else StepResult.NotReady
             ActionType.TAP -> {
                 val node = NodeFinder.find(root, step.target) ?: return StepResult.NotReady
                 val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
@@ -382,7 +389,21 @@ internal class ActionExecutor(
         data class Fatal(val message: String) : StepResult
     }
 
+    /** 화면의 글자와 설명(content-desc)을 모은다. 검색어 확인에 쓴다. 노드 수는 상한으로 자른다. */
+    private fun visibleTexts(root: AccessibilityNodeInfo): List<String> {
+        val out = mutableListOf<String>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        while (queue.isNotEmpty() && queue.size + out.size < MAX_TEXT_NODES) {
+            val node = queue.removeFirst()
+            node.text?.let { out += it.toString() }
+            node.contentDescription?.let { out += it.toString() }
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+        }
+        return out
+    }
+
     private companion object {
+        const val MAX_TEXT_NODES = 600
         const val ACTION_TIMEOUT_MS = 8_000L
         private const val TAG = "AemxActionExecutor"
         const val PROBE_INTERVAL_MS = 1_000L

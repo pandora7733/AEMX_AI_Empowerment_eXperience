@@ -79,21 +79,21 @@ class ExpectationInferencer(
                 )
             }
 
-            // 검색은 결과 화면으로 넘어가므로 화면이 바뀐다. 다만 같은 검색을 연달아 하면 결과 화면이
-            // 이미 떠 있어 그대로이니, 그 앱 화면이고 검색어가 보이면 통과시킨다(앞부분만 본다).
+            // 검색은 이번 검색어가 화면에 보여야 성공이다. 화면이 바뀌었다는 것만으로는 옛 결과 화면과
+            // 구별되지 않는다(같은 앱의 이전 검색 결과가 그대로 떠 있을 수 있다). 앞부분만 본다.
             ActionType.SEARCH -> {
                 val packageName = appResolver.resolvePackage(appName)
                 val probe = step.target?.trim().orEmpty().take(SEARCH_PROBE_LENGTH).trim()
                 step.copy(
-                    expect = Expectation(
-                        requireScreenChange = true,
-                        unchangedOk = if (packageName != null && probe.isNotEmpty()) {
-                            UnchangedOk(packageName, listOf(probe))
-                        } else {
-                            null
-                        },
-                        note = "검색하면 결과 화면으로 넘어가야 한다"
-                    )
+                    expect = if (probe.isEmpty()) {
+                        Expectation(requireScreenChange = true, note = "검색하면 결과 화면으로 넘어가야 한다")
+                    } else {
+                        Expectation(
+                            packageName = packageName,
+                            anyText = listOf(probe),
+                            note = "\"$probe\" 검색 결과 화면이어야 한다"
+                        )
+                    }
                 )
             }
 

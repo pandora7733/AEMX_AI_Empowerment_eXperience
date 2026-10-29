@@ -16,16 +16,17 @@ class ExpectationInferencerTest {
     private val inferencer = ExpectationInferencer(resolver)
 
     @Test
-    fun `검색은 앱과 검색어 앞부분을 이미 떠 있는 결과의 증거로 단다`() {
+    fun `검색은 앱 화면에서 이번 검색어 앞부분이 보여야 성공으로 본다`() {
         val step = inferencer.enrich(ActionStep(0, ActionType.SEARCH, "페이커 롤드컵 하이라이트 모음"), "유튜브")
-        assertEquals(true, step.expect.requireScreenChange)
-        assertEquals(UnchangedOk("com.google.android.youtube", listOf("페이커 롤드컵")), step.expect.unchangedOk)
+        assertEquals("com.google.android.youtube", step.expect.packageName)
+        assertEquals(listOf("페이커 롤드컵"), step.expect.anyText)
+        assertEquals(false, step.expect.requireScreenChange)
     }
 
     @Test
-    fun `앱을 모르면 이미 떠 있는 결과로 봐 주지 않는다`() {
+    fun `앱을 모르면 패키지 없이 검색어만 확인한다`() {
         val step = inferencer.enrich(ActionStep(0, ActionType.SEARCH, "페이커"), "모르는앱")
-        assertNull(step.expect.unchangedOk)
-        assertEquals(true, step.expect.requireScreenChange)
+        assertNull(step.expect.packageName)
+        assertEquals(listOf("페이커"), step.expect.anyText)
     }
 }

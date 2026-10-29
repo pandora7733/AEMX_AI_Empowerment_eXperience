@@ -29,6 +29,7 @@ import com.sihoo.aemx.assistant.AssistantStore
 import com.sihoo.aemx.pipeline.PipelineOrchestrator
 import com.sihoo.aemx.AndroidTtsController
 import com.sihoo.aemx.pipeline.PipelineState
+import com.sihoo.aemx.pipeline.PlanStepPruner
 import com.sihoo.aemx.pipeline.fake.FakeAppResolver
 import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
 import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
@@ -430,7 +431,8 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             when (result) {
                 is PlanResult.Success -> {
-                    val json = result.plan.toWireJson()
+                    // 오케스트레이터 경로와 같은 후처리(시간만 드는 앱 열기 제거)를 거친 뒤 보낸다.
+                    val json = PlanStepPruner.prune(result.plan).toWireJson()
                     Log.i(TAG, "실기기 실행 계획: $json")
                     logView.text = json
                     AemxAccessibilityService.submitActionPlan(json).fold(

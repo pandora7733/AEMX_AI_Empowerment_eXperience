@@ -9,6 +9,8 @@ import com.sihoo.aemx.pipeline.model.ExecutedStep
 import com.sihoo.aemx.pipeline.model.ScreenSnapshot
 import com.sihoo.aemx.pipeline.model.StepOutcome
 import com.sihoo.aemx.pipeline.port.ActionExecutor
+import com.sihoo.aemx.pipeline.model.Expectation
+import com.sihoo.aemx.pipeline.model.TextMatch
 import com.sihoo.aemx.pipeline.port.AppResolver
 
 import com.sihoo.aemx.pipeline.port.ExecutionResult
@@ -270,6 +272,8 @@ class PipelineOrchestrator(
         var replans = 0
         var executedTotal = 0
         var stepIndex = 0
+        // 이번 명령에서 성공한 마지막 검색어. 재생 전에 이 검색 결과 화면인지 확인하는 데 쓴다.
+        var lastSearchQuery: String? = null
 
         while (true) {
             if (stepIndex >= plan.steps.size) {
@@ -287,12 +291,13 @@ class PipelineOrchestrator(
             append(PipelineLogEntry.Level.STEP, step.describe())
             emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
 
-            val outcome = performAndVerify(step, plan.app)
+            val outcome = performAndVerify(step, plan.app, lastSearchQuery)
             executedTotal++
             history += ExecutedStep(step, outcome)
 
             when (outcome) {
                 is StepOutcome.Success -> {
+                    if (step.action == ActionType.SEARCH) lastSearchQuery = step.target
                     run.completedStepIds += stepId
                     run.lastEvidence = outcome.evidence
                     emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.Completed) }
@@ -370,8 +375,16 @@ class PipelineOrchestrator(
      * 화면이 계속 움직이더라도(애니메이션·광고 등) 기대 조건을 이미 만족했으면 성공으로 본다.
      * 그렇지 않을 때만 시간 초과로 처리한다.
      */
-    private suspend fun performAndVerify(step: ActionStep, appName: String): StepOutcome {
+    private suspend fun performAndVerify(step: ActionStep, appName: String, searchQuery: String?): StepOutcome {
         val before = screenObserver.capture() ?: ScreenSnapshot.EMPTY
+
+        // 재생은 이번 검색 결과 화면에서만 한다. 옛 결과 화면의 세 번째 영상을 재생하지 않도록, 검색어가
+        // 화면에 보일 때까지만 짧게 기다리고 끝내 안 보이면 누르지 않고 재분석으로 보낸다.
+        if (step.action == ActionType.PLAY_FIRST && !searchQuery.isNullOrBlank() &&
+            !awaitQueryVisible(searchQuery)
+        ) {
+            return StepOutcome.Mismatch(screenObserver.capture() ?: before, "이번 검색 결과 화면이 아니라 재생하지 않았다")
+        }
         // 실행모듈이 직접 확인한 결과(메시지 전송 확인 등). 화면 검증의 증거와 함께 성공의 근거가 된다.
         var executorEvidence: String? = null
 
@@ -423,7 +436,7 @@ class PipelineOrchestrator(
 
         _state.value = PipelineState.Verifying(step)
 
-        val settle = awaitSettle(step.timeoutMs, before)
+        val settle = awaitSettle(step.timeoutMs, before, step.expect)
         val after = settle.snapshot
 
         return when (val verdict = ScreenVerifier.verify(step.expect, before, after)) {
@@ -561,19 +574,32 @@ class PipelineOrchestrator(
         class Rejected(val outcome: (ScreenSnapshot) -> StepOutcome) : CommandMapping
     }
 
+    /** 검색어가 화면에 보일 때까지 짧게 기다린다(상한 [PLAY_QUERY_WAIT_MS]). 끝내 안 보이면 false. */
+    private suspend fun awaitQueryVisible(query: String): Boolean =
+        withTimeoutOrNull(PLAY_QUERY_WAIT_MS) {
+            while (!queryOnScreen(query)) delay(PLAY_QUERY_POLL_MS)
+            true
+        } ?: false
+
+    private fun queryOnScreen(query: String): Boolean {
+        val snapshot = screenObserver.capture() ?: return false
+        return TextMatch.queryVisible(snapshot.texts + snapshot.clickableLabels, query)
+    }
+
     /**
      * 화면 변화가 [PipelineConfig.quietPeriodMs] 동안 멈출 때까지 기다린다.
      *
      * TYPE_WINDOW_CONTENT_CHANGED 는 한 화면에서도 수십 번씩 쏟아지므로,
      * 마지막 이벤트만 남기는 conflated 채널로 받아 "조용해졌는가"만 본다.
      */
-    private suspend fun awaitSettle(timeoutMs: Long, seed: ScreenSnapshot): SettleResult =
+    private suspend fun awaitSettle(timeoutMs: Long, seed: ScreenSnapshot, expect: Expectation): SettleResult =
         coroutineScope {
             val inbox = Channel<ScreenChange>(Channel.CONFLATED)
             val collectJob = launch { screenObserver.changes.collect { inbox.trySend(it) } }
 
             try {
                 var last = seed
+                var early = false
 
                 // 시간은 전부 코루틴 시계로 잰다. 벽시계를 섞으면 가상 시간 테스트에서
                 // 타임아웃 경로를 검증할 수 없게 된다.
@@ -586,12 +612,21 @@ class PipelineOrchestrator(
                             quiet = true
                         } else {
                             last = change.snapshot
+                            // 기대 조건이 이미 맞으면 화면이 더 조용해지기를 기다리지 않는다.
+                            // 기대가 없는 step 은 화면을 확인한 것이 없으므로 여기서 끝내지 않는다.
+                            if (!expect.isEmpty &&
+                                ScreenVerifier.verify(expect, seed, last) is ScreenVerifier.Verdict.Match
+                            ) {
+                                early = true
+                                return@withTimeoutOrNull true
+                            }
                         }
                     }
                     true
                 } ?: false
 
-                SettleResult(screenObserver.capture() ?: last, settled)
+                if (early) SettleResult(last, settled = true)
+                else SettleResult(screenObserver.capture() ?: last, settled)
             } finally {
                 collectJob.cancel()
                 inbox.close()
@@ -618,8 +653,9 @@ class PipelineOrchestrator(
                     append(PipelineLogEntry.Level.JSON, masked)
                     result.warnings.forEach { append(PipelineLogEntry.Level.WARN, "파서 경고: $it") }
 
-                    // LLM 이 주지 않는 기대치를 여기서 채운다.
-                    val enriched = inferencer.enrich(result.plan)
+                    // 뒤의 동작이 앱을 함께 여는 "앱 열기"는 뺀다. LLM 이 주지 않는 기대치는 그다음에 채운다.
+                    val pruned = PlanStepPruner.prune(result.plan)
+                    val enriched = inferencer.enrich(pruned)
                     append(
                         PipelineLogEntry.Level.INFO,
                         "계획 ${enriched.steps.size}단계를 받았다 (대상 앱: ${enriched.app})"
@@ -734,6 +770,10 @@ class PipelineOrchestrator(
 
         /** 중단 뒤 실행모듈이 멈췄는지 다시 보는 간격. */
         const val CANCEL_POLL_MS = 100L
+
+        /** 재생 전에 검색 결과 화면을 기다리는 상한과 간격. 검색 단계가 이미 검색어를 확인했으면 바로 통과한다. */
+        const val PLAY_QUERY_WAIT_MS = 2_000L
+        const val PLAY_QUERY_POLL_MS = 250L
 
         /**
          * 사건 번호. 오케스트레이터를 새로 만들어도 이어서 커진다(개발 화면이 자주 갈아 끼운다).
