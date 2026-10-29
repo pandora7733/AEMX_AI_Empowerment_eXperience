@@ -1,7 +1,9 @@
 package com.sihoo.aemx.pipeline.llm
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -21,22 +23,39 @@ class GroqChatClient(
     private val endpoint: String = ENDPOINT,
 ) : CloudChatClient {
 
-    override suspend fun complete(system: String, user: String): String = withContext(Dispatchers.IO) {
+    @Volatile
+    private var answeredModel: String? = null
+
+    override val lastModel: String? get() = answeredModel
+
+    override suspend fun complete(system: String, user: String): String {
         if (apiKey.isBlank()) throw CloudChatException("API 키가 비어 있다")
+        val connection = openConnection()
 
-        val connection = try {
-            (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = timeoutMs
-                readTimeout = timeoutMs
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Authorization", "Bearer $apiKey")
+        // 블로킹 read 는 코루틴 취소로 깨지지 않으므로, 취소되면 소켓을 닫아 read 를 깨운다.
+        // 블록이 끝날 때까지 기다리지 않고 바로 CancellationException 으로 돌아온다.
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { connection.disconnect() }
+            CoroutineScope(Dispatchers.IO).launch {
+                cont.resumeWith(runCatching { send(connection, system, user) })
             }
-        } catch (e: IOException) {
-            throw CloudChatException("연결을 만들지 못했다")
         }
+    }
 
+    private fun openConnection(): HttpURLConnection = try {
+        (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $apiKey")
+        }
+    } catch (e: IOException) {
+        throw CloudChatException("연결을 만들지 못했다")
+    }
+
+    private fun send(connection: HttpURLConnection, system: String, user: String): String {
         try {
             connection.outputStream.use { it.write(buildBody(model, system, user).toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
@@ -45,7 +64,9 @@ class GroqChatClient(
                 throw CloudChatException("클라우드 응답 오류 (HTTP $code)", code)
             }
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            extractContent(body) ?: throw CloudChatException("응답에서 답을 찾지 못했다")
+            return extractContent(body)
+                ?.also { answeredModel = model }
+                ?: throw CloudChatException("응답에서 답을 찾지 못했다")
         } catch (e: CloudChatException) {
             throw e
         } catch (e: IOException) {
@@ -59,10 +80,23 @@ class GroqChatClient(
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
         /** 무료 한도와 모델 목록은 바뀐다. 안 되면 Groq 콘솔의 모델 목록에서 골라 바꾼다. */
-        const val DEFAULT_MODEL = "llama-3.3-70b-versatile"
+        const val DEFAULT_MODEL = "qwen/qwen3.8-27b"
 
-        /** 데모에서 오래 멈춰 있으면 안 된다. 넘으면 로컬 계획으로 되돌린다. */
-        const val DEFAULT_TIMEOUT_MS = 8_000
+        /** 첫 모델이 한도·서버·네트워크 오류로 실패할 때 한 번 더 묻는 모델. */
+        const val FALLBACK_MODEL = "openai/gpt-oss-120b"
+
+        /** 첫 모델 한 번의 시간 한도. 전체 5초 안에서 예비 모델이 들어갈 여유를 남긴다. */
+        const val DEFAULT_TIMEOUT_MS = 3_000
+
+        /**
+         * 모델마다 추론 깊이를 맞춘다. 추론을 끄면 Qwen 은 빠르고 정확하고, gpt-oss 는 낮은 추론을 쓴다.
+         * 모르는 모델은 아무것도 넣지 않는다(Groq 가 기본값을 쓴다).
+         */
+        internal fun reasoningEffort(model: String): String? = when {
+            model.contains("qwen", ignoreCase = true) -> "none"
+            model.contains("gpt-oss", ignoreCase = true) -> "low"
+            else -> null
+        }
 
         /** 같은 입력은 같은 계획이 나와야 하므로 temperature 0, 형식은 JSON 객체로 고정한다. */
         internal fun buildBody(model: String, system: String, user: String): String =
@@ -71,6 +105,7 @@ class GroqChatClient(
                 .put("temperature", 0)
                 .put("max_tokens", 512)
                 .put("response_format", JSONObject().put("type", "json_object"))
+                .also { body -> reasoningEffort(model)?.let { body.put("reasoning_effort", it) } }
                 .put(
                     "messages",
                     JSONArray()

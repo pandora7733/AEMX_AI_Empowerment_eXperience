@@ -31,11 +31,23 @@ class CloudSettings(private val context: Context) {
 
     val hasKey: Boolean get() = effectiveKey.isNotBlank()
 
+    /** 직접 정한 모델 이름. 비어 있으면 [effectiveModel] 이 기본 모델을 쓴다. */
+    var model: String
+        get() = prefs.getString(KEY_MODEL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_MODEL, value.trim()).apply()
+
+    val effectiveModel: String get() = model.ifBlank { GroqChatClient.DEFAULT_MODEL }
+
     /** 지금 쓸 수 있으면 클라우드 계획 생성기, 꺼져 있거나 키가 없으면 null. */
     fun generatorOrNull(): CloudPlanGenerator? {
         if (!enabled || !hasKey) return null
+        val client = FallbackChatClient(
+            primary = GroqChatClient(apiKey = effectiveKey, model = effectiveModel),
+            fallback = GroqChatClient(apiKey = effectiveKey, model = GroqChatClient.FALLBACK_MODEL),
+            log = { Log.i(TAG, it) },
+        )
         return CloudPlanGenerator(
-            client = GroqChatClient(apiKey = effectiveKey),
+            client = client,
             systemPrompt = AemxPrompts.systemPrompt(context),
             log = { Log.i(TAG, it) },
         )
@@ -46,5 +58,6 @@ class CloudSettings(private val context: Context) {
         const val PREFS = "aemx_cloud"
         const val KEY_API_KEY = "api_key"
         const val KEY_ENABLED = "enabled"
+        const val KEY_MODEL = "model"
     }
 }

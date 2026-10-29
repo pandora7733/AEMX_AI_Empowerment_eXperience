@@ -3,8 +3,10 @@ package com.sihoo.aemx.pipeline.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.text.InputType
@@ -40,6 +42,8 @@ import com.sihoo.aemx.pipeline.device.announcementFor
 import com.sihoo.aemx.pipeline.device.ServicePlanBridge
 import com.sihoo.aemx.pipeline.device.ServiceScreenSource
 import com.sihoo.aemx.pipeline.llm.CloudSettings
+import com.sihoo.aemx.pipeline.llm.CommandOutcome
+import com.sihoo.aemx.pipeline.llm.CommandTiming
 import com.sihoo.aemx.pipeline.llm.HybridPlanGenerator
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.port.SpeechResult
@@ -104,6 +108,20 @@ class PipelineDebugActivity : AppCompatActivity() {
     private var hybridPlanner: HybridPlanGenerator? = null
     private lateinit var cloudSwitch: CheckBox
     private lateinit var cloudStatus: TextView
+    private lateinit var routeView: TextView
+    private lateinit var timingView: TextView
+    /** 지금 도는 명령의 시각. 계획 콜백은 백그라운드 스레드에서 오므로 volatile. */
+    @Volatile
+    private var currentTiming: CommandTiming? = null
+
+    /** [currentTiming] 의 끝 신호가 어느 경로에서 올지. 두 경로가 같은 타이머를 공유하지 않게 한다. */
+    private enum class TimingPath { ORCHESTRATOR, DIRECT }
+
+    @Volatile
+    private var timingPath: TimingPath? = null
+
+    /** 음성 최종 결과의 말 끝 시각과 문장. 같은 문장으로 명령을 실행할 때만 쓴다. */
+    private var pendingSpeech: Pair<String, Long>? = null
     private lateinit var listenButton: Button
     private lateinit var wakeWordSwitch: CheckBox
     private lateinit var ownerOnlySwitch: CheckBox
@@ -278,11 +296,43 @@ class PipelineDebugActivity : AppCompatActivity() {
         orchestrator.submit(command)
     }
 
+    /** 명령의 시작 시각을 잡는다. 음성이면 말 끝 판정 시각부터, 글 입력이면 지금부터 잰다. */
+    private fun beginTiming(command: String, path: TimingPath) {
+        val speech = pendingSpeech?.takeIf { it.first == command }
+        pendingSpeech = null
+        timingPath = path
+        currentTiming = CommandTiming(
+            startMs = speech?.second ?: SystemClock.elapsedRealtime(),
+            fromSpeech = speech != null,
+        )
+    }
+
+    /** 같은 경로에서 온 끝 신호만 받아 한 줄을 로그와 화면에 남긴다. 계획 전의 신호는 타이머가 무시한다. */
+    private fun endTiming(path: TimingPath, outcome: CommandOutcome) {
+        if (timingPath != path) return
+        val line = currentTiming?.finish(SystemClock.elapsedRealtime(), outcome) ?: return
+        Log.i("AemxTiming", line)
+        timingView.text = line
+    }
+
+    /** 오케스트레이터가 끝 상태에 닿으면 명령 한 줄을 남긴다. */
+    private fun recordOrchestratorEnd(state: PipelineState) {
+        val outcome = when (state) {
+            is PipelineState.Finished -> CommandOutcome.SUCCESS
+            is PipelineState.Failed -> CommandOutcome.FAILED
+            is PipelineState.NeedsUser -> CommandOutcome.STOPPED
+            is PipelineState.NeedsSetup -> CommandOutcome.REFUSED
+            else -> return
+        }
+        endTiming(TimingPath.ORCHESTRATOR, outcome)
+    }
+
     private fun render(result: SpeechResult) {
         when (result) {
             // 중간 결과는 보여 주기만 한다. 아직 말이 끝나지 않았다.
             is SpeechResult.Partial -> stateView.text = "듣는 중... ${result.text}"
             is SpeechResult.Final -> {
+                pendingSpeech = result.text to SystemClock.elapsedRealtime()
                 commandInput.setText(result.text)
                 stateView.text = "들은 말: ${result.text}"
                 if (autoRunSwitch.isChecked) {
@@ -373,6 +423,7 @@ class PipelineDebugActivity : AppCompatActivity() {
 
         runButton.isEnabled = false
         stateView.setText(R.string.pipeline_device_planning)
+        beginTiming(command, TimingPath.DIRECT)
         lifecycleScope.launch {
             val result = withContext(Dispatchers.Default) {
                 planFor(planner).generate(PlanRequest(utterance = command, mode = PlanRequest.Mode.INITIAL))
@@ -386,17 +437,23 @@ class PipelineDebugActivity : AppCompatActivity() {
                         onSuccess = { stateView.setText(R.string.pipeline_device_running) },
                         onFailure = {
                             stateView.text = getString(R.string.pipeline_device_failed, it.message ?: "")
+                            endTiming(TimingPath.DIRECT, CommandOutcome.FAILED)
                         },
                     )
                 }
                 is PlanResult.Malformed -> {
                     logView.text = result.raw
                     stateView.text = getString(R.string.pipeline_device_failed, result.reason)
+                    endTiming(TimingPath.DIRECT, CommandOutcome.FAILED)
                 }
-                is PlanResult.EngineError ->
+                is PlanResult.EngineError -> {
                     stateView.text = getString(R.string.pipeline_device_failed, result.message)
-                is PlanResult.Refused ->
+                    endTiming(TimingPath.DIRECT, CommandOutcome.FAILED)
+                }
+                is PlanResult.Refused -> {
                     stateView.text = getString(R.string.pipeline_device_failed, result.message)
+                    endTiming(TimingPath.DIRECT, CommandOutcome.REFUSED)
+                }
             }
             runButton.isEnabled = true
         }
@@ -427,7 +484,10 @@ class PipelineDebugActivity : AppCompatActivity() {
             orchestrator = device
             collectJob = lifecycleScope.launch {
                 launch {
-                    device.state.collect { render(it) }
+                    device.state.collect {
+                        recordOrchestratorEnd(it)
+                        render(it)
+                    }
                 }
                 // StateFlow 는 구독하자마자 마지막 값을 준다. 지난 명령의 끝 상태를 다시 말하지 않게 건너뛴다.
                 launch { device.state.drop(1).collect { announce(it) } }
@@ -435,6 +495,7 @@ class PipelineDebugActivity : AppCompatActivity() {
                 launch { device.log.collect { entries -> renderLog(entries) } }
             }
         }
+        beginTiming(command, TimingPath.ORCHESTRATOR)
         device.submit(command)
     }
 
@@ -446,7 +507,12 @@ class PipelineDebugActivity : AppCompatActivity() {
         hybridPlanner ?: HybridPlanGenerator(
             local = local,
             cloud = { cloudSettings.generatorOrNull() },
-            log = { Log.i(TAG, it) },
+            log = { Log.i("CloudPlan", it) },
+            onRoute = { report ->
+                // 계획이 나온 시각. 끝 신호보다 먼저 일어나므로(같은 흐름에서 호출) 순서가 어긋나지 않는다.
+                currentTiming?.planned(SystemClock.elapsedRealtime(), report)
+                runOnUiThread { routeView.text = report.summary() }
+            },
         ).also { hybridPlanner = it }
 
     private fun renderCloudStatus() {
@@ -588,19 +654,11 @@ class PipelineDebugActivity : AppCompatActivity() {
         val padding = dpToPx(20)
         val spacing = dpToPx(12)
 
-        return LinearLayout(this).apply {
+        val controls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, padding, padding, padding)
 
-            addView(TextView(this@PipelineDebugActivity).apply {
-                setText(R.string.pipeline_title)
-                setTextAppearance(MaterialR.style.TextAppearance_MaterialComponents_Headline6)
-            }, matchWidthWrapHeight())
-
-            addView(TextView(this@PipelineDebugActivity).apply {
-                setText(R.string.pipeline_description)
-            }, matchWidthWrapHeight().apply { topMargin = spacing })
-
+            // 제목은 툴바가 맡으므로 본문에는 두지 않는다.
             val inputLayout = TextInputLayout(this@PipelineDebugActivity).apply {
                 setHint(R.string.pipeline_command_label)
             }
@@ -609,6 +667,50 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             inputLayout.addView(commandInput, matchWidthWrapHeight())
             addView(inputLayout, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            // 실행, 듣기, 상태와 처리 경로·시간 줄은 스크롤 없이 첫 화면에 보이도록 위에 둔다.
+            runButton = Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_run)
+                setOnClickListener { runCommand(commandInput.text?.toString().orEmpty()) }
+            }
+            addView(runButton, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            listenButton = Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_listen_start)
+                setOnClickListener {
+                    if (listening) {
+                        stopListening()
+                    } else if (ContextCompat.checkSelfPermission(
+                            this@PipelineDebugActivity, Manifest.permission.RECORD_AUDIO,
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        startListening()
+                    } else {
+                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            }
+            addView(listenButton, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            stateView = TextView(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_state_idle)
+                setTextAppearance(MaterialR.style.TextAppearance_MaterialComponents_Subtitle2)
+            }
+            addView(stateView, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            cloudStatus = TextView(this@PipelineDebugActivity)
+            addView(cloudStatus, matchWidthWrapHeight().apply { topMargin = spacing })
+            renderCloudStatus()
+
+            routeView = TextView(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_route_none)
+            }
+            addView(routeView, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            timingView = TextView(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_timing_none)
+            }
+            addView(timingView, matchWidthWrapHeight().apply { topMargin = spacing })
 
             // AEMX: 켜면 가짜 LLM 대신 온디바이스 Qwen3 를 쓴다. 실행모듈·화면관찰은 아직
             // 가짜 그대로다(공규태 파트 대기 중).
@@ -644,6 +746,23 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             addView(cloudSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
 
+            // 키·모델 입력은 평소에 필요 없다(키는 빌드에 들어 있다). 펼칠 때만 보여 준다.
+            val cloudSection = LinearLayout(this@PipelineDebugActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = View.GONE
+            }
+            addView(Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_cloud_settings_show)
+                setOnClickListener {
+                    val open = cloudSection.visibility != View.VISIBLE
+                    cloudSection.visibility = if (open) View.VISIBLE else View.GONE
+                    setText(
+                        if (open) R.string.pipeline_cloud_settings_hide else R.string.pipeline_cloud_settings_show,
+                    )
+                }
+            }, matchWidthWrapHeight().apply { topMargin = spacing })
+            addView(cloudSection, matchWidthWrapHeight())
+
             val keyLayout = TextInputLayout(this@PipelineDebugActivity).apply {
                 setHint(R.string.pipeline_cloud_key_hint)
             }
@@ -652,9 +771,9 @@ class PipelineDebugActivity : AppCompatActivity() {
                 // 저장된 키는 화면에 다시 보여 주지 않는다. 비워 두고 저장하면 키를 지운다.
             }
             keyLayout.addView(keyInput, matchWidthWrapHeight())
-            addView(keyLayout, matchWidthWrapHeight().apply { topMargin = spacing })
+            cloudSection.addView(keyLayout, matchWidthWrapHeight().apply { topMargin = spacing })
 
-            addView(Button(this@PipelineDebugActivity).apply {
+            cloudSection.addView(Button(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_cloud_key_save)
                 setOnClickListener {
                     val typed = keyInput.text?.toString().orEmpty().trim()
@@ -668,15 +787,23 @@ class PipelineDebugActivity : AppCompatActivity() {
                 }
             }, matchWidthWrapHeight().apply { topMargin = spacing })
 
-            cloudStatus = TextView(this@PipelineDebugActivity)
-            addView(cloudStatus, matchWidthWrapHeight().apply { topMargin = spacing })
-            renderCloudStatus()
-
-            runButton = Button(this@PipelineDebugActivity).apply {
-                setText(R.string.pipeline_run)
-                setOnClickListener { runCommand(commandInput.text?.toString().orEmpty()) }
+            val modelLayout = TextInputLayout(this@PipelineDebugActivity).apply {
+                setHint(R.string.pipeline_cloud_model_hint)
             }
-            addView(runButton, matchWidthWrapHeight().apply { topMargin = spacing })
+            val modelInput = TextInputEditText(modelLayout.context).apply {
+                setText(cloudSettings.model)
+            }
+            modelLayout.addView(modelInput, matchWidthWrapHeight())
+            cloudSection.addView(modelLayout, matchWidthWrapHeight().apply { topMargin = spacing })
+
+            cloudSection.addView(Button(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_cloud_model_save)
+                setOnClickListener {
+                    cloudSettings.model = modelInput.text?.toString().orEmpty()
+                    renderCloudStatus()
+                    stateView.setText(R.string.pipeline_cloud_model_saved)
+                }
+            }, matchWidthWrapHeight().apply { topMargin = spacing })
 
             // AEMX: 켜면 음성 최종 결과가 오는 대로 실행 버튼과 같은 경로로 실행한다. 기본은 꺼짐.
             autoRunSwitch = CheckBox(this@PipelineDebugActivity).apply {
@@ -721,48 +848,42 @@ class PipelineDebugActivity : AppCompatActivity() {
             }
             addView(enrollButton, matchWidthWrapHeight().apply { topMargin = spacing })
 
-            listenButton = Button(this@PipelineDebugActivity).apply {
-                setText(R.string.pipeline_listen_start)
-                setOnClickListener {
-                    if (listening) {
-                        stopListening()
-                    } else if (ContextCompat.checkSelfPermission(
-                            this@PipelineDebugActivity, Manifest.permission.RECORD_AUDIO,
-                        ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        startListening()
-                    } else {
-                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-            }
-            addView(listenButton, matchWidthWrapHeight().apply { topMargin = spacing })
-
-            stateView = TextView(this@PipelineDebugActivity).apply {
-                setText(R.string.pipeline_state_idle)
-                setTextAppearance(MaterialR.style.TextAppearance_MaterialComponents_Subtitle2)
-            }
-            addView(stateView, matchWidthWrapHeight().apply { topMargin = spacing })
-
             logScroll = ScrollView(this@PipelineDebugActivity)
             logView = TextView(this@PipelineDebugActivity).apply {
                 textSize = 12f
                 setTextIsSelectable(true)
             }
             logScroll.addView(logView, matchWidthWrapHeight())
-            addView(
-                logScroll,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f
-                ).apply {
-                    topMargin = spacing
-                    gravity = Gravity.TOP
-                }
-            )
+        }
+
+        // 컨트롤은 세로 스크롤 하나에 넣고, 로그는 그 아래에 남겨 높이 일부를 차지하게 한다.
+        val controlsScroll = ScrollView(this).apply { addView(controls, matchWidthWrapHeight()) }
+
+        // 로그는 기본 180dp 로 아래에 두고, 토글로 화면 절반까지 늘린다. 조작 영역은 남은 높이를 쓴다.
+        var logExpanded = false
+        val logToggle = Button(this).apply {
+            setText(R.string.pipeline_log_expand)
+            setOnClickListener {
+                logExpanded = !logExpanded
+                val height = if (logExpanded) resources.displayMetrics.heightPixels / 2 else dpToPx(LOG_COLLAPSED_DP)
+                logScroll.layoutParams = logLayoutParams(height, spacing, padding)
+                setText(if (logExpanded) R.string.pipeline_log_collapse else R.string.pipeline_log_expand)
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(controlsScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(logToggle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(padding, 0, padding, 0)
+            })
+            addView(logScroll, logLayoutParams(dpToPx(LOG_COLLAPSED_DP), spacing, padding))
         }
     }
+
+    private fun logLayoutParams(height: Int, top: Int, side: Int) =
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height).apply {
+            setMargins(side, top, side, side)
+        }
 
     private fun matchWidthWrapHeight() = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -786,6 +907,13 @@ class PipelineDebugActivity : AppCompatActivity() {
     /** 우회 경로(runOnDevice)의 결과를 상태줄에 띄우는 콜백. 오케스트레이터 경로는 이걸 거치지 않는다. */
     private val deviceObserver: (PlanOutcome) -> Unit = { outcome ->
         runOnUiThread {
+            endTiming(
+                TimingPath.DIRECT,
+                when (outcome) {
+                    is PlanOutcome.Completed -> CommandOutcome.SUCCESS
+                    is PlanOutcome.Failed -> CommandOutcome.FAILED
+                },
+            )
             stateView.text = when (outcome) {
                 is PlanOutcome.Completed -> getString(R.string.pipeline_device_done)
                 is PlanOutcome.Failed -> getString(
@@ -826,6 +954,9 @@ class PipelineDebugActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "PipelineDebug"
+
+        /** 로그 영역의 기본 높이(dp). 접혀 있을 때도 이만큼은 보인다. 펼치면 화면 절반까지 늘어난다. */
+        private const val LOG_COLLAPSED_DP = 180
 
         /** 등록에 쓸 수 있는 최소 길이. 0.8초(16kHz). */
         private const val MIN_ENROLL_SAMPLES = 12_800

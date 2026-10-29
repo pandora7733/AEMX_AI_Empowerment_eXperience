@@ -26,6 +26,9 @@ class CloudPlanGenerator(
 
     override fun isReady(): Boolean = true
 
+    /** 방금 계획을 낸 모델 이름. 처리 경로 표시에 쓴다. */
+    val answeredModel: String? get() = client.lastModel
+
     override suspend fun generate(request: PlanRequest): PlanResult {
         // 마지막 방어선. 부르는 쪽 실수로 개인정보 명령이 들어와도 보내지 않는다.
         if (!CloudRoutingPolicy.mayUploadScreen(request.utterance, null)) {

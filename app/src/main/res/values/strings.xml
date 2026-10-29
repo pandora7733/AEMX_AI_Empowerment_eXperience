@@ -27,7 +27,8 @@
     <string name="action_plan_failed">실행 요청 실패</string>
     <string name="action_plan_cancel">실행 중단</string>
     <string name="pipeline_title">파이프라인 테스트</string>
-    <string name="pipeline_description">STT·LLM·실행모듈이 아직 합류하지 않아 가짜 구현으로 흐름만 확인하는 개발용 화면입니다.</string>
+    <string name="pipeline_log_expand">로그 펼치기</string>
+    <string name="pipeline_log_collapse">로그 접기</string>
     <string name="pipeline_command_label">음성 명령 (STT 결과 대신 직접 입력)</string>
     <string name="pipeline_sample_command">유튜브에서 고양이 영상 틀어줘</string>
     <string name="pipeline_run">실행</string>
@@ -49,6 +50,13 @@
     <string name="pipeline_cloud_status_on">클라우드: 사용 가능 (어려운 동작만 클라우드로 처리)</string>
     <string name="pipeline_cloud_status_no_key">클라우드: 키 없음 (기기에서만 처리). 빌드할 때 local.properties 에 GROQ_API_KEY 를 넣거나 여기에 입력</string>
     <string name="pipeline_cloud_status_off">클라우드: 꺼짐 (기기에서만 처리)</string>
+    <string name="pipeline_cloud_model_hint">클라우드 모델 이름 (비우면 기본 모델 사용)</string>
+    <string name="pipeline_cloud_model_save">모델 저장</string>
+    <string name="pipeline_cloud_model_saved">클라우드 모델을 저장했습니다. 비우면 기본 모델을 씁니다.</string>
+    <string name="pipeline_route_none">처리: 아직 명령이 없습니다</string>
+    <string name="pipeline_timing_none">시간: 아직 끝난 명령이 없습니다</string>
+    <string name="pipeline_cloud_settings_show">클라우드 설정 펼치기</string>
+    <string name="pipeline_cloud_settings_hide">클라우드 설정 접기</string>
     <string name="pipeline_llm_ready">LLM 준비 완료. 명령을 실행하세요.</string>
     <string name="pipeline_llm_failed">LLM 준비 실패: %1$s</string>
     <string name="pipeline_listen_start">음성으로 말하기</string>

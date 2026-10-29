@@ -8,6 +8,9 @@ package com.sihoo.aemx.pipeline.llm
 interface CloudChatClient {
     /** @return 모델이 낸 글(JSON 계획이 들어 있어야 한다). */
     suspend fun complete(system: String, user: String): String
+
+    /** 방금 답한 모델 이름. 처리 경로를 보여 줄 때 쓴다. 모델 이름이 없는 구현은 null. */
+    val lastModel: String? get() = null
 }
 
 /** 네트워크·인증·한도 오류. 메시지에는 키나 사용자 발화를 넣지 않는다. */

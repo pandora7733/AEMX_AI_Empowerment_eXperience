@@ -56,4 +56,43 @@ class CloudRoutingPolicyTest {
         assertTrue(CloudRoutingPolicy.mayUploadScreen("고양이 영상 틀어줘", "유튜브"))
         assertTrue(CloudRoutingPolicy.mayUploadScreen("고양이 영상 틀어줘", "com.google.android.youtube"))
     }
+
+    @Test
+    fun `발화만 보고 어려운 명령은 클라우드로 보낸다`() {
+        val hard = listOf(
+            "유튜브에서 고양이 영상 틀어줘",
+            "유튜브에서 손흥민 하이라이트 검색해서 세 번째 영상 틀어줘",
+            "유튜브 쇼츠 보여줘",
+            "인스타 릴스에서 다음 영상 넘겨줘",
+            "알라딘에서 해리포터 검색해줘",
+            "쿠팡 켜서 생수 2리터 검색해",
+            "유투브에서 아이브 노래 틀어 줘",
+            "음 그 유튜브 뮤직에서 비투비 그리워하다 좀 틀어봐",
+            "알라딘 열고 검색창에 데미안 쳐줘",
+        )
+        hard.forEach { assertEquals(it, Route.CLOUD, CloudRoutingPolicy.routeUtterance(it)) }
+    }
+
+    @Test
+    fun `발화만 보고 간단한 명령은 기기에서 처리한다`() {
+        val simple = listOf(
+            "네이버에서 서울 날씨 찾아줘",
+            "구글에서 오늘 뉴스 검색해줘",
+            "유튜브 열어줘",
+            "플레이스토어 열어줘",
+            "플레이 스토어 열어줘",
+        )
+        simple.forEach { assertEquals(it, Route.LOCAL, CloudRoutingPolicy.routeUtterance(it)) }
+    }
+
+    @Test
+    fun `발화만 보고 개인정보 명령은 어려운 말이 있어도 기기에서 처리한다`() {
+        val personal = listOf(
+            "배재준한테 카톡으로 안녕이라고 보내줘",
+            "문자로 엄마한테 늦는다고 보내줘",
+            "카톡으로 유튜브 영상 틀어 달라고 보내줘",
+            "엄마한테 사진 보내줘",
+        )
+        personal.forEach { assertEquals(it, Route.LOCAL, CloudRoutingPolicy.routeUtterance(it)) }
+    }
 }
