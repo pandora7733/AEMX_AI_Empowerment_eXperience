@@ -11,7 +11,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.accessibilityservice.InputMethod
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.EditorInfo
 import com.sihoo.aemx.pipeline.model.TextMatch
 
 internal class ActionExecutor(
@@ -83,6 +87,8 @@ internal class ActionExecutor(
         inputStage = 0
         inputActedAt = 0L
         submitActedAt = 0L
+        submitStage = 0
+        submitMethods = emptyList()
         when (step.action) {
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
@@ -214,6 +220,10 @@ internal class ActionExecutor(
 
     /** 검색 버튼(또는 엔터)을 누른 시각. 누른 뒤에는 다시 누르지 않고 결과만 확인한다. 0이면 아직 안 눌렀다. */
     private var submitActedAt = 0L
+
+    /** 이 step 에서 제출 방법을 몇 번 냈는지, 그리고 낼 수 있는 방법 목록. */
+    private var submitStage = 0
+    private var submitMethods: List<SubmitMethod> = emptyList()
 
     /** 마지막으로 넣으려던 검색어(앞부분). 결과 화면에 이 글자가 보이는지 확인할 때 쓴다. */
     private var lastQuery = ""
@@ -490,51 +500,130 @@ internal class ActionExecutor(
      * 엉뚱한 노드는 누르지 않는다. 제출한 뒤에는 다시 누르지 않고 [verifySubmit] 로 결과가 떴는지만 본다.
      */
     private fun submitSearch(root: AccessibilityNodeInfo, target: String): StepResult {
-        if (submitActedAt > 0L) return verifySubmit(root)
-        val field = searchInput(root)
-        if (field == null) {
-            // 입력칸을 못 찾으면 이름으로 찾는 예전 방법만 쓴다.
-            val named = NodeFinder.find(root, target) ?: return StepResult.NotReady
-            val clickable = NodeFinder.clickableAncestor(named) ?: return StepResult.NotReady
-            return if (pressLogged(root, clickable, target) {
-                    if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) "클릭" else null
-                }
-            ) StepResult.Success else StepResult.NotReady
+        if (submitStage == 0) {
+            val field = searchInput(root)
+            if (field == null) {
+                // 입력칸을 못 찾으면 이름으로 찾는 예전 방법만 쓴다.
+                val named = NodeFinder.find(root, target) ?: return StepResult.NotReady
+                val clickable = NodeFinder.clickableAncestor(named) ?: return StepResult.NotReady
+                return if (pressLogged(root, clickable, target) {
+                        if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) "클릭" else null
+                    }
+                ) StepResult.Success else StepResult.NotReady
+            }
+            // 입력칸이 비어 있으면 누르지 않는다. 빈 칸으로 누르는 검색은 의미가 없다.
+            if (isBlankField(field)) return StepResult.Fatal("검색어가 입력칸에 없어 검색하지 않았습니다.")
+            submitMethods = submitMethodsFor(root, field)
+            if (submitMethods.isEmpty()) return StepResult.Fatal("검색 버튼이 없고 엔터를 보낼 방법도 없어 검색하지 않았습니다.")
         }
-        // 입력칸이 비어 있으면 누르지 않는다. 빈 칸으로 누르는 검색은 의미가 없다.
-        if (isBlankField(field)) return StepResult.Fatal("검색어가 입력칸에 없어 검색하지 않았습니다.")
+        // 방법을 낸 뒤에는 결과가 떴는지 본다. 안 떴으면 다음 방법으로 넘어간다.
+        if (submitActedAt > 0L) {
+            val field = searchInput(root)
+            if (field != null && isBlankField(field)) {
+                return StepResult.Fatal("검색어가 입력칸에서 사라져 검색 결과를 확인하지 못했습니다.")
+            }
+            if (submitConfirmed(root, field)) {
+                logSubmit("성공", submitMethods[submitStage - 1].label)
+                return StepResult.Success
+            }
+            if (SystemClock.uptimeMillis() - submitActedAt < SUBMIT_VERIFY_MS) return StepResult.NotReady
+            logSubmit("결과 없음", submitMethods[submitStage - 1].label)
+            submitActedAt = 0L
+        }
+        if (submitStage >= submitMethods.size) {
+            logSubmit("실패(모든 방법 시도)", "-")
+            return StepResult.Fatal("검색을 제출했지만 결과 화면을 확인하지 못했습니다.")
+        }
+        val method = submitMethods[submitStage]
+        submitStage++
+        val acted = runSubmit(root, target, method)
+        logSubmit(if (acted) "실행" else "실행 못 함", method.label)
+        submitActedAt = if (acted) SystemClock.uptimeMillis() else 0L
+        return StepResult.NotReady
+    }
+
+    /** 검색을 제출하는 방법 하나. 순서대로 시도한다. */
+    private sealed interface SubmitMethod {
+        val label: String
+
+        /** 입력칸 오른쪽의 검색 버튼을 누른다. */
+        class Press(val node: AccessibilityNodeInfo) : SubmitMethod {
+            override val label = "버튼 누르기"
+        }
+
+        /** 입력칸에 접근성 IME 엔터(ACTION_IME_ENTER, API 30 이상). 앱에 따라 무시된다. */
+        class ImeAction(val field: AccessibilityNodeInfo) : SubmitMethod {
+            override val label = "접근성 IME 엔터"
+        }
+
+        /** 입력기 연결로 검색 동작을 보낸다(EditorInfo.IME_ACTION_SEARCH, API 33 이상). */
+        data object EditorSearch : SubmitMethod {
+            override val label = "입력기 검색 동작"
+        }
+
+        /** 입력기 연결로 엔터 키를 누르고 뗀다(진짜 키 입력, API 33 이상). */
+        data object KeyEnter : SubmitMethod {
+            override val label = "입력기 엔터 키"
+        }
+    }
+
+    /** 제출 방법 목록. 버튼이 분명하면 그것이 먼저, 그다음 접근성 IME 엔터, 입력기 연결 방법 순서다. */
+    private fun submitMethodsFor(root: AccessibilityNodeInfo, field: AccessibilityNodeInfo): List<SubmitMethod> {
+        val methods = mutableListOf<SubmitMethod>()
         val buttons = clickableNodes(root)
-        val index = SearchFieldRole.pickButton(
+        SearchFieldRole.pickButton(
             buttons.map { node ->
                 SearchFieldRole.Button(node.text?.toString(), node.contentDescription?.toString(), boxOf(node))
             },
             boxOf(field),
-        )
-        val pressed = if (index != null) {
-            pressLogged(root, buttons[index], target) { pressNode(buttons[index]) }
-        } else {
-            val method = if (imeEnter(field)) "IME 엔터" else null
-            logNode("검색 제출(버튼 없음) '$target'", field, method)
-            method != null
+        )?.let { methods += SubmitMethod.Press(buttons[it]) }
+        if (Build.VERSION.SDK_INT >= 30) methods += SubmitMethod.ImeAction(field)
+        if (inputConnection() != null) {
+            methods += SubmitMethod.EditorSearch
+            methods += SubmitMethod.KeyEnter
         }
-        if (!pressed) return StepResult.NotReady
-        submitActedAt = SystemClock.uptimeMillis()
-        return StepResult.NotReady
+        return methods
+    }
+
+    private fun runSubmit(root: AccessibilityNodeInfo, target: String, method: SubmitMethod): Boolean = when (method) {
+        is SubmitMethod.Press -> pressLogged(root, method.node, target) { pressNode(method.node) }
+        is SubmitMethod.ImeAction -> imeEnter(method.field)
+        SubmitMethod.EditorSearch -> inputConnection()?.let { connection ->
+            connection.performEditorAction(EditorInfo.IME_ACTION_SEARCH)
+            true
+        } == true
+        // sendKeyEvent 는 결과를 돌려주지 않는다. 제출됐는지는 화면을 보고 확인한다.
+        SubmitMethod.KeyEnter -> inputConnection()?.let { connection ->
+            connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+            connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+            true
+        } == true
+    }
+
+    /** 접근성 입력기 연결. 키보드가 열려 글자를 넣는 칸이 있을 때만 있다(API 33 이상, flagInputMethodEditor 가 필요하다). */
+    @SuppressLint("NewApi")
+    private fun inputConnection(): InputMethod.AccessibilityInputConnection? =
+        if (Build.VERSION.SDK_INT >= 33) service.inputMethod?.currentInputConnection else null
+
+    /** 키보드 창이 떠 있는지. 자동완성 목록 중에는 떠 있다. */
+    private fun keyboardOpen(): Boolean =
+        runCatching { service.windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } }.getOrDefault(false)
+
+    private fun logSubmit(result: String, method: String) {
+        runCatching { Log.i(TAG, "검색 제출 $result: 방법=$method (시도 ${submitStage}/${submitMethods.size})") }
     }
 
     /**
      * 제출 뒤 결과 확인. 입력칸이 비어 버렸으면(글자가 사라졌으면) 실패로 알린다. 입력칸이 아닌 화면 글자에
      * 검색어가 보이면 결과가 뜬 것으로 본다. 입력칸의 글자는 셈에 넣지 않는다(검색 시작 화면에 그대로 남아 있을 수 있다).
      */
-    private fun verifySubmit(root: AccessibilityNodeInfo): StepResult {
-        val field = searchInput(root)
-        if (field != null && isBlankField(field)) {
-            return StepResult.Fatal("검색어가 입력칸에서 사라져 검색 결과를 확인하지 못했습니다.")
-        }
-        if (lastQuery.isEmpty()) return StepResult.Success
+    private fun submitConfirmed(root: AccessibilityNodeInfo, field: AccessibilityNodeInfo?): Boolean {
+        // 입력칸이 아직 포커스를 가지고 키보드가 열려 있으면 자동완성 목록이 떠 있는 것이다. 결과가 아니다.
+        if (field != null && field.isFocused && keyboardOpen()) return false
+        if (lastQuery.isEmpty()) return true
         val texts = visibleTexts(root).toMutableList()
         field?.text?.toString()?.let { texts.remove(it) }
-        return if (TextMatch.queryVisible(texts, lastQuery)) StepResult.Success else StepResult.NotReady
+        return TextMatch.queryVisible(texts, lastQuery)
     }
 
     /** 검색 입력칸. 역할로 고른 칸이 없으면 포커스가 있는 편집 칸을 쓴다(글자를 넣은 칸은 보통 포커스를 가진다). */
@@ -826,6 +915,9 @@ internal class ActionExecutor(
 
         /** 누른 뒤 화면 변화를 확인하는 시각. 진단 로그에만 쓴다. */
         const val PRESS_CHECK_MS = 300L
+
+        /** 검색을 제출한 뒤 결과가 떴는지 기다리는 시간. 안 떴으면 다음 제출 방법으로 넘어간다. */
+        const val SUBMIT_VERIFY_MS = 1_200L
 
         /** step 마다 제출하는 호출자가 정착을 건너뛸 수 있는 행동. 재생·스크롤·메시지 전송은 빼 둔다. */
         val FAST_SETTLE_ACTIONS = setOf(ActionType.OPEN_APP, ActionType.SEARCH, ActionType.TAP, ActionType.INPUT_TEXT)
