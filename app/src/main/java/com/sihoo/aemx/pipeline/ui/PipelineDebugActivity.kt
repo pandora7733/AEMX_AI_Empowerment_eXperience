@@ -8,6 +8,7 @@ import android.text.InputType
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
@@ -64,6 +65,8 @@ class PipelineDebugActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PipelineCore.init(applicationContext)
+        // 입력칸이 처음부터 포커스를 받아 키보드가 뜨면 캡슐 위치가 키보드 위로 밀린다. 키보드는 사용자가 누를 때만 올린다.
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         setContentView(createContentView())
         observeCore()
         // 처음 만들 때만 adb 명령을 읽는다. 화면을 다시 만들 때 같은 명령이 또 실행되지 않게 한다.
@@ -117,6 +120,13 @@ class PipelineDebugActivity : AppCompatActivity() {
      */
     private fun handleAdbCommand(intent: Intent?) {
         if (intent == null) return
+        if (intent.hasExtra(EXTRA_LISTEN_DEMO)) {
+            val on = intent.getBooleanExtra(EXTRA_LISTEN_DEMO, false)
+            intent.removeExtra(EXTRA_LISTEN_DEMO)
+            PipelineCore.demoListening(on)
+            Log.i(TAG, "듣는 중 캡슐 시연 훅(켜짐=$on)")
+            return
+        }
         val command = AdbCommand.resolve(intent.getStringExtra(EXTRA_CMD), intent.getStringExtra(EXTRA_CMD_B64)) ?: return
         val run = intent.getBooleanExtra(EXTRA_RUN, false)
         intent.removeExtra(EXTRA_CMD)
@@ -404,5 +414,7 @@ class PipelineDebugActivity : AppCompatActivity() {
         private const val EXTRA_CMD = "cmd"
         private const val EXTRA_CMD_B64 = "cmd_b64"
         private const val EXTRA_RUN = "run"
+        /** 음성 없이 듣는 중 캡슐을 띄우거나 끄는 검증용 extra. */
+        private const val EXTRA_LISTEN_DEMO = "listen_demo"
     }
 }

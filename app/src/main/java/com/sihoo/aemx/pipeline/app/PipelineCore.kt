@@ -521,7 +521,10 @@ object PipelineCore {
         if (settings.realLlm) prepareRealLlm()
         // 캡슐의 중단 버튼은 의도만 보낸다. 명령을 소유한 오케스트레이터가 받아 멈춘다.
         scope.launch {
-            AssistantStore.shared.cancelRequests.collect { runId -> orchestrator?.requestCancel(runId) }
+            AssistantStore.shared.cancelRequests.collect { runId ->
+                // 듣는 중 캡슐의 중단은 듣기를 끈다. 명령의 중단은 오케스트레이터가 받는다.
+                if (runId == voiceRunId) stopVoice() else orchestrator?.requestCancel(runId)
+            }
         }
     }
 
@@ -596,6 +599,20 @@ object PipelineCore {
                 Log.e(TAG, "음성인식 준비 실패", e)
                 _status.value = appContext.getString(R.string.pipeline_stt_failed, e.message ?: "")
             }
+        }
+    }
+
+    /**
+     * 음성 없이 듣는 중 캡슐만 띄우고 끈다(adb 검증용). 마이크와 인식기는 건드리지 않는다.
+     * 캡슐의 중단 버튼은 [stopVoice] 로 이어져 같은 방식으로 끝난다.
+     */
+    fun demoListening(on: Boolean) {
+        if (on) {
+            val id = UUID.randomUUID().toString().take(8)
+            voiceRunId = id
+            AssistantStore.shared.post(PipelineEvent.ListeningStarted(id, PipelineOrchestrator.SEQUENCE.incrementAndGet()))
+        } else {
+            stopVoice()
         }
     }
 

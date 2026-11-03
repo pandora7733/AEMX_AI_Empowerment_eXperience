@@ -12,6 +12,8 @@ import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup.MarginLayoutParams
+import android.view.View.MeasureSpec
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -146,6 +148,36 @@ internal class CapsuleView(
             cornerRadius = px(R.dimen.aemx_capsule_radius).toFloat()
             if (!listening) setStroke(px(R.dimen.aemx_stroke_width), context.getColor(R.color.aemx_stroke))
         }
+    }
+
+    /**
+     * 크기를 직접 잰다. 광원은 본체와 같은 크기여야 한다(화면 전체로 커지지 않게). 본체 위아래 여백(광원 여백)만큼
+     * 키를 늘리고, 광원 뷰는 이 전체 크기로 맞춘다.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val lp = body.layoutParams as MarginLayoutParams
+        body.measure(
+            MeasureSpec.makeMeasureSpec(width - lp.leftMargin - lp.rightMargin, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+        )
+        val height = body.measuredHeight + lp.topMargin + lp.bottomMargin
+        glow.measure(
+            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+        )
+        setMeasuredDimension(width, height)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val lp = body.layoutParams as MarginLayoutParams
+        glow.layout(0, 0, glow.measuredWidth, glow.measuredHeight)
+        body.layout(
+            lp.leftMargin,
+            lp.topMargin,
+            lp.leftMargin + body.measuredWidth,
+            lp.topMargin + body.measuredHeight,
+        )
     }
 
     private fun px(dimen: Int) = resources.getDimensionPixelSize(dimen)
