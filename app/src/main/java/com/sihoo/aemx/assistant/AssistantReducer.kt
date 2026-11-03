@@ -89,6 +89,14 @@ object AssistantReducer {
             is PipelineEvent.Replanning ->
                 state.copy(phase = AssistantPhase.Replanning, replanCount = event.replanCount)
 
+            is PipelineEvent.ConfirmSend ->
+                state.copy(
+                    phase = AssistantPhase.ConfirmingAction,
+                    confirmRecipient = event.recipient,
+                    confirmContent = event.content,
+                    expanded = true
+                )
+
             is PipelineEvent.NeedsUser ->
                 state.copy(phase = AssistantPhase.NeedsUser, userActionPrompt = event.reason, expanded = true)
 

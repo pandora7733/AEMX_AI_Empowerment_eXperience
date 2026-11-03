@@ -39,6 +39,11 @@ class PipelineSettings(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_RUN, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_RUN, value).apply()
 
+    /** 메시지를 보내기 전에 받는 사람과 내용을 확인받는다. 켜짐이 기본이다. 끄는 것은 개발 화면과 adb 시험용이다. */
+    var confirmSend: Boolean
+        get() = prefs.getBoolean(KEY_CONFIRM_SEND, true)
+        set(value) = prefs.edit().putBoolean(KEY_CONFIRM_SEND, value).apply()
+
     private companion object {
         const val PREFS = "aemx_pipeline_settings"
         const val KEY_REAL_LLM = "real_llm"
@@ -47,5 +52,6 @@ class PipelineSettings(context: Context) {
         const val KEY_WAKE_WORD = "wake_word"
         const val KEY_OWNER_ONLY = "owner_only"
         const val KEY_AUTO_RUN = "auto_run"
+        const val KEY_CONFIRM_SEND = "confirm_send"
     }
 }

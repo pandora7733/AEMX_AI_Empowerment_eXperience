@@ -126,6 +126,21 @@ class PipelineDebugActivity : AppCompatActivity() {
             Log.i(TAG, "패널 시연 장면: $scene, 보여줌=${com.sihoo.aemx.assistant.OverlayDemo.play(scene)}")
             return
         }
+        if (intent.hasExtra(EXTRA_CONFIRM_SEND)) {
+            // 시험용: 이 실행 동안만 보내기 확인을 끈다(설정 값은 바꾸지 않는다, 프로세스가 끝나면 사라진다).
+            val on = intent.getBooleanExtra(EXTRA_CONFIRM_SEND, true)
+            intent.removeExtra(EXTRA_CONFIRM_SEND)
+            PipelineCore.setSendConfirmOverride(on)
+            Log.i(TAG, "보내기 확인 시험 훅(켜짐=$on)")
+            return
+        }
+        if (intent.hasExtra(EXTRA_CONFIRM_DEMO)) {
+            val on = intent.getBooleanExtra(EXTRA_CONFIRM_DEMO, false)
+            intent.removeExtra(EXTRA_CONFIRM_DEMO)
+            PipelineCore.demoConfirm(on)
+            Log.i(TAG, "보내기 확인 화면 시연 훅(켜짐=$on)")
+            return
+        }
         if (intent.hasExtra(EXTRA_LISTEN_DEMO)) {
             val on = intent.getBooleanExtra(EXTRA_LISTEN_DEMO, false)
             intent.removeExtra(EXTRA_LISTEN_DEMO)
@@ -317,6 +332,13 @@ class PipelineDebugActivity : AppCompatActivity() {
                 setOnCheckedChangeListener { _, checked -> PipelineCore.setAutoRun(checked) }
             }
             addView(autoRunSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
+            // 메시지를 보내기 전에 받는 사람과 내용을 확인받는다. 기본은 켜짐이고, 끄면 바로 보낸다(시험용).
+            val confirmSwitch = CheckBox(this@PipelineDebugActivity).apply {
+                setText(R.string.pipeline_confirm_send)
+                isChecked = PipelineCore.prefs.confirmSend
+                setOnCheckedChangeListener { _, checked -> PipelineCore.prefs.confirmSend = checked }
+            }
+            addView(confirmSwitch, matchWidthWrapHeight().apply { topMargin = spacing })
             // 다른 앱 위에 뜨는 캡슐. 기본 켜짐이고, 끄면 캡슐만 사라지고 실행은 그대로다.
             overlaySwitch = CheckBox(this@PipelineDebugActivity).apply {
                 setText(R.string.pipeline_overlay_toggle)
@@ -422,6 +444,12 @@ class PipelineDebugActivity : AppCompatActivity() {
         private const val EXTRA_RUN = "run"
         /** 음성 없이 듣는 중 캡슐을 띄우거나 끄는 검증용 extra. */
         private const val EXTRA_LISTEN_DEMO = "listen_demo"
+
+        /** 시험용 extra: 보내기 확인을 이 실행 동안 끈다(false). */
+        private const val EXTRA_CONFIRM_SEND = "confirm_send"
+
+        /** 시연용 extra: 임의의 받는 사람과 내용으로 확인 화면을 띄운다(보내지 않는다). */
+        private const val EXTRA_CONFIRM_DEMO = "confirm_demo"
         private const val EXTRA_OVERLAY_DEMO = "overlay_demo"
     }
 }

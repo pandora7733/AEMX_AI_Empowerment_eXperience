@@ -126,4 +126,16 @@ sealed interface PipelineEvent {
         override val runId: String,
         override val sequence: Long
     ) : PipelineEvent
+
+    /**
+     * 메시지를 보내기 직전이다. 사용자가 받는 사람과 내용을 확인해야 실제로 보낸다.
+     * 화면은 확인 모드(보내기·취소)를 보이고, 음성으로도 답할 수 있다. 내용은 기기 안에서만 쓴다.
+     */
+    data class ConfirmSend(
+        override val runId: String,
+        override val sequence: Long,
+        val stepId: String,
+        val recipient: String,
+        val content: String
+    ) : PipelineEvent
 }

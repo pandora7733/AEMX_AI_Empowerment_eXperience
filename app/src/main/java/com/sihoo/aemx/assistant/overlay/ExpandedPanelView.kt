@@ -25,6 +25,10 @@ internal class ExpandedPanelView(
     private val onStop: () -> Unit,
     private val onContinue: () -> Unit,
     private val onCollapse: () -> Unit,
+    /** 보내기 확인에서 "보내기"를 눌렀다. */
+    private val onSend: () -> Unit = {},
+    /** 보내기 확인에서 "취소"를 눌렀다. */
+    private val onCancelSend: () -> Unit = {},
 ) : LinearLayout(context) {
 
     private val title: TextView
@@ -34,6 +38,9 @@ internal class ExpandedPanelView(
     private val actions: LinearLayout
     private val stop: TextView
     private val cont: TextView
+    private val confirmBox: LinearLayout
+    private val confirmText: TextView
+    private val confirmActions: LinearLayout
 
     /** 지금 그린 단계 줄들. 다시 그릴 때 펄스를 먼저 멈추려고 기억한다. */
     private val rowViews = mutableListOf<TextView>()
@@ -62,6 +69,25 @@ internal class ExpandedPanelView(
 
         prompt = label(context, R.dimen.aemx_text_label, R.color.aemx_text)
         addView(prompt, matchWrap().apply { topMargin = space })
+
+        // 보내기 확인: 받는 사람과 내용을 카드에 담고, 내용을 크게 보여 준다. 말로 답해도 된다는 안내를 둔다.
+        confirmBox = LinearLayout(context).apply { orientation = VERTICAL; visibility = View.GONE }
+        confirmText = label(context, R.dimen.aemx_text_label, R.color.aemx_text)
+        confirmText.maxLines = 6
+        confirmText.ellipsize = TextUtils.TruncateAt.END
+        confirmBox.addView(confirmText, matchWrap())
+        val voiceHint = label(context, R.dimen.aemx_text_caption, R.color.aemx_text_secondary)
+        voiceHint.setText(R.string.send_confirm_voice_hint)
+        confirmBox.addView(voiceHint, matchWrap().apply { topMargin = space })
+        confirmActions = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.END }
+        val send = button(context, context.getString(R.string.send_confirm_send), primary = true)
+        send.setOnClickListener { onSend() }
+        val cancelSend = button(context, context.getString(R.string.send_confirm_cancel))
+        cancelSend.setOnClickListener { onCancelSend() }
+        confirmActions.addView(send, LayoutParams(LayoutParams.WRAP_CONTENT, px(R.dimen.aemx_touch_min)))
+        confirmActions.addView(cancelSend, LayoutParams(LayoutParams.WRAP_CONTENT, px(R.dimen.aemx_touch_min)).apply { marginStart = space })
+        confirmBox.addView(confirmActions, matchWrap().apply { topMargin = space })
+        addView(confirmBox, matchWrap().apply { topMargin = space })
 
         actions = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.END }
         cont = button(context, "계속", primary = true)
@@ -110,6 +136,14 @@ internal class ExpandedPanelView(
         stop.isEnabled = text.stopEnabled
         stop.alpha = if (text.stopEnabled) 1f else 0.5f
         actions.visibility = if (needsUser || text.showStop) View.VISIBLE else View.GONE
+
+        // 보내기 확인 중에는 받는 사람과 내용, 보내기·취소 버튼을 보인다. 중단 버튼도 그대로 둔다.
+        val confirming = state.phase == AssistantPhase.ConfirmingAction
+        confirmBox.visibility = if (confirming) View.VISIBLE else View.GONE
+        if (confirming) {
+            confirmText.text = "${context.getString(R.string.send_confirm_recipient)}  ${state.confirmRecipient.orEmpty()}\n" +
+                "${context.getString(R.string.send_confirm_content)}  ${state.confirmContent.orEmpty()}"
+        }
 
         // 재계획 중에는 파랑 테두리로 회복 중임을 보여 준다. 다른 상태는 기본 테두리다.
         background = surface(if (state.phase == AssistantPhase.Replanning) R.color.aemx_action else R.color.aemx_stroke)

@@ -75,6 +75,13 @@ class PipelineOrchestrator(
     private val logSink: (String) -> Unit = {},
     /** 유튜브 API 검색 통로를 명령마다 얻는다. 설정이 꺼져 있거나 키가 없으면 null. */
     private val youtubeSearch: () -> YouTubeSearch? = { null },
+    /**
+     * 메시지를 보내기 직전에 사용자에게 받는 사람과 내용을 확인받는다. true 면 보낸다. 기본은 확인 없이 보낸다(시험용).
+     * 확인을 기다리는 동안 중단 요청은 이 코루틴을 취소하므로 취소가 우선한다.
+     */
+    private val confirmSend: suspend (recipient: String, content: String) -> Boolean = { _, _ -> true },
+    /** 지금 메시지 보내기를 확인받아야 하는지. 꺼져 있으면 확인 사건도 내지 않는다. */
+    private val confirmRequired: () -> Boolean = { false },
 ) {
 
     private val inferencer = ExpectationInferencer(appResolver)
@@ -298,6 +305,20 @@ class PipelineOrchestrator(
             _state.value = PipelineState.Executing(step, stepIndex + 1, plan.steps.size)
             append(PipelineLogEntry.Level.STEP, step.describe(), sensitive = step.action == ActionType.SEND_MESSAGE)
             emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
+
+            if (step.action == ActionType.SEND_MESSAGE && confirmRequired()) {
+                // 보내기 전에 받는 사람과 내용을 확인받는다. 거절하면 아무것도 보내지 않고 끝낸다.
+                val recipient = step.target.orEmpty()
+                val content = step.value.orEmpty()
+                emit(run) { id, seq -> PipelineEvent.ConfirmSend(id, seq, stepId, recipient, content) }
+                if (!confirmSend(recipient, content)) {
+                    emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.Cancelled) }
+                    fail("보내지 않았어요", run, sensitive = true)
+                    return
+                }
+                // 승인되면 같은 단계가 다시 실행 중이라고 알린다(확인 화면에서 실행 화면으로 돌아간다).
+                emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
+            }
 
             val outcome = performAndVerify(step, plan.app, lastSearchQuery)
             executedTotal++

@@ -76,7 +76,10 @@ data class AssistantUiState(
     val userActionPrompt: String? = null,
     val result: VerifiedResult? = null,
     val error: String? = null,
-    val expanded: Boolean = false
+    val expanded: Boolean = false,
+    /** 보내기 확인 중인 받는 사람과 내용. [AssistantPhase.ConfirmingAction] 일 때만 있다. */
+    val confirmRecipient: String? = null,
+    val confirmContent: String? = null
 ) {
     /**
      * 화면이 "성공"을 보여도 되는지. 모든 단계가 끝났고 그 결과를 관찰로 확인했을 때만 true 다.

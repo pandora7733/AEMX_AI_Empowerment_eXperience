@@ -152,6 +152,8 @@ internal class AssistantOverlayController(
             onStop = { store.requestCancellation() },
             onContinue = { store.requestContinuation() },
             onCollapse = { togglePanel() },
+            onSend = { store.answerSend(true) },
+            onCancelSend = { store.answerSend(false) },
         ).also {
             panel = it
             it.visibility = View.GONE

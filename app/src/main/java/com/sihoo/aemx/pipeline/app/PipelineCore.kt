@@ -45,7 +45,10 @@ import com.sihoo.aemx.pipeline.youtube.YouTubeSearchClient
 import com.sihoo.aemx.pipeline.youtube.YouTubeShortcut
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
+import com.sihoo.aemx.pipeline.model.ActionType
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -144,6 +147,21 @@ object PipelineCore {
 
     /** 듣기 한 번의 runId. 듣기 사건(ListeningStarted 등)이 같은 세션끼리 묶이게 한다. */
     private var voiceRunId: String? = null
+
+    /** 보내기 확인을 기다리는 중의 답 상자. null 이면 확인 대기 중이 아니다. */
+    @Volatile
+    private var pendingSend: CompletableDeferred<Boolean>? = null
+
+    /** 개발 화면과 adb 훅이 끈 보내기 확인. 프로세스가 끝나면 사라지고 설정([PipelineSettings.confirmSend])이 다시 쓰인다. */
+    @Volatile
+    private var sendConfirmOverride: Boolean? = null
+
+    /** 시연 확인 화면의 실행 번호. 답을 받아도 실제로 보내지 않는다. */
+    private var demoRunId: String? = null
+
+    /** 보내기 확인이 켜져 있는지. 시험 훅 값이 있으면 그것이 우선한다. */
+    val sendConfirmEnabled: Boolean
+        get() = sendConfirmOverride ?: settings.confirmSend
 
     private val verifier by lazy { SpeakerVerifier(appContext) }
     private val enrolledVoices = ArrayList<FloatArray>()
@@ -287,6 +305,13 @@ object PipelineCore {
                     // 오케스트레이터 경로와 같은 후처리(시간만 드는 앱 열기 제거, 유튜브 API 로 영상 열기)를 거친 뒤 보낸다.
                     val pruned = PlanStepPruner.prune(result.plan)
                     val plan = youtubeSearchOrNull()?.let { YouTubeShortcut.rewrite(pruned, command, it) } ?: pruned
+                    // 이 경로에는 보내기 확인 화면이 없다. 확인을 켜 두었으면 메시지 보내기는 실행하지 않는다.
+                    if (sendConfirmEnabled && plan.steps.any { it.action == ActionType.SEND_MESSAGE }) {
+                        _status.value = appContext.getString(R.string.send_needs_orchestrator)
+                        endTiming(TimingPath.DIRECT, CommandOutcome.REFUSED)
+                        _runEnabled.value = true
+                        return@launch
+                    }
                     val json = plan.toWireJson()
                     Log.i(TAG, "실기기 실행 계획: $json")
                     _planJson.value = json
@@ -422,6 +447,8 @@ object PipelineCore {
             scope = scope,
             logSink = { Log.i("AemxOrchestrator", it) },
             youtubeSearch = { youtubeSearchOrNull() },
+            confirmSend = { recipient, content -> awaitSendConfirmation(recipient, content) },
+            confirmRequired = { sendConfirmEnabled },
         )
     }
 
@@ -514,6 +541,69 @@ object PipelineCore {
         }
     }
 
+    // ---------------------------------------------------------------- 보내기 확인
+
+    /**
+     * 메시지를 보내기 전에 사용자의 확인을 기다린다. 질문을 소리로 읽고, 화면의 보내기·취소나 음성 "응"·"아니"로 답한다.
+     * 15초 안에 답이 없으면 보내지 않는다. 확인을 기다리는 동안은 호출어 문을 열어 짧은 답을 듣는다.
+     * 중단 요청은 이 코루틴을 취소하므로 중단이 우선한다.
+     */
+    private suspend fun awaitSendConfirmation(recipient: String, content: String): Boolean {
+        if (!sendConfirmEnabled) return true
+        val answer = CompletableDeferred<Boolean>()
+        pendingSend = answer
+        if (announcer == null) announcer = AndroidTtsController(appContext) { }
+        announcer?.speak(appContext.getString(R.string.send_confirm_question, recipient, content))
+        val gateBefore = gate
+        gateBefore?.required = false
+        try {
+            return withTimeoutOrNull(SEND_CONFIRM_TIMEOUT_MS) { answer.await() } ?: false
+        } finally {
+            pendingSend = null
+            gateBefore?.required = settings.wakeWord
+        }
+    }
+
+    /** 확인 화면의 답 한 번. 확인 대기 중이 아니면 아무 일도 없다. */
+    private fun answerPendingSend(send: Boolean) {
+        pendingSend?.complete(send)
+    }
+
+    /** 음성 답을 읽는다. 답이 아니면 상태줄에 안내만 하고 명령으로 넘기지 않는다. */
+    private fun onSendVoiceAnswer(text: String) {
+        val answer = SendAnswer.parse(text)
+        if (answer == null) {
+            _status.value = appContext.getString(R.string.send_confirm_hint)
+            return
+        }
+        answerPendingSend(answer)
+    }
+
+    /**
+     * 시연용 확인 화면. 임의의 받는 사람과 내용을 띄우고 답해도 보내지 않는다. 캡처용이다.
+     * 끄면 실행 번호를 취소로 닫아 캡슐을 치운다.
+     */
+    fun demoConfirm(on: Boolean) {
+        val previous = demoRunId
+        if (previous != null) {
+            AssistantStore.shared.post(PipelineEvent.CancelRequested(previous, PipelineOrchestrator.SEQUENCE.incrementAndGet()))
+            AssistantStore.shared.post(PipelineEvent.Cancelled(previous, PipelineOrchestrator.SEQUENCE.incrementAndGet(), emptySet()))
+            demoRunId = null
+        }
+        if (!on) return
+        val id = UUID.randomUUID().toString().take(8)
+        demoRunId = id
+        AssistantStore.shared.post(PipelineEvent.RunStarted(id, PipelineOrchestrator.SEQUENCE.incrementAndGet(), "시연 확인"))
+        AssistantStore.shared.post(
+            PipelineEvent.ConfirmSend(id, PipelineOrchestrator.SEQUENCE.incrementAndGet(), "demo", "테스트 받는 사람", "테스트")
+        )
+    }
+
+    /** adb 훅: 보내기 확인을 이 실행 동안만 끈다(true 면 켠다). 설정 값은 바꾸지 않는다. */
+    fun setSendConfirmOverride(enabled: Boolean?) {
+        sendConfirmOverride = enabled
+    }
+
     // ---------------------------------------------------------------- 시작과 설정
 
     /**
@@ -532,6 +622,10 @@ object PipelineCore {
         resetPipeline()
         // 실제 LLM 을 쓰기로 했으면 시작할 때 올린다(이미 올라가 있으면 prepare 가 다시 올리지 않는다).
         if (settings.realLlm) prepareRealLlm()
+        // 확인 화면의 보내기·취소 버튼은 답만 보낸다. 기다리는 쪽이 받아 보내거나 멈춘다.
+        scope.launch {
+            AssistantStore.shared.sendAnswers.collect { answerPendingSend(it) }
+        }
         // 캡슐의 중단 버튼은 의도만 보낸다. 명령을 소유한 오케스트레이터가 받아 멈춘다.
         scope.launch {
             AssistantStore.shared.cancelRequests.collect { runId ->
@@ -662,6 +756,11 @@ object PipelineCore {
                 }
             }
             is SpeechResult.Final -> {
+                // 보내기 확인 중의 말은 명령이 아니라 답이다.
+                if (pendingSend != null) {
+                    onSendVoiceAnswer(result.text)
+                    return
+                }
                 pendingSpeech = result.text to SystemClock.elapsedRealtime()
                 _heard.value = result.text
                 _status.value = "들은 말: ${result.text}"
@@ -720,6 +819,9 @@ object PipelineCore {
     // ---------------------------------------------------------------- 가짜 경로가 쓰는 소소한 통로
 
     private const val MIN_ENROLL_SAMPLES = 12_800
+
+    /** 보내기 확인을 기다리는 최대 시간. 답이 없으면 보내지 않는다. */
+    private const val SEND_CONFIRM_TIMEOUT_MS = 15_000L
 }
 
 /**

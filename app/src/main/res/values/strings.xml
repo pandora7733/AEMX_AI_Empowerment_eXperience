@@ -121,4 +121,16 @@
     <string name="main_listen_stop">듣기 끄기</string>
     <string name="main_ready">준비가 끝났어요. 듣기를 켜고 \"하이 에이맥스\"라고 말해 보세요.</string>
     <string name="main_not_ready">아직 준비되지 않은 항목이 있어요. 위에서부터 차례로 해 주세요.</string>
+    <string name="send_confirm_question">%1$s에게 “%2$s”를 보낼까요?</string>
+    <string name="send_confirm_hint">“보내”라고 하면 보내고, “취소”라고 하면 보내지 않아요.</string>
+    <string name="send_needs_orchestrator">메시지 보내기는 확인 화면이 있는 경로로만 할 수 있어요.</string>
+    <string name="send_confirm_title">이렇게 보낼까요?</string>
+    <string name="send_confirm_recipient">받는 사람</string>
+    <string name="send_confirm_app">앱</string>
+    <string name="send_confirm_content">내용</string>
+    <string name="send_confirm_voice_hint">말로 해도 돼요. “보내”, “취소”라고 말해 보세요.</string>
+    <string name="send_confirm_send">보내기</string>
+    <string name="send_confirm_cancel">취소</string>
+    <string name="send_not_sent">보내지 않았어요</string>
+    <string name="pipeline_confirm_send">보내기 전에 확인받기</string>
 </resources>

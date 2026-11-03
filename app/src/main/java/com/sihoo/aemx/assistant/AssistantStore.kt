@@ -71,6 +71,17 @@ class AssistantStore(scope: CoroutineScope) {
         _continueRequests.tryEmit(current.runId)
     }
 
+    private val _sendAnswers = MutableSharedFlow<Boolean>(extraBufferCapacity = 4)
+
+    /** 보내기 확인에 대한 답. true 는 보내기, false 는 취소다. 명령을 소유한 쪽이 받아 이어 간다. */
+    val sendAnswers: SharedFlow<Boolean> = _sendAnswers.asSharedFlow()
+
+    /** 확인 화면의 보내기·취소 버튼. 확인 대기 중일 때만 보낸다. */
+    fun answerSend(send: Boolean) {
+        if (_state.value.phase != AssistantPhase.ConfirmingAction) return
+        _sendAnswers.tryEmit(send)
+    }
+
     companion object {
         /**
          * 앱 전체가 함께 쓰는 하나. 개발 화면이 사건을 넣고, 다음 단계의 오버레이(접근성 서비스)가
