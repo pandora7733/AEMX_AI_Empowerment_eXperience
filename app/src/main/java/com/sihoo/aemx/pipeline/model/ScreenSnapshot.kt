@@ -14,6 +14,8 @@ data class ScreenSnapshot(
     val texts: List<String>,
     /** 눌 수 있는 요소들의 라벨. 재분석 때 "무엇을 누를 수 있는지" 알려주는 용도. */
     val clickableLabels: List<String> = emptyList(),
+    /** 입력칸의 이름(검색창 등). 클라우드 재분석 프롬프트가 "입력칸" 으로 보여 준다. 로컬 프롬프트는 쓰지 않는다. */
+    val inputLabels: List<String> = emptyList(),
     /** 이 화면이 팝업/다이얼로그로 보이는지. */
     val isDialog: Boolean = false,
     val capturedAt: Long = System.currentTimeMillis()

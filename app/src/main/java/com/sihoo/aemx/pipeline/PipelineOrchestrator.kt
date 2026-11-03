@@ -358,7 +358,11 @@ class PipelineOrchestrator(
                     val visits = (screenVisits[signature] ?: 0) + 1
                     screenVisits[signature] = visits
                     if (visits > config.sameScreenReplanLimit) {
-                        fail("같은 화면에서 ${visits}번 막혀 더 진행하지 않는다", run)
+                        fail(
+                            "이 화면에서 더 진행하지 못했어요",
+                            run,
+                            logReason = "같은 화면에서 ${visits}번 막혀 더 진행하지 않는다",
+                        )
                         return
                     }
 
@@ -759,8 +763,17 @@ class PipelineOrchestrator(
         emit(run) { id, seq -> PipelineEvent.ResultVerified(id, seq, evidence) }
     }
 
-    private fun fail(reason: String, run: Run, speakReason: Boolean = false, sensitive: Boolean = false) {
-        append(PipelineLogEntry.Level.ERROR, reason, sensitive = sensitive)
+    /**
+     * 실패로 끝낸다. [reason] 은 사용자에게(캡슐·음성) 나가고, 개발 로그에는 [logReason] 이 남는다(같으면 생략).
+     */
+    private fun fail(
+        reason: String,
+        run: Run,
+        speakReason: Boolean = false,
+        sensitive: Boolean = false,
+        logReason: String = reason,
+    ) {
+        append(PipelineLogEntry.Level.ERROR, logReason, sensitive = sensitive)
         _state.value = PipelineState.Failed(reason, speakReason)
         emit(run) { id, seq -> PipelineEvent.Failed(id, seq, reason) }
     }

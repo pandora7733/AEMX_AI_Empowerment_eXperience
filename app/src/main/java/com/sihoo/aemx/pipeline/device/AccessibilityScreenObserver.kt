@@ -110,11 +110,15 @@ internal const val MAX_SNAPSHOT_TEXTS = 30
 /** 누를 수 있는 라벨 상한. 프롬프트가 쓰는 개수(20)와 맞춘다. 더 줘도 LLM 은 잘라 버린다. */
 internal const val MAX_SNAPSHOT_CLICKABLES = 20
 
+/** 입력칸 이름 상한. 검색창 하나를 고르는 데 충분하다. */
+internal const val MAX_SNAPSHOT_INPUTS = 5
+
 internal fun ScreenReading.toSnapshot(): ScreenSnapshot = ScreenSnapshot(
     packageName = description.packageName,
     className = title,
     texts = description.texts.take(MAX_SNAPSHOT_TEXTS),
     clickableLabels = description.clickableLabels.take(MAX_SNAPSHOT_CLICKABLES),
+    inputLabels = description.inputLabels.take(MAX_SNAPSHOT_INPUTS),
     // 다이얼로그는 접근성 창 정보만으로 믿고 가를 수 없어 아직 판정하지 않는다.
     isDialog = false
 )

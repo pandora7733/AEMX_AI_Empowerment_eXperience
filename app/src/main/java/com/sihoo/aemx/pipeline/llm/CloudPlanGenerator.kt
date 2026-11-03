@@ -94,6 +94,10 @@ class CloudPlanGenerator(
         if (screen.texts.isNotEmpty()) {
             appendLine("- 보이는 글자: ${screen.texts.take(MAX_SCREEN_TEXTS).joinToString(", ")}")
         }
+        if (screen.inputLabels.isNotEmpty()) {
+            // 검색창처럼 글자 없는 입력칸도 고를 수 있게 이름을 알려 준다.
+            appendLine("- 입력칸: ${screen.inputLabels.joinToString(", ")}")
+        }
         if (screen.clickableLabels.isNotEmpty()) {
             append("- 누를 수 있는 것: ${screen.clickableLabels.take(MAX_SCREEN_TEXTS).joinToString(", ")}")
         }

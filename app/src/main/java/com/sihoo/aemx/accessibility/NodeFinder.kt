@@ -14,6 +14,8 @@ data class ScreenDescription(
     val packageName: String? = null,
     val texts: List<String> = emptyList(),
     val clickableLabels: List<String> = emptyList(),
+    /** 입력칸(편집 가능한 노드)의 이름: 힌트, 없으면 리소스 id 끝부분, 없으면 설명. 검색창을 모델이 고르게 한다. */
+    val inputLabels: List<String> = emptyList(),
 )
 
 internal object NodeFinder {
@@ -280,12 +282,16 @@ internal object NodeFinder {
 
         val texts = LinkedHashSet<String>()
         val clickables = LinkedHashSet<String>()
+        val inputs = LinkedHashSet<String>()
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0
 
         while (queue.isNotEmpty() && texts.size < MAX_LABELS) {
             if (++visited > 2_000) break
             val node = queue.removeFirst()
+            if (node.isVisibleToUser && node.isEnabled && node.isEditable) {
+                inputLabel(node)?.let { inputs += it }
+            }
             if (node.isVisibleToUser) {
                 val label = listOfNotNull(
                     node.text?.toString(),
@@ -305,6 +311,7 @@ internal object NodeFinder {
             packageName = root.packageName?.toString(),
             texts = texts.toList(),
             clickableLabels = clickables.toList(),
+            inputLabels = inputs.toList(),
         )
     }
 
@@ -417,4 +424,12 @@ internal object NodeFinder {
      * 제목에 "shorts" 가 들어간 일반 영상과 섞이지 않게 꼬리말 전체로 본다.
      */
     private val SHORTS_MARKERS = listOf("Shorts 동영상 재생", "Shorts video")
+
+    /** 입력칸의 이름. 힌트, 리소스 id 의 끝부분(패키지 앞 부분은 뺀다), 설명 순으로 찾는다. 셋 다 없으면 null. */
+    private fun inputLabel(node: AccessibilityNodeInfo): String? {
+        val hint = if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString()?.trim() else null
+        val id = node.viewIdResourceName?.substringAfterLast('/')?.trim()
+        val description = node.contentDescription?.toString()?.trim()
+        return listOf(hint, id, description).firstOrNull { !it.isNullOrBlank() && it.length <= MAX_LABEL_LENGTH }
+    }
 }

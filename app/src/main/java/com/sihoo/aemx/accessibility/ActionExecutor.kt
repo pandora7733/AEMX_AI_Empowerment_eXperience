@@ -1,6 +1,11 @@
 package com.sihoo.aemx.accessibility
 
+import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -106,10 +111,21 @@ internal class ActionExecutor(
             if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) OPEN_APP_TIMEOUT_MS else ACTION_TIMEOUT_MS
         var foregroundSince = 0L
         var popupDismisses = 0
+        var prePopupChecked = false
         lateinit var attempt: Runnable
         attempt = Runnable {
             if (id != executionId) return@Runnable
             pendingRetry = null
+            // 늦게 뜬 광고 팝업은 첫 탭을 받아 버리고 조작은 성공으로 보인다. 누르거나 입력하기 전에 한 번 닫아 본다.
+            if (!prePopupChecked && step.action in setOf(ActionType.TAP, ActionType.INPUT_TEXT)) {
+                prePopupChecked = true
+                if (popupDismisses < MAX_POPUP_DISMISSES && tryDismissPopup(plan.app, step)) {
+                    popupDismisses++
+                    pendingRetry = attempt
+                    handler.postDelayed(attempt, RETRY_INTERVAL_MS)
+                    return@Runnable
+                }
+            }
             val observed = try {
                 performUiAction(plan.app, step)
             } catch (_: RuntimeException) {
@@ -242,13 +258,8 @@ internal class ActionExecutor(
             ActionType.SEARCH ->
                 if (TextMatch.queryVisible(visibleTexts(root), step.target.orEmpty())) StepResult.Success
                 else StepResult.NotReady
-            ActionType.TAP -> {
-                val node = NodeFinder.find(root, step.target) ?: return StepResult.NotReady
-                val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
-                if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success
-                else StepResult.NotReady
-            }
-            ActionType.INPUT_TEXT -> setText(root, step.target, step.value.orEmpty())
+            ActionType.TAP -> tap(root, step.target)
+            ActionType.INPUT_TEXT -> inputText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
                 val ordinal = step.value?.let(Ordinal::find) ?: 1
                 if (ordinal > 1) return playNth(root, appPackage, ordinal, includeShorts = wantsShorts(step))
@@ -361,22 +372,158 @@ internal class ActionExecutor(
         return StepResult.NotReady
     }
 
+    private fun insideWebView(node: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = node
+        while (current != null) {
+            if (current.className?.toString() == "android.webkit.WebView") return true
+            current = current.parent
+        }
+        return false
+    }
+
     /**
      * 눌 수 있는 조상이 있고 클릭이 받아들여지면 그것으로 끝, 아니면 노드 bounds 중앙을 제스처로 탭한다.
      * 제스처는 눌렀는지 알려 주지 않으므로 호출한 쪽이 화면 변화로 확인해야 한다.
      */
     private fun clickOrTap(node: AccessibilityNodeInfo): Boolean {
-        NodeFinder.clickableAncestor(node)?.let { clickable ->
-            if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        // 웹뷰 안의 버튼은 접근성 클릭을 받아 놓고 아무 일도 하지 않는 일이 있어, 처음부터 좌표로 누른다.
+        if (!insideWebView(node)) {
+            NodeFinder.clickableAncestor(node)?.let { clickable ->
+                if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            }
         }
         val bounds = Rect().also(node::getBoundsInScreen)
         if (bounds.width() <= 0 || bounds.height() <= 0) return false
         return service.tap(bounds.exactCenterX(), bounds.exactCenterY())
     }
 
-    private fun setText(root: AccessibilityNodeInfo, target: String, text: CharSequence): StepResult {
-        val node = NodeFinder.find(root, target, editableOnly = true) ?: return StepResult.NotReady
-        return setNodeText(node, text)
+    /**
+     * 누르기. 이름으로 먼저 찾고, 실패하면 역할로 찾는다. 검색 입력칸 말이면 칸을 누르고, 검색 버튼 말이면 버튼을 누른다.
+     */
+    private fun tap(root: AccessibilityNodeInfo, target: String): StepResult {
+        NodeFinder.find(root, target)?.let { node ->
+            val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
+            return if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success else StepResult.NotReady
+        }
+        if (SearchFieldRole.isButtonRequest(target)) return pressSearchButton(root)
+        if (SearchFieldRole.isFieldRequest(target)) {
+            val field = findSearchField(root) ?: return StepResult.NotReady
+            return if (clickOrTap(field)) StepResult.Success else StepResult.NotReady
+        }
+        return StepResult.NotReady
+    }
+
+    /**
+     * 입력. 이름으로 먼저 찾고(편집 가능한 노드만), 실패하면 검색 입력칸을 역할로 찾는다.
+     * SET_TEXT 를 받으면 칸에 보이는지 확인한다. 받지 않는 입력칸(웹뷰 등)은 포커스 → 전체 선택 → 붙여넣기로 넣는다.
+     */
+    private fun inputText(root: AccessibilityNodeInfo, target: String, text: String): StepResult {
+        val node = NodeFinder.find(root, target, editableOnly = true)
+            ?: (if (SearchFieldRole.isFieldRequest(target)) findSearchField(root) else null)
+            ?: return StepResult.NotReady
+        val probe = text.trim().take(TextMatch.QUERY_KEY_LENGTH)
+        // SET_TEXT 를 받으면 끝이다. 칸의 글자는 바로 다시 읽히지 않는 경우가 있어 확인하지 않는다(기존 동작).
+        // SET_TEXT 는 덧붙이지 않고 바꾸므로 다시 넣어도 중복되지 않는다.
+        if (setNodeText(node, text) == StepResult.Success) return StepResult.Success
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) return StepResult.NotReady
+        // 기존 글자를 모두 고른 뒤 붙여넣으면 바뀐다(선택 범위 지정은 API 18 부터 있다).
+        val selectAll = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, node.text?.length ?: 0)
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectAll)
+        if (!copyToClipboard(text)) return StepResult.NotReady
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return StepResult.NotReady
+        node.refresh()
+        return if (showsOtherText(node, probe)) StepResult.NotReady else StepResult.Success
+    }
+
+    /**
+     * 칸에 글자가 보이는데 넣으려던 글자가 아니면 true. 글자를 읽을 수 없거나(비어 있음) 맞으면 false.
+     * 붙여넣기처럼 칸에 바로 안 보이는 경우를 실패로 몰지 않기 위해 빈 칸은 확인하지 않는다.
+     */
+    private fun showsOtherText(node: AccessibilityNodeInfo, probe: String): Boolean {
+        // 힌트 글자만 보이는 칸은 비어 있는 것이다(힌트를 글자로 착각하지 않는다).
+        if (Build.VERSION.SDK_INT >= 26 && node.isShowingHintText) return false
+        val shown = node.text?.toString()?.takeIf { it.isNotBlank() } ?: return false
+        return probe.isNotEmpty() && !TextMatch.contains(shown, probe)
+    }
+
+    private fun copyToClipboard(text: String): Boolean {
+        val clipboard = service.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
+        clipboard.setPrimaryClip(ClipData.newPlainText("aemx", text))
+        return true
+    }
+
+    /** 역할로 찾은 검색 입력칸. 편집 가능한 노드 중에서 [SearchFieldRole.pickField] 가 고른다. */
+    private fun findSearchField(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val fields = editableNodes(root)
+        val index = SearchFieldRole.pickField(
+            fields.map { node ->
+                SearchFieldRole.Field(
+                    id = node.viewIdResourceName,
+                    hint = if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null,
+                    description = node.contentDescription?.toString(),
+                    box = boxOf(node),
+                    focused = node.isFocused,
+                )
+            },
+            service.resources.displayMetrics.heightPixels,
+        ) ?: return null
+        return fields[index]
+    }
+
+    /**
+     * 검색 버튼 누르기. 입력칸 오른쪽의 검색 버튼을 누르고, 없으면 입력칸에 엔터(IME 엔터, API 30 이상)를 보낸다.
+     */
+    private fun pressSearchButton(root: AccessibilityNodeInfo): StepResult {
+        val field = findSearchField(root) ?: return StepResult.NotReady
+        val buttons = clickableNodes(root)
+        val index = SearchFieldRole.pickButton(
+            buttons.map { node ->
+                SearchFieldRole.Button(node.text?.toString(), node.contentDescription?.toString(), boxOf(node))
+            },
+            boxOf(field),
+        )
+        if (index != null) return if (clickOrTap(buttons[index])) StepResult.Success else StepResult.NotReady
+        return if (imeEnter(field)) StepResult.Success else StepResult.NotReady
+    }
+
+    @SuppressLint("NewApi")
+    private fun imeEnter(field: AccessibilityNodeInfo): Boolean =
+        Build.VERSION.SDK_INT >= 30 &&
+            field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+
+    private fun editableNodes(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> =
+        collect(root) { node ->
+            node.isVisibleToUser && node.isEnabled &&
+                (node.isEditable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT })
+        }
+
+    private fun clickableNodes(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> =
+        collect(root) { node ->
+            node.isVisibleToUser && node.isEnabled &&
+                (node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+        }
+
+    /** 화면 트리를 위에서부터 훑어 [keep] 에 맞는 노드를 모은다. 노드 수에는 상한을 둔다. */
+    private fun collect(root: AccessibilityNodeInfo, keep: (AccessibilityNodeInfo) -> Boolean): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        while (queue.isNotEmpty() && visited < MAX_TEXT_NODES) {
+            val node = queue.removeFirst()
+            visited++
+            if (keep(node)) out += node
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+        }
+        return out
+    }
+
+    private fun boxOf(node: AccessibilityNodeInfo): SearchFieldRole.Box {
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        return SearchFieldRole.Box(rect.left, rect.top, rect.right, rect.bottom)
     }
 
     private fun setNodeText(node: AccessibilityNodeInfo, text: CharSequence): StepResult {
@@ -470,7 +617,14 @@ internal class ActionExecutor(
         }
 
         val index = PopupDismiss.choose(candidates) ?: return false
-        val clicked = clickables[index]?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        // 웹뷰 팝업은 접근성 클릭을 받고도 닫히지 않는 일이 있어 실제 좌표 탭으로 누른다.
+        val target = clickables[index]
+        val bounds = Rect().also { target?.getBoundsInScreen(it) }
+        val clicked = if (target != null && bounds.width() > 0 && bounds.height() > 0) {
+            service.tap(bounds.exactCenterX(), bounds.exactCenterY())
+        } else {
+            target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        }
         if (clicked) Log.i(TAG, "팝업 닫기: ${step.action.name} 단계 앞에서 닫을 버튼을 눌렀다")
         return clicked
     }

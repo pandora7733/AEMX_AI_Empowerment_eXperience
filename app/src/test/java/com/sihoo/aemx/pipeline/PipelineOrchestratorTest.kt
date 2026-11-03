@@ -377,7 +377,8 @@ class PipelineOrchestratorTest {
 
         val state = orchestrator.state.value
         assertTrue("상태가 $state 였다", state is PipelineState.Failed)
-        assertTrue((state as PipelineState.Failed).reason.contains("같은 화면"))
+        // 사용자에게는 짧은 안내가 나가고, 같은 화면이라는 개발 문장은 로그에만 남는다.
+        assertEquals("이 화면에서 더 진행하지 못했어요", (state as PipelineState.Failed).reason)
         // 재분석 상한(10)이 아니라 같은-화면 상한(2)에서 멈춰야 한다.
         assertTrue("재분석이 너무 많이 돌았다: ${planner.requests.size}", planner.requests.size <= 4)
     }
