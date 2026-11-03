@@ -40,6 +40,7 @@ internal class ActionExecutor(
         isRunning = true
         evidence = null
         settleSteps = settleAfterStep
+        lastQuery = ""
         val currentId = ++executionId
         executeStep(plan, 0, currentId)
     }
@@ -81,6 +82,7 @@ internal class ActionExecutor(
         shortsScrolled = false
         inputStage = 0
         inputActedAt = 0L
+        submitActedAt = 0L
         when (step.action) {
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
@@ -209,6 +211,12 @@ internal class ActionExecutor(
     /** 입력 한 step 안에서 쓴 방법 번호(0이면 아직 안 넣었다)와 마지막으로 넣은 시각. step 마다 새로 시작한다. */
     private var inputStage = 0
     private var inputActedAt = 0L
+
+    /** 검색 버튼(또는 엔터)을 누른 시각. 누른 뒤에는 다시 누르지 않고 결과만 확인한다. 0이면 아직 안 눌렀다. */
+    private var submitActedAt = 0L
+
+    /** 마지막으로 넣으려던 검색어(앞부분). 결과 화면에 이 글자가 보이는지 확인할 때 쓴다. */
+    private var lastQuery = ""
 
     private var lastProbeAt = 0L
     private var lastChipTapAt = 0L
@@ -413,36 +421,132 @@ internal class ActionExecutor(
      * 눌 수 있는 조상이 있고 클릭이 받아들여지면 그것으로 끝, 아니면 노드 bounds 중앙을 제스처로 탭한다.
      * 제스처는 눌렀는지 알려 주지 않으므로 호출한 쪽이 화면 변화로 확인해야 한다.
      */
-    private fun clickOrTap(node: AccessibilityNodeInfo): Boolean {
+    private fun clickOrTap(node: AccessibilityNodeInfo): Boolean = pressNode(node) != null
+
+    /** 누르고 어떻게 눌렀는지 돌려준다("클릭" 또는 "좌표"). 못 눌렀으면 null. */
+    private fun pressNode(node: AccessibilityNodeInfo): String? {
         // 웹뷰 안의 버튼은 접근성 클릭을 받아 놓고 아무 일도 하지 않는 일이 있어, 처음부터 좌표로 누른다.
         if (!insideWebView(node)) {
             NodeFinder.clickableAncestor(node)?.let { clickable ->
-                if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+                if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "클릭"
             }
         }
         val bounds = Rect().also(node::getBoundsInScreen)
-        if (bounds.width() <= 0 || bounds.height() <= 0) return false
-        return service.tap(bounds.exactCenterX(), bounds.exactCenterY())
+        if (bounds.width() <= 0 || bounds.height() <= 0) return null
+        return if (service.tap(bounds.exactCenterX(), bounds.exactCenterY())) "좌표" else null
+    }
+
+    /**
+     * 누르기 한 번을 진단과 함께 한다. 누른 노드의 모습(클래스, id, 글자 길이, 설명 길이, 위치, 눌릴 조상 여부)과
+     * 방법을 남기고, 300ms 뒤 화면 글자가 바뀌었는지도 남긴다. 글자 내용은 남기지 않는다.
+     */
+    private fun pressLogged(root: AccessibilityNodeInfo, node: AccessibilityNodeInfo, target: String, act: () -> String?): Boolean {
+        val before = screenFingerprint(root)
+        val method = act()
+        logNode("누르기 '$target'", node, method)
+        handler.postDelayed({
+            val after = service.rootInActiveWindow?.let(::screenFingerprint)
+            Log.i(TAG, "누르기 '$target' 300ms 뒤: 화면 변화=${after != null && after != before}, 방법=${method ?: "실패"}")
+        }, PRESS_CHECK_MS)
+        return method != null
+    }
+
+    private fun screenFingerprint(root: AccessibilityNodeInfo): Int = visibleTexts(root).hashCode()
+
+    private fun logNode(prefix: String, node: AccessibilityNodeInfo, method: String?) {
+        runCatching {
+            val bounds = Rect().also(node::getBoundsInScreen)
+            Log.i(
+                TAG,
+                "$prefix: class=${node.className} id=${node.viewIdResourceName} 글자길이=${node.text?.length ?: -1} " +
+                    "설명길이=${node.contentDescription?.length ?: -1} bounds=${bounds.toShortString()} " +
+                    "눌릴조상=${NodeFinder.clickableAncestor(node) != null} 방법=${method ?: "실패"}"
+            )
+        }
     }
 
     /**
      * 누르기. 이름으로 먼저 찾고, 실패하면 역할로 찾는다. 검색 입력칸 말이면 칸을 누르고, 검색 버튼 말이면 버튼을 누른다.
      */
     private fun tap(root: AccessibilityNodeInfo, target: String): StepResult {
-        // 입력칸이 비어 있으면 검색 버튼을 누르지 않는다. 빈 칸으로 누르는 검색은 의미가 없다.
-        if (SearchFieldRole.isButtonRequest(target) && blankSearchField(root)) {
-            return StepResult.Fatal("검색어가 입력칸에 없어 검색 버튼을 누르지 않았습니다.")
-        }
+        // 검색 제출은 이름보다 역할을 먼저 본다. "검색" 이라는 글자는 화면 여기저기에 있어 이름으로 찾으면 엉뚱한 곳을 누른다.
+        if (SearchFieldRole.isButtonRequest(target)) return submitSearch(root, target)
         NodeFinder.find(root, target)?.let { node ->
             val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
-            return if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success else StepResult.NotReady
+            return if (pressLogged(root, clickable, target) {
+                    if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) "클릭" else null
+                }
+            ) StepResult.Success else StepResult.NotReady
         }
-        if (SearchFieldRole.isButtonRequest(target)) return pressSearchButton(root)
         if (SearchFieldRole.isFieldRequest(target)) {
             val field = findSearchField(root) ?: return StepResult.NotReady
-            return if (clickOrTap(field)) StepResult.Success else StepResult.NotReady
+            return if (pressLogged(root, field, target) { pressNode(field) }) StepResult.Success else StepResult.NotReady
         }
         return StepResult.NotReady
+    }
+
+    /**
+     * 검색 제출. 입력칸 오른쪽에 검색 버튼이 하나 분명하면 그것을 누르고, 없으면 입력칸에 IME 엔터(API 30 이상)를 보낸다.
+     * 엉뚱한 노드는 누르지 않는다. 제출한 뒤에는 다시 누르지 않고 [verifySubmit] 로 결과가 떴는지만 본다.
+     */
+    private fun submitSearch(root: AccessibilityNodeInfo, target: String): StepResult {
+        if (submitActedAt > 0L) return verifySubmit(root)
+        val field = searchInput(root)
+        if (field == null) {
+            // 입력칸을 못 찾으면 이름으로 찾는 예전 방법만 쓴다.
+            val named = NodeFinder.find(root, target) ?: return StepResult.NotReady
+            val clickable = NodeFinder.clickableAncestor(named) ?: return StepResult.NotReady
+            return if (pressLogged(root, clickable, target) {
+                    if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) "클릭" else null
+                }
+            ) StepResult.Success else StepResult.NotReady
+        }
+        // 입력칸이 비어 있으면 누르지 않는다. 빈 칸으로 누르는 검색은 의미가 없다.
+        if (isBlankField(field)) return StepResult.Fatal("검색어가 입력칸에 없어 검색하지 않았습니다.")
+        val buttons = clickableNodes(root)
+        val index = SearchFieldRole.pickButton(
+            buttons.map { node ->
+                SearchFieldRole.Button(node.text?.toString(), node.contentDescription?.toString(), boxOf(node))
+            },
+            boxOf(field),
+        )
+        val pressed = if (index != null) {
+            pressLogged(root, buttons[index], target) { pressNode(buttons[index]) }
+        } else {
+            val method = if (imeEnter(field)) "IME 엔터" else null
+            logNode("검색 제출(버튼 없음) '$target'", field, method)
+            method != null
+        }
+        if (!pressed) return StepResult.NotReady
+        submitActedAt = SystemClock.uptimeMillis()
+        return StepResult.NotReady
+    }
+
+    /**
+     * 제출 뒤 결과 확인. 입력칸이 비어 버렸으면(글자가 사라졌으면) 실패로 알린다. 입력칸이 아닌 화면 글자에
+     * 검색어가 보이면 결과가 뜬 것으로 본다. 입력칸의 글자는 셈에 넣지 않는다(검색 시작 화면에 그대로 남아 있을 수 있다).
+     */
+    private fun verifySubmit(root: AccessibilityNodeInfo): StepResult {
+        val field = searchInput(root)
+        if (field != null && isBlankField(field)) {
+            return StepResult.Fatal("검색어가 입력칸에서 사라져 검색 결과를 확인하지 못했습니다.")
+        }
+        if (lastQuery.isEmpty()) return StepResult.Success
+        val texts = visibleTexts(root).toMutableList()
+        field?.text?.toString()?.let { texts.remove(it) }
+        return if (TextMatch.queryVisible(texts, lastQuery)) StepResult.Success else StepResult.NotReady
+    }
+
+    /** 검색 입력칸. 역할로 고른 칸이 없으면 포커스가 있는 편집 칸을 쓴다(글자를 넣은 칸은 보통 포커스를 가진다). */
+    private fun searchInput(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
+        findSearchField(root) ?: collect(root) { node ->
+            node.isVisibleToUser && node.isEnabled && node.isEditable && node.isFocused
+        }.firstOrNull()
+
+    /** 입력칸에 글자가 없다(힌트만 보이거나 빈 글자). 글자를 읽을 수 없으면(null) 비었다고 보지 않는다. */
+    private fun isBlankField(field: AccessibilityNodeInfo): Boolean {
+        if (Build.VERSION.SDK_INT >= 26 && field.isShowingHintText) return true
+        return field.text?.isBlank() == true
     }
 
     /**
@@ -454,6 +558,7 @@ internal class ActionExecutor(
             ?: (if (SearchFieldRole.isFieldRequest(target)) findSearchField(root) else null)
             ?: return StepResult.NotReady
         val probe = text.trim().take(TextMatch.QUERY_KEY_LENGTH)
+        lastQuery = probe
         // 넣은 뒤 칸을 다시 읽어 확인한다. 비어 있으면 다음 방법으로 넘어가고, 다 해도 안 들어가면 실패로 알린다.
         // 방법이 실제로 실행됐을 때만 확인한다(받지 않은 방법은 아무것도 넣지 않았다).
         if (inputActedAt > 0L) {
@@ -538,13 +643,6 @@ internal class ActionExecutor(
         return true
     }
 
-    /** 검색 입력칸이 있는데 글자가 없다(힌트만 보이거나 빈 글자). 글자를 읽을 수 없으면 비었다고 보지 않는다. */
-    private fun blankSearchField(root: AccessibilityNodeInfo): Boolean {
-        val field = findSearchField(root) ?: return false
-        if (Build.VERSION.SDK_INT >= 26 && field.isShowingHintText) return true
-        return field.text?.isBlank() == true
-    }
-
     /** 역할로 찾은 검색 입력칸. 편집 가능한 노드 중에서 [SearchFieldRole.pickField] 가 고른다. */
     private fun findSearchField(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val fields = editableNodes(root)
@@ -561,22 +659,6 @@ internal class ActionExecutor(
             service.resources.displayMetrics.heightPixels,
         ) ?: return null
         return fields[index]
-    }
-
-    /**
-     * 검색 버튼 누르기. 입력칸 오른쪽의 검색 버튼을 누르고, 없으면 입력칸에 엔터(IME 엔터, API 30 이상)를 보낸다.
-     */
-    private fun pressSearchButton(root: AccessibilityNodeInfo): StepResult {
-        val field = findSearchField(root) ?: return StepResult.NotReady
-        val buttons = clickableNodes(root)
-        val index = SearchFieldRole.pickButton(
-            buttons.map { node ->
-                SearchFieldRole.Button(node.text?.toString(), node.contentDescription?.toString(), boxOf(node))
-            },
-            boxOf(field),
-        )
-        if (index != null) return if (clickOrTap(buttons[index])) StepResult.Success else StepResult.NotReady
-        return if (imeEnter(field)) StepResult.Success else StepResult.NotReady
     }
 
     @SuppressLint("NewApi")
@@ -741,6 +823,9 @@ internal class ActionExecutor(
 
         /** 넣은 뒤 칸이 비어 보여도 화면이 바뀔 틈을 이만큼 준 다음에야 다음 방법으로 넘어간다. */
         const val INPUT_VERIFY_MS = 400L
+
+        /** 누른 뒤 화면 변화를 확인하는 시각. 진단 로그에만 쓴다. */
+        const val PRESS_CHECK_MS = 300L
 
         /** step 마다 제출하는 호출자가 정착을 건너뛸 수 있는 행동. 재생·스크롤·메시지 전송은 빼 둔다. */
         val FAST_SETTLE_ACTIONS = setOf(ActionType.OPEN_APP, ActionType.SEARCH, ActionType.TAP, ActionType.INPUT_TEXT)

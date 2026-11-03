@@ -33,6 +33,8 @@ object SendMessageGuard {
         if (plan.steps.none { it.action == ActionType.SEND_MESSAGE }) return plan
         // 받는 사람은 발화에서 정한다. 모델이 고른 이름은 참고만 하고, 발화에서 못 뽑으면 보내지 않는다.
         val who = recipientOf(utterance) ?: return null
+        // 받는 사람 이름이 두 번 나오면 어느 쪽이 내용인지 모른다. 내용을 정하지 않고 보내지 않는다.
+        if (mentionCount(utterance, who) > 1) return null
 
         val app = appName(plan.app)
         val steps = plan.steps.map { original ->
@@ -46,6 +48,7 @@ object SendMessageGuard {
                 said != null -> if (squash(said) == squash(value)) step else step.copy(value = said)
                 value.isNotEmpty() && !endsWithInstruction(value) &&
                     !isEmptyContent(value, step.target) &&
+                    !leaksRecipient(value, who) &&
                     squash(utterance).contains(squash(value)) -> step
                 else -> return null
             }
@@ -90,7 +93,7 @@ object SendMessageGuard {
     /** "엄마한테 늦는다고 보내줘" 에서 "늦는다". 받는 사람과 조사는 걷어 낸다. 뽑을 수 없으면 null. */
     internal fun extractContent(utterance: String, recipient: String?): String? {
         val match = SAID.find(utterance.trim()) ?: return null
-        return stripFraming(match.groupValues[1], recipient).ifEmpty { null }
+        return stripFraming(match.groupValues[1], recipient).ifEmpty { null }?.takeUnless { leaksRecipient(it, recipient) }
     }
 
     /**
@@ -100,7 +103,24 @@ object SendMessageGuard {
     internal fun extractLoose(utterance: String, recipient: String?): String? {
         val match = LOOSE.find(utterance.trim()) ?: return null
         val text = stripFraming(match.groupValues[1], recipient)
-        return text.takeUnless { it.isEmpty() || isChannelWord(it) }
+        return text.takeUnless { it.isEmpty() || isChannelWord(it) || leaksRecipient(it, recipient) }
+    }
+
+    /**
+     * 내용에 "받는 사람+조사"(배재준한테, 엄마에게)가 남아 있으면 참이다. 수단 말 순서가 꼬였을 때 받는 사람이
+     * 메시지에 섞이는 것을 막는다. 내용이 이름과 같은 단어("엄마한테 엄마라고")는 막지 않는다.
+     */
+    internal fun leaksRecipient(text: String, recipient: String?): Boolean =
+        recipientWithParticle(recipient)?.containsMatchIn(squash(text)) == true
+
+    /** 발화에 "받는 사람+조사"가 몇 번 나오는지. 두 번이면 어느 쪽이 내용인지 모른다. */
+    internal fun mentionCount(utterance: String, recipient: String): Int =
+        recipientWithParticle(recipient)?.findAll(squash(utterance))?.count() ?: 0
+
+    private fun recipientWithParticle(recipient: String?): Regex? {
+        val who = recipient?.let(::squash).orEmpty()
+        if (who.isEmpty()) return null
+        return Regex(Regex.escape(who) + "(?:한테|에게|께)")
     }
 
     /** value 에서 지시 꼬리, 받는 사람, 수단 말을 걷어 낸 나머지가 비었거나 수단 말뿐인지. */
@@ -113,11 +133,14 @@ object SendMessageGuard {
     /** 앞의 받는 사람과 조사, 수단 말(으로/로)을 걷어 내고 따옴표를 벗긴다. */
     private fun stripFraming(raw: String, recipient: String?): String {
         var text = raw.trim().trim('"', '\'', '“', '”').trim()
+        // 수단 말이 받는 사람보다 먼저 올 수 있다("카카오톡으로 배재준한테 …"). 먼저 걷고 나서 받는 사람을 본다.
+        text = CHANNEL.replace(text, "")
         val who = recipient?.trim().orEmpty()
         if (who.isNotEmpty() && text.startsWith(who)) {
             text = text.substring(who.length).trimStart()
             RECIPIENT_PARTICLES.firstOrNull { text.startsWith(it) }?.let { text = text.substring(it.length).trimStart() }
         }
+        // 받는 사람 뒤에 수단 말이 올 수도 있다("배재준한테 카카오톡으로 …").
         text = CHANNEL.replace(text, "")
         return text.trim('"', '\'', '“', '”').trim()
     }
