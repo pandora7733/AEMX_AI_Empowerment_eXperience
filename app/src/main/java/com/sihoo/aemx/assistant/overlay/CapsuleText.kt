@@ -31,6 +31,12 @@ object CapsuleTextFactory {
     const val PLANNING = "실행을 준비하고 있어요…"
     const val REPLANNING = "화면을 다시 확인하고 있어요…"
     const val LISTENING = "듣고 있어요…"
+
+    /** 인식 중(흐린 파형)에는 중간 결과 글자를 보이지 않는다. 짧은 고정 문구만 보인다. */
+    const val RECOGNIZING = "알아듣고 있어요…"
+
+    /** 최종 문장을 보여 주는 줄의 길이 상한. 넘으면 말줄임으로 자른다. */
+    const val SENTENCE_MAX = 28
     const val CONFIRMING = "이렇게 보낼까요?"
     const val NEEDS_USER = "직접 해 주셔야 해요"
     const val NEEDS_USER_SUB = "AEMX · 기다리는 중"
@@ -48,7 +54,7 @@ object CapsuleTextFactory {
             else -> when (state.phase) {
                 AssistantPhase.Idle -> ""
                 AssistantPhase.Listening -> LISTENING
-                AssistantPhase.Recognizing -> state.transcript.ifBlank { LISTENING }
+                AssistantPhase.Recognizing -> RECOGNIZING
                 AssistantPhase.Understanding -> UNDERSTANDING
                 AssistantPhase.Planning -> PLANNING
                 AssistantPhase.ConfirmingAction -> CONFIRMING
@@ -69,6 +75,8 @@ object CapsuleTextFactory {
             state.phase == AssistantPhase.Success -> VERIFIED_SUB
             state.phase == AssistantPhase.Executing || state.phase == AssistantPhase.Replanning ->
                 stepCounter(state)
+            // 알아들은 문장은 이해 단계에서 한 줄로 한 번만 보인다(글자가 계속 바뀌는 중간 결과는 보이지 않는다).
+            state.phase == AssistantPhase.Understanding -> sentenceLine(state.transcript)
             else -> ""
         }
 
@@ -91,6 +99,13 @@ object CapsuleTextFactory {
             AssistantPhase.Recognizing -> VoiceState.Recognizing
             else -> VoiceState.None
         }
+    }
+
+    /** 최종 문장을 한 줄로. 줄바꿈을 없애고 길면 자른다. 비면 빈 문자열. */
+    internal fun sentenceLine(sentence: String): String {
+        val oneLine = sentence.replace(Regex("\\s+"), " ").trim()
+        if (oneLine.isEmpty()) return ""
+        return if (oneLine.length > SENTENCE_MAX) oneLine.take(SENTENCE_MAX) + "…" else oneLine
     }
 
     /** 지금 하는 단계 문장. 하는 단계가 없으면(막 끝낸 직후) 다음 단계, 그것도 없으면 일반 문구. */

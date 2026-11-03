@@ -202,10 +202,15 @@ object OverlayMotion {
         view.animate().alpha(1f).setDuration(SWAP_MS).setInterpolator(EASE).start()
     }
 
-    /** 인식 문장을 한 글자씩 나타낸다. 다 나타나면 [full] 전체가 남는다. */
+    /**
+     * 인식 문장을 한 글자씩 나타낸다. 음성 인식 중간 결과가 자주 바뀌어 어수선하다는 사용자 의견으로 끈다
+     * ([TYPEWRITER_ON] 이 거짓이면 바로 보인다). 다시 켜려면 이 값만 바꾼다.
+     */
+    const val TYPEWRITER_ON = false
+
     fun typewrite(view: TextView, full: String, reduced: Boolean = isReduced()) {
         typers.remove(view)?.cancel()
-        if (reduced || full.isEmpty()) {
+        if (!TYPEWRITER_ON || reduced || full.isEmpty()) {
             view.text = full
             return
         }

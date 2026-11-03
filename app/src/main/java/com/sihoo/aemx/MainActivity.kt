@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.provider.Settings
@@ -20,6 +22,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.R as MaterialR
+import com.sihoo.aemx.accessibility.AccessibilityState
+import com.sihoo.aemx.accessibility.AccessibilityStatus
 import com.sihoo.aemx.accessibility.AemxAccessibilityService
 import com.sihoo.aemx.pipeline.app.PipelineCore
 import com.sihoo.aemx.pipeline.app.VoiceService
@@ -37,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private enum class Item { MIC, NOTIFY, ACCESS, OVERLAY, CONTACTS, MODEL }
 
     private val rows = LinkedHashMap<Item, Row>()
+    private val handler = Handler(Looper.getMainLooper())
     private lateinit var listenButton: Button
     private lateinit var summaryView: TextView
     private lateinit var statusView: TextView
@@ -65,6 +70,13 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        handler.removeCallbacks(accessPoll)
+        if (accessibilityState() != AccessibilityState.Connected) handler.postDelayed(accessPoll, ACCESS_POLL_MS)
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(accessPoll)
+        super.onPause()
     }
 
     private fun observeCore() {
@@ -134,14 +146,17 @@ class MainActivity : AppCompatActivity() {
     /** 항목마다 끝났는지 보고 상태 글자와 버튼을 다시 맞춘다. 준비가 다 끝나면 듣기를 한 번 자동으로 켠다. */
     private fun refresh() {
         if (!::listenButton.isInitialized) return
-        val done = doneItems()
+        val access = accessibilityState()
+        val done = doneItems(access)
         var nextMarked = false
         Item.entries.forEach { item ->
             val row = rows.getValue(item)
             val isDone = item in done
+            val disconnected = item == Item.ACCESS && !isDone && access == AccessibilityState.ConfiguredButDisconnected
             row.state.setText(
                 when {
                     isDone -> R.string.guide_done
+                    disconnected -> R.string.guide_access_disconnected
                     !nextMarked -> R.string.guide_next
                     else -> R.string.guide_todo
                 },
@@ -159,15 +174,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun doneItems(): Set<Item> {
+    private fun doneItems(access: AccessibilityState): Set<Item> {
         val done = mutableSetOf<Item>()
         if (granted(Manifest.permission.RECORD_AUDIO)) done += Item.MIC
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || granted(Manifest.permission.POST_NOTIFICATIONS)) {
             done += Item.NOTIFY
         }
-        val accessibility = isAccessibilityServiceEnabled()
-        if (accessibility) done += Item.ACCESS
-        if (accessibility && AemxAccessibilityService.isOverlayEnabled()) done += Item.OVERLAY
+        val connected = access == AccessibilityState.Connected
+        if (connected) done += Item.ACCESS
+        if (connected && AemxAccessibilityService.isOverlayEnabled()) done += Item.OVERLAY
         if (granted(Manifest.permission.READ_CONTACTS)) done += Item.CONTACTS
         if (PipelineCore.modelReady.value) done += Item.MODEL
         return done
@@ -200,14 +215,28 @@ class MainActivity : AppCompatActivity() {
     private fun granted(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        if (AemxAccessibilityService.isConnected()) return true
+    /** 접근성 상태. 연결된 것만 완료로 본다. 설정에만 남아 있으면 껐다 켜 달라고 따로 안내한다. */
+    private fun accessibilityState(): AccessibilityState {
         val expected = ComponentName(this, AemxAccessibilityService::class.java).flattenToString()
         val enabledServices = Settings.Secure.getString(
             contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-        ).orEmpty()
-        return enabledServices.split(':').any { it.equals(expected, ignoreCase = true) }
+        )
+        return AccessibilityStatus.of(
+            connected = AemxAccessibilityService.isConnected(),
+            configured = AccessibilityStatus.configuredIn(enabledServices, expected),
+        )
+    }
+
+    /**
+     * 연결이 아직 안 됐으면 1초마다 다시 본다. 설정에서 켜고 돌아오지 않고 화면에 머무는 동안에도 완료로 바뀐다.
+     * 화면이 가려지면 멈춘다.
+     */
+    private val accessPoll = object : Runnable {
+        override fun run() {
+            refresh()
+            if (accessibilityState() != AccessibilityState.Connected) handler.postDelayed(this, ACCESS_POLL_MS)
+        }
     }
 
     private fun titleFor(item: Item) = when (item) {
@@ -250,5 +279,8 @@ class MainActivity : AppCompatActivity() {
 
         /** 시작 화면의 최대 시간(ms). 모델이 이보다 빨리 준비되면 그때 내린다. */
         const val SPLASH_MAX_MS = 2_000L
+
+        /** 접근성 연결을 기다리는 동안 다시 보는 간격. */
+        const val ACCESS_POLL_MS = 1_000L
     }
 }
