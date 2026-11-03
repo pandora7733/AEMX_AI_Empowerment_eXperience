@@ -1,15 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 오버레이 캡슐(디자인 tokens.json dimension). -->
+    <!-- 오버레이 디자인 토큰(aemx-v2 tokens.json dimension, typography). -->
     <dimen name="aemx_capsule_min_height">64dp</dimen>
     <dimen name="aemx_capsule_radius">30dp</dimen>
     <dimen name="aemx_side_inset">16dp</dimen>
     <dimen name="aemx_touch_min">48dp</dimen>
     <dimen name="aemx_logo_size">40dp</dimen>
+    <dimen name="aemx_space_4">4dp</dimen>
     <dimen name="aemx_space_8">8dp</dimen>
     <dimen name="aemx_space_12">12dp</dimen>
+    <dimen name="aemx_space_16">16dp</dimen>
+    <dimen name="aemx_space_24">24dp</dimen>
+    <dimen name="aemx_space_32">32dp</dimen>
     <dimen name="aemx_stroke_width">1.5dp</dimen>
     <dimen name="aemx_text_title">18sp</dimen>
+    <dimen name="aemx_text_body">18sp</dimen>
     <dimen name="aemx_text_label">16sp</dimen>
     <dimen name="aemx_text_caption">14sp</dimen>
+
+    <!-- 듣는 중 캡슐(높이 88). 광원은 캡슐 밖 16dp 까지 그린다(그보다 바깥은 창 밖이라 잘린다). -->
+    <dimen name="aemx_listening_min_height">88dp</dimen>
+    <dimen name="aemx_glow_pad">16dp</dimen>
+    <dimen name="aemx_glow_stroke">8dp</dimen>
+    <dimen name="aemx_glow_blur">6dp</dimen>
+    <dimen name="aemx_rim_width">2.5dp</dimen>
+    <dimen name="aemx_wave_height">34dp</dimen>
+    <dimen name="aemx_wave_bar_width">7dp</dimen>
+    <dimen name="aemx_wave_bar_gap">5dp</dimen>
 </resources>

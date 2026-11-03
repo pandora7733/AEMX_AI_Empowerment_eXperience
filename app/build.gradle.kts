@@ -70,6 +70,8 @@ android {
 
     buildTypes {
         release {
+            // 공개 배포하지 않는 시연용 APK 라서 디버그 키로 서명한다(키스토어를 따로 두지 않는다).
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = false
             }

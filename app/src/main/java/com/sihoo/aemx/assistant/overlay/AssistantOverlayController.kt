@@ -9,9 +9,12 @@ import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
+import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.widget.LinearLayout
 import com.sihoo.aemx.R
+import com.sihoo.aemx.assistant.AssistantPhase
 import com.sihoo.aemx.assistant.AssistantStore
 import com.sihoo.aemx.assistant.AssistantUiState
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +54,14 @@ internal class AssistantOverlayController(
     private var dismissedRunId: String? = null
     private var lastState = AssistantUiState()
 
+    /** 창의 내용: 캡슐과 펼친 패널을 함께 담는다. 패널은 캡슐 위(아래 도킹) 또는 아래(위 도킹)에 붙는다. */
+    private var root: LinearLayout? = null
+    private var panel: ExpandedPanelView? = null
+
+    /** 사용자가 펼친 명령과 접은 명령(runId). 상태가 펼치라고 해도 사용자가 접었으면 접힌다. */
+    private var panelOpenRunId: String? = null
+    private var panelClosedRunId: String? = null
+
     /** 캡슐 창이 지금 화면에 떠 있는지. */
     val isShowing: Boolean get() = added
 
@@ -67,6 +78,8 @@ internal class AssistantOverlayController(
         scope = null
         hide()
         view = null
+        root = null
+        panel = null
         touchGate.reset()
     }
 
@@ -81,6 +94,8 @@ internal class AssistantOverlayController(
         val showing = added
         hide()
         view = null
+        root = null
+        panel = null
         if (showing) render(lastState)
     }
 
@@ -93,6 +108,7 @@ internal class AssistantOverlayController(
         }
         show(DockPolicy.dockFor(state.phase))
         view?.bind(text, dismissible = state.phase.isTerminal)
+        updatePanel(state, text)
 
         handler.removeCallbacks(autoHide)
         if (CapsuleVisibility.autoHides(state.phase)) {
@@ -113,19 +129,31 @@ internal class AssistantOverlayController(
         val capsule = view ?: CapsuleView(
             service,
             onStop = { store.requestCancellation() },
-            onDismiss = { dismiss(lastState.runId) }
+            onDismiss = { dismiss(lastState.runId) },
+            onToggle = { togglePanel() },
+        ).also { view = it }
+        val content = root ?: LinearLayout(service).apply {
+            orientation = LinearLayout.VERTICAL
+            setOnApplyWindowInsetsListener { v, insets -> onInsets(insets); v.onApplyWindowInsets(insets) }
+        }.also { root = it }
+        val expanded = panel ?: ExpandedPanelView(
+            service,
+            onStop = { store.requestCancellation() },
+            onContinue = { store.requestContinuation() },
+            onCollapse = { togglePanel() },
         ).also {
-            view = it
-            it.setOnApplyWindowInsetsListener { v, insets -> onInsets(insets); v.onApplyWindowInsets(insets) }
+            panel = it
+            it.visibility = View.GONE
         }
 
         val dockChanged = newDock != dock
         dock = newDock
+        arrangeContent(content, capsule, expanded, dock)
         if (!added) {
             val lp = buildParams()
             params = lp
             try {
-                windowManager.addView(capsule, lp)
+                windowManager.addView(content, lp)
                 added = true
             } catch (e: RuntimeException) {
                 // 창을 못 붙여도 실행에는 영향이 없다. 다음 상태 변화 때 다시 시도한다.
@@ -143,12 +171,57 @@ internal class AssistantOverlayController(
         }
     }
 
+    /** 아래 도킹이면 패널이 캡슐 위, 위 도킹이면 캡슐 아래에 오도록 순서를 맞춘다. */
+    private fun arrangeContent(content: LinearLayout, capsule: CapsuleView, expanded: ExpandedPanelView, dock: Dock) {
+        content.removeAllViews()
+        val full = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        val first = if (dock == Dock.BOTTOM) expanded else capsule
+        val second = if (dock == Dock.BOTTOM) capsule else expanded
+        content.addView(first, full)
+        content.addView(second, full)
+    }
+
+    /** 펼친 패널을 여닫는다. 열려 있으면 접고, 접혀 있으면 펼친다. 명령마다 따로 기억한다. */
+    private fun togglePanel() {
+        val runId = lastState.runId
+        if (panelOpen(lastState)) {
+            panelClosedRunId = runId
+            panelOpenRunId = null
+        } else {
+            panelOpenRunId = runId
+            panelClosedRunId = null
+        }
+        render(lastState)
+    }
+
+    /** 패널을 펼칠지. 끝난 명령은 접는다(오류만 상태가 펼치라고 해서 펼친다). */
+    private fun panelOpen(state: AssistantUiState): Boolean {
+        if (state.phase == AssistantPhase.Idle) return false
+        if (state.phase == AssistantPhase.Success || state.phase == AssistantPhase.Delivered ||
+            state.phase == AssistantPhase.Cancelled
+        ) {
+            return false
+        }
+        if (panelClosedRunId == state.runId) return false
+        return panelOpenRunId == state.runId || state.expanded
+    }
+
+    private fun updatePanel(state: AssistantUiState, text: CapsuleText) {
+        val expanded = panel ?: return
+        val open = panelOpen(state)
+        if (open) expanded.bind(state, text)
+        val wasVisible = expanded.visibility == View.VISIBLE
+        expanded.visibility = if (open) View.VISIBLE else View.GONE
+        // 패널이 붙거나 떨어지면 창의 높이가 바뀐다. 그때마다 도킹 위치를 다시 잡는다.
+        if (open != wasVisible) root?.post { correctPosition(0) }
+    }
+
     private fun hide() {
         handler.removeCallbacks(autoHide)
-        val capsule = view
-        if (added && capsule != null) {
+        val content = root
+        if (added && content != null) {
             try {
-                windowManager.removeView(capsule)
+                windowManager.removeView(content)
             } catch (e: RuntimeException) {
                 Log.w(TAG, "캡슐 창을 떼지 못했다", e)
             }
@@ -249,10 +322,10 @@ internal class AssistantOverlayController(
     }
 
     private fun update(lp: WindowManager.LayoutParams) {
-        val capsule = view ?: return
+        val content = root ?: return
         if (!added) return
         try {
-            windowManager.updateViewLayout(capsule, lp)
+            windowManager.updateViewLayout(content, lp)
         } catch (e: RuntimeException) {
             Log.w(TAG, "캡슐 창을 고치지 못했다", e)
         }

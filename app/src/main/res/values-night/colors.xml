@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 오버레이 캡슐 다크(디자인 tokens.json dark). 이름은 values/colors.xml 과 같다. -->
+    <!-- 오버레이 디자인 토큰 다크(aemx-v2 tokens.json dark 와 SVG dark). 이름은 values/colors.xml 과 같다. -->
+    <color name="aemx_background">#FF11141C</color>
     <color name="aemx_surface">#FF11141C</color>
-    <color name="aemx_stroke">#FF2A3142</color>
+    <color name="aemx_stroke">#FF343C50</color>
     <color name="aemx_text">#FFF4F6FF</color>
     <color name="aemx_text_secondary">#FFB6C0D4</color>
     <color name="aemx_action">#FF9BB3FF</color>
-    <color name="aemx_chip">#FF1D2330</color>
-    <color name="aemx_logo">#FF648BFF</color>
-    <color name="aemx_logo_end">#FF9878FF</color>
-    <color name="aemx_logo_text">#FF11141C</color>
+    <color name="aemx_success_text">#FF55C99A</color>
+    <color name="aemx_error_text">#FFFF9EAA</color>
+    <color name="aemx_chip">#FF222938</color>
 </resources>

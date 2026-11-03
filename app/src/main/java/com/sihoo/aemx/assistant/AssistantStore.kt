@@ -56,6 +56,21 @@ class AssistantStore(scope: CoroutineScope) {
         _cancelRequests.tryEmit(current.runId)
     }
 
+    private val _continueRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /**
+     * 사람이 직접 처리한 뒤 "계속"을 눌렀다는 의도. 값은 멈춰 있던 명령의 runId 다. 다시 이어서 실행하는 것은
+     * 명령을 소유한 쪽(개발 화면의 오케스트레이터)이 이 흐름을 받아 한다. 화면은 의도만 보낸다.
+     */
+    val continueRequests: SharedFlow<String> = _continueRequests.asSharedFlow()
+
+    /** "계속" 의도. 직접 처리 대기(NeedsUser) 중이고 중단 요청이 없을 때만 보낸다. */
+    fun requestContinuation() {
+        val current = _state.value
+        if (current.phase != AssistantPhase.NeedsUser || current.cancellationRequested) return
+        _continueRequests.tryEmit(current.runId)
+    }
+
     companion object {
         /**
          * 앱 전체가 함께 쓰는 하나. 개발 화면이 사건을 넣고, 다음 단계의 오버레이(접근성 서비스)가

@@ -3,7 +3,11 @@ package com.sihoo.aemx.assistant.overlay
 import com.sihoo.aemx.assistant.AssistantPhase
 import com.sihoo.aemx.assistant.AssistantReducer
 import com.sihoo.aemx.assistant.AssistantUiState
+import com.sihoo.aemx.assistant.UserMessages
 import com.sihoo.aemx.pipeline.StepStatus
+
+/** 듣는 중 캡슐의 모양. 아니면 [None] 이고 접힌 캡슐이다. */
+enum class VoiceState { None, Listening, Recognizing }
 
 /** 캡슐에 보이는 글자와 버튼. [visible] 이 false 면 캡슐을 숨긴다. */
 data class CapsuleText(
@@ -12,7 +16,9 @@ data class CapsuleText(
     /** 보조 줄("단계 2/3"). 없으면 빈 문자열. */
     val subtitle: String = "",
     val showStop: Boolean = false,
-    val stopEnabled: Boolean = true
+    val stopEnabled: Boolean = true,
+    /** 듣는 중이면 높이 88 캡슐에 파형과 광원을 켠다. 중단을 누르면 [None] 이 된다. */
+    val voice: VoiceState = VoiceState.None
 )
 
 /** 화면 상태를 캡슐 문구로 바꾼다. 순수 함수라 안드로이드 없이 테스트한다. */
@@ -49,7 +55,8 @@ object CapsuleTextFactory {
                 AssistantPhase.NeedsUser -> NEEDS_USER
                 AssistantPhase.Success -> state.result?.summary ?: ""
                 AssistantPhase.Delivered -> AssistantReducer.DELIVERED_MESSAGE
-                AssistantPhase.Error -> state.error?.takeIf { it.isNotBlank() } ?: ERROR
+                // 개발 로그 문장은 사용자에게 그대로 내보내지 않고 짧은 안내로 바꾼다.
+                AssistantPhase.Error -> UserMessages.forFailure(state.error)
                 AssistantPhase.Cancelled -> CANCELLED
             }
         }
@@ -68,8 +75,19 @@ object CapsuleTextFactory {
             title = title,
             subtitle = subtitle,
             showStop = running,
-            stopEnabled = !state.cancellationRequested
+            stopEnabled = !state.cancellationRequested,
+            voice = voiceFor(state)
         )
+    }
+
+    /** 중단을 눌렀으면 파형과 광원을 바로 멈춘다(접힌 캡슐로 돌아간다). */
+    private fun voiceFor(state: AssistantUiState): VoiceState {
+        if (state.cancellationRequested) return VoiceState.None
+        return when (state.phase) {
+            AssistantPhase.Listening -> VoiceState.Listening
+            AssistantPhase.Recognizing -> VoiceState.Recognizing
+            else -> VoiceState.None
+        }
     }
 
     /** 지금 하는 단계 문장. 하는 단계가 없으면(막 끝낸 직후) 다음 단계, 그것도 없으면 일반 문구. */

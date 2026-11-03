@@ -157,8 +157,9 @@ class OverlayLogicTest {
         assertEquals("", delivered.subtitle)
         assertFalse(delivered.showStop)
 
+        // 개발 문장("LLM 오류")은 사용자에게 그대로 나가지 않고 짧은 안내로 바뀐다.
         val error = CapsuleTextFactory.from(state(AssistantPhase.Error, error = "LLM 오류"))
-        assertEquals("LLM 오류", error.title)
+        assertEquals(com.sihoo.aemx.assistant.UserMessages.UNDERSTAND_FAILED, error.title)
         assertFalse(error.showStop)
         assertEquals(CapsuleTextFactory.ERROR, CapsuleTextFactory.from(state(AssistantPhase.Error)).title)
 
