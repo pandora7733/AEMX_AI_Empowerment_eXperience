@@ -523,7 +523,9 @@ internal class ActionExecutor(
                 return StepResult.Fatal("검색어가 입력칸에서 사라져 검색 결과를 확인하지 못했습니다.")
             }
             if (submitConfirmed(root, field)) {
-                logSubmit("성공", submitMethods[submitStage - 1].label)
+                val won = submitMethods[submitStage - 1]
+                logSubmit("성공", won.label)
+                rememberSubmit(root.packageName?.toString().orEmpty(), won)
                 return StepResult.Success
             }
             if (SystemClock.uptimeMillis() - submitActedAt < SUBMIT_VERIFY_MS) return StepResult.NotReady
@@ -546,28 +548,38 @@ internal class ActionExecutor(
     private sealed interface SubmitMethod {
         val label: String
 
+        /** 기억할 때 쓰는 이름(같은 앱에서 성공한 방법을 다음에 먼저 낸다). */
+        val kind: String
+
         /** 입력칸 오른쪽의 검색 버튼을 누른다. */
         class Press(val node: AccessibilityNodeInfo) : SubmitMethod {
             override val label = "버튼 누르기"
+            override val kind = "press"
         }
 
         /** 입력칸에 접근성 IME 엔터(ACTION_IME_ENTER, API 30 이상). 앱에 따라 무시된다. */
         class ImeAction(val field: AccessibilityNodeInfo) : SubmitMethod {
             override val label = "접근성 IME 엔터"
+            override val kind = "ime"
         }
 
         /** 입력기 연결로 검색 동작을 보낸다(EditorInfo.IME_ACTION_SEARCH, API 33 이상). */
         data object EditorSearch : SubmitMethod {
             override val label = "입력기 검색 동작"
+            override val kind = "editor"
         }
 
         /** 입력기 연결로 엔터 키를 누르고 뗀다(진짜 키 입력, API 33 이상). */
         data object KeyEnter : SubmitMethod {
             override val label = "입력기 엔터 키"
+            override val kind = "key"
         }
     }
 
-    /** 제출 방법 목록. 버튼이 분명하면 그것이 먼저, 그다음 접근성 IME 엔터, 입력기 연결 방법 순서다. */
+    /**
+     * 제출 방법 목록. 버튼이 분명하면 그것이 먼저, 그다음 접근성 IME 엔터, 입력기 연결 방법 순서다.
+     * 같은 앱(패키지)에서 마지막으로 성공한 방법이 있으면 그것을 맨 앞으로 옮긴다(기억은 프로세스 안에서만).
+     */
     private fun submitMethodsFor(root: AccessibilityNodeInfo, field: AccessibilityNodeInfo): List<SubmitMethod> {
         val methods = mutableListOf<SubmitMethod>()
         val buttons = clickableNodes(root)
@@ -582,7 +594,14 @@ internal class ActionExecutor(
             methods += SubmitMethod.EditorSearch
             methods += SubmitMethod.KeyEnter
         }
-        return methods
+        val remembered = submitWins[root.packageName?.toString().orEmpty()]
+        return methods.sortedBy { if (it.kind == remembered) 0 else 1 }
+    }
+
+    /** 성공한 제출 방법을 앱별로 기억한다. 앱이 바뀌거나 프로세스가 끝나면 잊는다. */
+    private fun rememberSubmit(packageName: String, method: SubmitMethod) {
+        submitWins[packageName] = method.kind
+        Log.i(TAG, "검색 제출 방법을 기억한다: 앱=$packageName 방법=${method.label}")
     }
 
     private fun runSubmit(root: AccessibilityNodeInfo, target: String, method: SubmitMethod): Boolean = when (method) {
@@ -918,6 +937,9 @@ internal class ActionExecutor(
 
         /** 검색을 제출한 뒤 결과가 떴는지 기다리는 시간. 안 떴으면 다음 제출 방법으로 넘어간다. */
         const val SUBMIT_VERIFY_MS = 1_200L
+
+        /** 앱(패키지)별로 검색 제출에 마지막으로 성공한 방법의 이름. 프로세스 안에서만 기억한다. */
+        private val submitWins = HashMap<String, String>()
 
         /** step 마다 제출하는 호출자가 정착을 건너뛸 수 있는 행동. 재생·스크롤·메시지 전송은 빼 둔다. */
         val FAST_SETTLE_ACTIONS = setOf(ActionType.OPEN_APP, ActionType.SEARCH, ActionType.TAP, ActionType.INPUT_TEXT)

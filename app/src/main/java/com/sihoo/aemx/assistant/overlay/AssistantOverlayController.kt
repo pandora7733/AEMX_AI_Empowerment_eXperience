@@ -65,6 +65,9 @@ internal class AssistantOverlayController(
     /** 캡슐 창이 지금 화면에 떠 있는지. */
     val isShowing: Boolean get() = added
 
+    /** 캡슐이 사라지는 중인지. 그 사이에 다시 나타나면 창을 떼지 않는다. */
+    private var exiting = false
+
     fun attach() {
         if (scope != null) return
         val newScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -76,7 +79,7 @@ internal class AssistantOverlayController(
     fun detach() {
         scope?.cancel()
         scope = null
-        hide()
+        hide(animated = false)
         view = null
         root = null
         panel = null
@@ -92,7 +95,7 @@ internal class AssistantOverlayController(
     /** 다크 모드나 글자 크기가 바뀌었다. 색과 크기를 다시 읽도록 캡슐을 새로 만든다. */
     fun onConfigurationChanged() {
         val showing = added
-        hide()
+        hide(animated = false)
         view = null
         root = null
         panel = null
@@ -100,6 +103,7 @@ internal class AssistantOverlayController(
     }
 
     private fun render(state: AssistantUiState) {
+        val previous = lastState.phase
         lastState = state
         val text = CapsuleTextFactory.from(state)
         if (!text.visible || !CapsuleVisibility.shouldShow(state, enabled, dismissedRunId)) {
@@ -108,6 +112,7 @@ internal class AssistantOverlayController(
         }
         show(DockPolicy.dockFor(state.phase))
         view?.bind(text, dismissible = state.phase.isTerminal)
+        if (state.phase == AssistantPhase.Success && previous != AssistantPhase.Success) view?.popSuccess()
         updatePanel(state, text)
 
         handler.removeCallbacks(autoHide)
@@ -126,6 +131,11 @@ internal class AssistantOverlayController(
     }
 
     private fun show(newDock: Dock) {
+        // 사라지는 중에 다시 나타나면 사라지는 움직임을 끊고 그대로 보여 준다.
+        if (exiting) {
+            exiting = false
+            view?.cancelExit()
+        }
         val capsule = view ?: CapsuleView(
             service,
             onStop = { store.requestCancellation() },
@@ -160,6 +170,7 @@ internal class AssistantOverlayController(
                 Log.w(TAG, "캡슐 창을 붙이지 못했다", e)
                 return
             }
+            capsule.animateIn()
             capsule.post { correctPosition(0) }
         } else if (dockChanged) {
             val lp = params ?: return
@@ -209,15 +220,44 @@ internal class AssistantOverlayController(
     private fun updatePanel(state: AssistantUiState, text: CapsuleText) {
         val expanded = panel ?: return
         val open = panelOpen(state)
-        if (open) expanded.bind(state, text)
         val wasVisible = expanded.visibility == View.VISIBLE
-        expanded.visibility = if (open) View.VISIBLE else View.GONE
-        // 패널이 붙거나 떨어지면 창의 높이가 바뀐다. 그때마다 도킹 위치를 다시 잡는다.
-        if (open != wasVisible) root?.post { correctPosition(0) }
+        if (open) expanded.bind(state, text)
+        when {
+            open && !wasVisible -> expanded.open()
+            !open && wasVisible -> expanded.close { root?.post { correctPosition(0) } }
+            open -> Unit
+            else -> expanded.visibility = View.GONE
+        }
+        // 패널이 붙거나 떨어지면 창의 높이가 바뀐다. 펼칠 때는 바로, 닫을 때는 닫힌 뒤에 도킹 위치를 다시 잡는다.
+        if (open && !wasVisible) root?.post { correctPosition(0) }
     }
 
-    private fun hide() {
+    /** 창을 뗀다. [animated] 면 캡슐이 흐려진 뒤에 뗀다(성공하면 캡슐이 저절로 사라질 때 등). */
+    private fun hide(animated: Boolean = true) {
         handler.removeCallbacks(autoHide)
+        val capsule = view
+        if (!added) {
+            exiting = false
+            touchGate.reset()
+            return
+        }
+        if (!animated || capsule == null || OverlayMotion.isReduced()) {
+            exiting = false
+            removeWindow()
+            return
+        }
+        if (exiting) return
+        exiting = true
+        capsule.animateOut {
+            // 사라지는 중에 다시 나타나지 않았을 때만 뗀다([show] 가 exiting 을 끈다).
+            if (exiting) {
+                exiting = false
+                removeWindow()
+            }
+        }
+    }
+
+    private fun removeWindow() {
         val content = root
         if (added && content != null) {
             try {

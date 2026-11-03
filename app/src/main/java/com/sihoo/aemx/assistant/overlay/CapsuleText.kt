@@ -18,7 +18,9 @@ data class CapsuleText(
     val showStop: Boolean = false,
     val stopEnabled: Boolean = true,
     /** 듣는 중이면 높이 88 캡슐에 파형과 광원을 켠다. 중단을 누르면 [None] 이 된다. */
-    val voice: VoiceState = VoiceState.None
+    val voice: VoiceState = VoiceState.None,
+    /** 이해 단계라 글자가 약하게 맥박친다(1800ms). */
+    val pulse: Boolean = false,
 )
 
 /** 화면 상태를 캡슐 문구로 바꾼다. 순수 함수라 안드로이드 없이 테스트한다. */
@@ -76,7 +78,8 @@ object CapsuleTextFactory {
             subtitle = subtitle,
             showStop = running,
             stopEnabled = !state.cancellationRequested,
-            voice = voiceFor(state)
+            voice = voiceFor(state),
+            pulse = running && !state.cancellationRequested && state.phase == AssistantPhase.Understanding,
         )
     }
 

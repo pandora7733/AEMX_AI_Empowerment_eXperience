@@ -35,6 +35,9 @@ internal class ExpandedPanelView(
     private val stop: TextView
     private val cont: TextView
 
+    /** 지금 그린 단계 줄들. 다시 그릴 때 펄스를 먼저 멈추려고 기억한다. */
+    private val rowViews = mutableListOf<TextView>()
+
     init {
         orientation = VERTICAL
         val space = px(R.dimen.aemx_space_12)
@@ -72,10 +75,15 @@ internal class ExpandedPanelView(
 
     /** 상태와 캡슐 문구로 패널을 채운다. 단계 목록은 매번 새로 그린다(단계 수가 적다). */
     fun bind(state: AssistantUiState, text: CapsuleText) {
-        title.text = text.title
+        if (title.text.toString() != text.title) {
+            title.text = text.title
+            OverlayMotion.swap(title)
+        }
         counter.text = text.subtitle
         counter.visibility = if (text.subtitle.isBlank()) View.GONE else View.VISIBLE
 
+        rowViews.forEach { OverlayMotion.stop(it) }
+        rowViews.clear()
         stepList.removeAllViews()
         PanelRows.from(state).forEach { row ->
             val line = label(
@@ -88,6 +96,9 @@ internal class ExpandedPanelView(
             line.maxLines = 2
             line.ellipsize = TextUtils.TruncateAt.END
             stepList.addView(line, matchWrap().apply { topMargin = px(R.dimen.aemx_space_8) })
+            rowViews += line
+            // 진행 중인 단계는 은은하게 펄스한다(중단하면 멈춘다).
+            if (row.statusWord == PROGRESS_WORD) OverlayMotion.pulse(line, OverlayMotion.EXECUTING_PULSE_MS)
         }
 
         val needsUser = state.phase == AssistantPhase.NeedsUser
@@ -102,6 +113,22 @@ internal class ExpandedPanelView(
 
         // 재계획 중에는 파랑 테두리로 회복 중임을 보여 준다. 다른 상태는 기본 테두리다.
         background = surface(if (state.phase == AssistantPhase.Replanning) R.color.aemx_action else R.color.aemx_stroke)
+    }
+
+    /** 패널을 연다. 패널이 떠오르고 단계 줄이 50ms 간격으로 차례로 나타난다. 높이는 바꾸지 않는다(창 위치 보정과 충돌). */
+    fun open() {
+        visibility = View.VISIBLE
+        val distance = px(R.dimen.aemx_space_8).toFloat()
+        OverlayMotion.panelIn(this, distance)
+        rowViews.forEachIndexed { index, line -> OverlayMotion.rowIn(line, index, distance) }
+    }
+
+    /** 패널을 닫는다. 흐려진 뒤 숨기고 [end] 를 부른다. 그 사이 다시 열면 닫는 움직임을 끊는다. */
+    fun close(end: () -> Unit) {
+        OverlayMotion.panelOut(this, px(R.dimen.aemx_space_8).toFloat()) {
+            visibility = View.GONE
+            end()
+        }
     }
 
     private fun surface(stroke: Int) = GradientDrawable().apply {
@@ -137,4 +164,9 @@ internal class ExpandedPanelView(
     private fun matchWrap() = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
 
     private fun px(dimen: Int) = resources.getDimensionPixelSize(dimen)
+
+    private companion object {
+        /** [PanelRows] 가 진행 중인 단계에 붙이는 말. */
+        const val PROGRESS_WORD = "진행 중"
+    }
 }

@@ -41,8 +41,11 @@ internal class CapsuleView(
     private val subtitle: TextView
     private val wave: VoiceWaveView
     private val stop: TextView
+    private val logo: AemxLogoView
     private var dismissible = false
     private var voice = VoiceState.None
+    private var titleTarget: String? = null
+    private var pulsing = false
 
     init {
         addView(glow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -57,7 +60,7 @@ internal class CapsuleView(
         addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
         // 로고는 장식이라 TalkBack 이 읽지 않는다(AemxLogoView 가 스스로 제외한다).
-        val logo = AemxLogoView(context)
+        logo = AemxLogoView(context)
         val logoSize = px(R.dimen.aemx_logo_size)
         body.addView(logo, LinearLayout.LayoutParams(logoSize, logoSize))
 
@@ -101,7 +104,13 @@ internal class CapsuleView(
                 cornerRadius = px(R.dimen.aemx_space_12).toFloat()
             }
             isClickable = true
-            setOnClickListener { onStop() }
+            setOnClickListener {
+                // 중단을 누르면 펄스와 파형을 0ms 로 바로 멈춘다(글자가 바뀌기를 기다리지 않는다).
+                OverlayMotion.stop(title)
+                OverlayMotion.stop(logo)
+                wave.setListening(false)
+                onStop()
+            }
         }
         body.addView(stop, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, touch).apply { marginStart = space })
 
@@ -117,13 +126,44 @@ internal class CapsuleView(
         this.dismissible = dismissible
         isClickable = dismissible
         if (text.voice != voice) applyVoice(text.voice)
-        if (title.text.toString() != text.title) title.text = text.title
+        // 같은 글자로 다시 그릴 때 인식 문장을 처음부터 다시 나타내지 않도록, 목표 글자와 비교한다.
+        if (titleTarget != text.title) {
+            titleTarget = text.title
+            if (text.voice == VoiceState.Recognizing) {
+                OverlayMotion.typewrite(title, text.title)
+            } else {
+                OverlayMotion.finishTypewrite(title, text.title)
+                OverlayMotion.swap(title)
+            }
+        }
+        if (text.pulse != pulsing) {
+            pulsing = text.pulse
+            if (text.pulse) {
+                OverlayMotion.pulse(title, CapsuleMotion.UNDERSTAND_PULSE_MS)
+                OverlayMotion.pulse(logo, CapsuleMotion.UNDERSTAND_PULSE_MS)
+            } else {
+                OverlayMotion.stop(title)
+                OverlayMotion.stop(logo)
+            }
+        }
         subtitle.text = text.subtitle
         subtitle.visibility = if (text.subtitle.isBlank() || voice != VoiceState.None) View.GONE else View.VISIBLE
         stop.visibility = if (text.showStop) View.VISIBLE else View.GONE
         stop.isEnabled = text.stopEnabled
         stop.alpha = if (text.stopEnabled) 1f else 0.5f
     }
+
+    /** 캡슐이 새로 나타난다(창을 붙인 뒤). */
+    fun animateIn() = OverlayMotion.enter(body, px(R.dimen.aemx_space_8).toFloat())
+
+    /** 캡슐이 사라진다. [end] 는 끝난 뒤 부른다(그 뒤에 창을 뗀다). */
+    fun animateOut(end: () -> Unit) = OverlayMotion.exit(body) { end() }
+
+    /** 사라지는 중에 다시 나타나면 되돌린다. */
+    fun cancelExit() = OverlayMotion.cancelExit(body)
+
+    /** 성공했다(체크가 나타나며 캡슐이 0.96 에서 1 로 커진다). */
+    fun popSuccess() = OverlayMotion.successPop(body)
 
     private fun applyVoice(next: VoiceState) {
         voice = next
