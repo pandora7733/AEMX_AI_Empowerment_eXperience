@@ -11,6 +11,8 @@
     <!-- 호출어를 화면이 꺼져 있을 때도 들으려면 마이크 사용 포그라운드 서비스가 필요하다. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 듣는 중 알림을 띄운다(안드로이드 13 이상은 사용자 허용이 필요하다). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 문자 보내기: 받는 사람 이름이 연락처에 정확히 한 명 있는지 확인한다. 실행 중에 사용자에게 물어본다. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />

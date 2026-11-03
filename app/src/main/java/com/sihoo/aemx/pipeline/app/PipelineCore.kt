@@ -107,6 +107,14 @@ object PipelineCore {
     /** 마지막으로 들은 최종 문장. 개발 화면의 명령칸에 넣는다. */
     val heard: StateFlow<String?> = _heard.asStateFlow()
 
+    private val _modelReady = MutableStateFlow(false)
+    /** 온디바이스 LLM 이 올라와 쓸 수 있는지. 첫 실행 안내의 "모델 준비" 항목이 본다. */
+    val modelReady: StateFlow<Boolean> = _modelReady.asStateFlow()
+
+    private val _modelMessage = MutableStateFlow("")
+    /** 모델 내려받기와 준비 진행 문장. */
+    val modelMessage: StateFlow<String> = _modelMessage.asStateFlow()
+
     private val _enrolling = MutableStateFlow(false)
     /** 목소리 등록 중인지. 등록 버튼을 막는다. */
     val enrolling: StateFlow<Boolean> = _enrolling.asStateFlow()
@@ -224,16 +232,21 @@ object PipelineCore {
             val planner = llmPlanner ?: LlamaPlanGenerator(appContext).also { llmPlanner = it }
             try {
                 withContext(Dispatchers.IO) {
-                    planner.prepare { _, message -> _status.value = message }
+                    planner.prepare { _, message ->
+                        _status.value = message
+                        _modelMessage.value = message
+                    }
                 }
                 collectJob?.cancel()
                 val fresh = buildOrchestrator(planner = planner)
                 orchestrator = fresh
                 collectJob = subscribe(fresh, announceEnds = false)
                 _status.value = appContext.getString(R.string.pipeline_llm_ready)
+                _modelReady.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "LLM 준비 실패", e)
                 _status.value = appContext.getString(R.string.pipeline_llm_failed, e.message ?: "")
+                _modelReady.value = false
                 settings.realLlm = false
             } finally {
                 _runEnabled.value = true
