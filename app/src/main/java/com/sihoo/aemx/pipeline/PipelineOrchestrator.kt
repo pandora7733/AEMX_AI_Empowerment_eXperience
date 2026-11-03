@@ -13,6 +13,7 @@ import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.TextMatch
 import com.sihoo.aemx.pipeline.youtube.YouTubeSearch
 import com.sihoo.aemx.accessibility.SearchCheck
+import com.sihoo.aemx.pipeline.youtube.ShortsShortcut
 import com.sihoo.aemx.pipeline.youtube.YouTubeShortcut
 import com.sihoo.aemx.pipeline.port.AppResolver
 
@@ -587,6 +588,8 @@ class PipelineOrchestrator(
             ActionType.OPEN_VIDEO ->
                 CommandMapping.Ready(ActionExecutor.Command.OpenVideo(step.target.orEmpty()))
 
+            ActionType.OPEN_SHORTS -> CommandMapping.Ready(ActionExecutor.Command.OpenShorts)
+
             ActionType.SCROLL ->
                 CommandMapping.Ready(
                     ActionExecutor.Command.Scroll(
@@ -717,12 +720,15 @@ class PipelineOrchestrator(
                     // 뒤의 동작이 앱을 함께 여는 "앱 열기"는 뺀다. LLM 이 주지 않는 기대치는 그다음에 채운다.
                     val pruned = PlanStepPruner.prune(result.plan)
                     // 유튜브 검색 후 N번째 재생은 YouTube Data API 로 영상 id 를 미리 찾아 바로 연다(처음 계획에만).
+                    // 쇼츠 열기는 주소 하나로 바로 연다(처음 계획에만). 아니면 검색 후 N번째 영상 API 경로를 본다.
                     val shortcut = if (request.mode == PlanRequest.Mode.INITIAL) {
-                        youtubeSearch()?.let { YouTubeShortcut.rewrite(pruned, request.utterance, it) } ?: pruned
+                        val shorts = ShortsShortcut.rewrite(pruned, request.utterance)
+                        if (shorts !== pruned) shorts
+                        else youtubeSearch()?.let { YouTubeShortcut.rewrite(pruned, request.utterance, it) } ?: pruned
                     } else {
                         pruned
                     }
-                    if (shortcut !== pruned) append(PipelineLogEntry.Level.INFO, "유튜브 API 로 영상을 바로 연다")
+                    if (shortcut !== pruned) append(PipelineLogEntry.Level.INFO, "유튜브 바로 열기 계획으로 바꿨다")
                     val enriched = inferencer.enrich(shortcut)
                     append(
                         PipelineLogEntry.Level.INFO,

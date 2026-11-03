@@ -29,6 +29,8 @@ internal object SearchRoutes {
             AppLauncher.YOUTUBE_PACKAGE -> "https://www.youtube.com/results?search_query=$encoded"
             // 유튜브 뮤직 앱이 music.youtube.com 링크를 받는다(실기기에서 확인 필요).
             AppLauncher.YOUTUBE_MUSIC_PACKAGE -> "https://music.youtube.com/search?q=$encoded"
+            // 크롬은 웹 검색 주소를 크롬 안에서 연다. 주소를 받지 못하면 아래 브라우저 방법으로 넘어간다.
+            AppLauncher.CHROME_PACKAGE -> "https://www.google.com/search?q=$encoded"
             else -> return emptyList()
         }
         val inApp = Route.View(url, packageName)

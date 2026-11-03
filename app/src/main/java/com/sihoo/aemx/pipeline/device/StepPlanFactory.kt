@@ -73,6 +73,11 @@ internal object StepPlanFactory {
                 target = command.videoId
             }
 
+            Command.OpenShorts -> {
+                action = A11yType.OPEN_SHORTS
+                target = PLACEHOLDER_TARGET
+            }
+
             is Command.NextVideo -> {
                 action = A11yType.NEXT_VIDEO
                 target = PLACEHOLDER_TARGET

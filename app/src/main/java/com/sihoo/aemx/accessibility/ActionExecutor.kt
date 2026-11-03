@@ -79,6 +79,8 @@ internal class ActionExecutor(
         ordinalTracker = null
         shortsSince = 0L
         shortsScrolled = false
+        inputStage = 0
+        inputActedAt = 0L
         when (step.action) {
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
@@ -96,6 +98,10 @@ internal class ActionExecutor(
             ActionType.OPEN_VIDEO -> appLauncher.openVideo(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
                 onFailure = { fail(index, step, it.message ?: "영상 열기 실패", id) },
+            )
+            ActionType.OPEN_SHORTS -> appLauncher.openShorts().fold(
+                onSuccess = { retryUntilReady(plan, index, id) },
+                onFailure = { fail(index, step, it.message ?: "쇼츠 열기 실패", id) },
             )
             ActionType.WAIT -> {
                 val delayMs = WaitDuration.millis(step.value ?: step.target)
@@ -200,6 +206,10 @@ internal class ActionExecutor(
         handler.postDelayed(check, 300L)
     }
 
+    /** 입력 한 step 안에서 쓴 방법 번호(0이면 아직 안 넣었다)와 마지막으로 넣은 시각. step 마다 새로 시작한다. */
+    private var inputStage = 0
+    private var inputActedAt = 0L
+
     private var lastProbeAt = 0L
     private var lastChipTapAt = 0L
     private var ordinalTracker: OrdinalTracker? = null
@@ -265,7 +275,7 @@ internal class ActionExecutor(
             return StepResult.NotReady
         }
         return when (step.action) {
-            ActionType.OPEN_APP, ActionType.OPEN_VIDEO -> StepResult.Success
+            ActionType.OPEN_APP, ActionType.OPEN_VIDEO, ActionType.OPEN_SHORTS -> StepResult.Success
             // 검색은 이번 검색어가 화면에 보일 때만 성공이다. 같은 앱의 옛 검색 결과도 앱 화면이라 패키지만으로는 구별되지 않는다.
             ActionType.SEARCH -> {
                 val visible = TextMatch.queryVisible(visibleTexts(root), step.target.orEmpty())
@@ -419,6 +429,10 @@ internal class ActionExecutor(
      * 누르기. 이름으로 먼저 찾고, 실패하면 역할로 찾는다. 검색 입력칸 말이면 칸을 누르고, 검색 버튼 말이면 버튼을 누른다.
      */
     private fun tap(root: AccessibilityNodeInfo, target: String): StepResult {
+        // 입력칸이 비어 있으면 검색 버튼을 누르지 않는다. 빈 칸으로 누르는 검색은 의미가 없다.
+        if (SearchFieldRole.isButtonRequest(target) && blankSearchField(root)) {
+            return StepResult.Fatal("검색어가 입력칸에 없어 검색 버튼을 누르지 않았습니다.")
+        }
         NodeFinder.find(root, target)?.let { node ->
             val clickable = NodeFinder.clickableAncestor(node) ?: return StepResult.NotReady
             return if (clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) StepResult.Success else StepResult.NotReady
@@ -440,37 +454,95 @@ internal class ActionExecutor(
             ?: (if (SearchFieldRole.isFieldRequest(target)) findSearchField(root) else null)
             ?: return StepResult.NotReady
         val probe = text.trim().take(TextMatch.QUERY_KEY_LENGTH)
-        // SET_TEXT 를 받으면 끝이다. 칸의 글자는 바로 다시 읽히지 않는 경우가 있어 확인하지 않는다(기존 동작).
-        // SET_TEXT 는 덧붙이지 않고 바꾸므로 다시 넣어도 중복되지 않는다.
-        if (setNodeText(node, text) == StepResult.Success) return StepResult.Success
-        if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) return StepResult.NotReady
+        // 넣은 뒤 칸을 다시 읽어 확인한다. 비어 있으면 다음 방법으로 넘어가고, 다 해도 안 들어가면 실패로 알린다.
+        // 방법이 실제로 실행됐을 때만 확인한다(받지 않은 방법은 아무것도 넣지 않았다).
+        if (inputActedAt > 0L) {
+            val verdict = fieldVerdict(node, probe)
+            if (verdict != FieldVerdict.Empty) return finishInput(node, verdict)
+            if (SystemClock.uptimeMillis() - inputActedAt < INPUT_VERIFY_MS) return StepResult.NotReady
+        }
+        if (inputStage >= INPUT_STAGES) {
+            logInput(node, "들어가지 않음(방법 $inputStage 까지 시도)")
+            return StepResult.Fatal("검색어를 입력칸에 넣지 못했습니다.")
+        }
+        inputStage++
+        logInput(node, "방법 $inputStage 실행 전")
+        val acted = runInputStage(node, text, inputStage)
+        inputActedAt = if (acted) SystemClock.uptimeMillis() else 0L
+        // 바로 보이면 끝이다. 아니면 다음 확인 때 본다(화면이 아직 안 바뀌었을 수 있다).
+        val verdict = if (acted) fieldVerdict(node, probe) else FieldVerdict.Empty
+        if (verdict != FieldVerdict.Empty) return finishInput(node, verdict)
+        return StepResult.NotReady
+    }
+
+    /** 입력 방법 하나. 1·4는 SET_TEXT, 2·5는 포커스 후 붙여넣기, 3은 칸을 좌표로 눌러 포커스만 준다. */
+    private fun runInputStage(node: AccessibilityNodeInfo, text: String, stage: Int): Boolean = when (stage) {
+        1, 4 -> setNodeText(node, text) == StepResult.Success
+        2, 5 -> focusAndPaste(node, text)
+        3 -> {
+            val bounds = Rect().also(node::getBoundsInScreen)
+            bounds.width() > 0 && bounds.height() > 0 && service.tap(bounds.exactCenterX(), bounds.exactCenterY())
+        }
+        else -> false
+    }
+
+    private fun focusAndPaste(node: AccessibilityNodeInfo, text: String): Boolean {
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) return false
         // 기존 글자를 모두 고른 뒤 붙여넣으면 바뀐다(선택 범위 지정은 API 18 부터 있다).
         val selectAll = Bundle().apply {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, node.text?.length ?: 0)
         }
         node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectAll)
-        if (!copyToClipboard(text)) return StepResult.NotReady
-        if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return StepResult.NotReady
-        node.refresh()
-        return if (showsOtherText(node, probe)) StepResult.NotReady else StepResult.Success
+        if (!copyToClipboard(text)) return false
+        return node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+    }
+
+    private fun finishInput(node: AccessibilityNodeInfo, verdict: FieldVerdict): StepResult {
+        logInput(node, if (verdict == FieldVerdict.Filled) "들어갔다" else "확인할 수 없어 그대로 둔다")
+        return StepResult.Success
     }
 
     /**
-     * 칸에 글자가 보이는데 넣으려던 글자가 아니면 true. 글자를 읽을 수 없거나(비어 있음) 맞으면 false.
-     * 붙여넣기처럼 칸에 바로 안 보이는 경우를 실패로 몰지 않기 위해 빈 칸은 확인하지 않는다.
+     * 칸을 다시 읽은 결과. [Filled]: 넣은 글자가 보인다. [Empty]: 힌트만 보이거나 비었다(아직 안 들어갔다).
+     * [Unknown]: 글자를 읽을 수 없거나(비밀번호, 글자 노출 없음) 다른 글자가 보인다. 기존처럼 성공으로 둔다.
      */
-    private fun showsOtherText(node: AccessibilityNodeInfo, probe: String): Boolean {
+    private enum class FieldVerdict { Filled, Empty, Unknown }
+
+    private fun fieldVerdict(node: AccessibilityNodeInfo, probe: String): FieldVerdict {
+        node.refresh()
+        if (node.isPassword) return FieldVerdict.Unknown
         // 힌트 글자만 보이는 칸은 비어 있는 것이다(힌트를 글자로 착각하지 않는다).
-        if (Build.VERSION.SDK_INT >= 26 && node.isShowingHintText) return false
-        val shown = node.text?.toString()?.takeIf { it.isNotBlank() } ?: return false
-        return probe.isNotEmpty() && !TextMatch.contains(shown, probe)
+        if (Build.VERSION.SDK_INT >= 26 && node.isShowingHintText) return FieldVerdict.Empty
+        val shown = node.text?.toString() ?: return FieldVerdict.Unknown
+        if (shown.isBlank()) return FieldVerdict.Empty
+        return if (probe.isEmpty() || TextMatch.contains(shown, probe)) FieldVerdict.Filled else FieldVerdict.Unknown
+    }
+
+    /** 입력칸 진단. 글자 내용은 남기지 않고 길이만 남긴다. 메인이 폰에서 원인을 볼 때 쓴다. */
+    private fun logInput(node: AccessibilityNodeInfo, outcome: String) {
+        val hint = Build.VERSION.SDK_INT >= 26 && node.isShowingHintText
+        val length = if (hint) 0 else node.text?.length ?: -1
+        runCatching {
+            Log.i(
+                TAG,
+                "입력칸: class=${node.className} id=${node.viewIdResourceName} editable=${node.isEditable} " +
+                    "focused=${node.isFocused} hint=$hint 글자길이=$length 단계=$inputStage 결과=$outcome"
+            )
+        }
     }
 
     private fun copyToClipboard(text: String): Boolean {
         val clipboard = service.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
         clipboard.setPrimaryClip(ClipData.newPlainText("aemx", text))
         return true
+    }
+
+    /** 검색 입력칸이 있는데 글자가 없다(힌트만 보이거나 빈 글자). 글자를 읽을 수 없으면 비었다고 보지 않는다. */
+    private fun blankSearchField(root: AccessibilityNodeInfo): Boolean {
+        val field = findSearchField(root) ?: return false
+        if (Build.VERSION.SDK_INT >= 26 && field.isShowingHintText) return true
+        return field.text?.isBlank() == true
     }
 
     /** 역할로 찾은 검색 입력칸. 편집 가능한 노드 중에서 [SearchFieldRole.pickField] 가 고른다. */
@@ -663,6 +735,12 @@ internal class ActionExecutor(
     private companion object {
         const val MAX_TEXT_NODES = 600
         const val MAX_POPUP_DISMISSES = 2
+
+        /** 입력 방법은 이만큼 있다(SET_TEXT, 붙여넣기, 좌표 포커스 후 SET_TEXT, 붙여넣기). */
+        const val INPUT_STAGES = 5
+
+        /** 넣은 뒤 칸이 비어 보여도 화면이 바뀔 틈을 이만큼 준 다음에야 다음 방법으로 넘어간다. */
+        const val INPUT_VERIFY_MS = 400L
 
         /** step 마다 제출하는 호출자가 정착을 건너뛸 수 있는 행동. 재생·스크롤·메시지 전송은 빼 둔다. */
         val FAST_SETTLE_ACTIONS = setOf(ActionType.OPEN_APP, ActionType.SEARCH, ActionType.TAP, ActionType.INPUT_TEXT)

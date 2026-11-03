@@ -20,6 +20,7 @@ object StepLabelFormatter {
             ActionType.PLAY_FIRST -> "첫 영상 재생하기"
             ActionType.NEXT_VIDEO -> "다음 영상으로 넘기기"
             ActionType.OPEN_VIDEO -> "영상 열기"
+            ActionType.OPEN_SHORTS -> "쇼츠 열기"
             ActionType.SCROLL -> if (isUp(target)) "위로 스크롤하기" else "아래로 스크롤하기"
             ActionType.WAIT -> "잠시 기다리기"
             ActionType.SEND_MESSAGE -> "${recipient(name)}에게 ${messenger(app)} 보내기"
@@ -41,6 +42,7 @@ object StepLabelFormatter {
             ActionType.PLAY_FIRST -> "첫 영상을 재생하는 중…"
             ActionType.NEXT_VIDEO -> "다음 영상으로 넘기는 중…"
             ActionType.OPEN_VIDEO -> "영상을 여는 중…"
+            ActionType.OPEN_SHORTS -> "쇼츠를 여는 중…"
             ActionType.SCROLL -> if (isUp(target)) "위로 스크롤하는 중…" else "아래로 스크롤하는 중…"
             ActionType.WAIT -> "잠시 기다리는 중…"
             ActionType.SEND_MESSAGE -> "${recipient(name)}에게 ${messenger(app)} 보내는 중…"
@@ -62,6 +64,7 @@ object StepLabelFormatter {
             ActionType.PLAY_FIRST -> "첫 영상을 재생했어요"
             ActionType.NEXT_VIDEO -> "다음 영상으로 넘겼어요"
             ActionType.OPEN_VIDEO -> "영상을 열었어요"
+            ActionType.OPEN_SHORTS -> "쇼츠를 열었어요"
             ActionType.SCROLL -> "스크롤했어요"
             ActionType.WAIT -> "잠시 기다렸어요"
             ActionType.SEND_MESSAGE -> {

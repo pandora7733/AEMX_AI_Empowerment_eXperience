@@ -69,6 +69,17 @@ internal class AppLauncher(private val context: Context) {
     }
 
     /**
+     * 유튜브 쇼츠 피드를 연다. https 주소는 재생 중에도 쇼츠 화면으로 간다(실기기에서 확인: adb -p 유튜브).
+     * 주소를 받을 앱이 없으면 예외를 그대로 올려 실패로 알린다.
+     */
+    fun openShorts(): Result<Unit> = runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/shorts")).apply {
+            setPackage(YOUTUBE_PACKAGE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
+    /**
      * 유튜브 영상 하나를 유튜브 앱으로 연다. 영상 id 형식이 아니면 열지 않는다.
      *
      * 재생 중인 영상이 있으면 https 주소는 무시되고(유튜브가 최상위 인스턴스에 전달만 한다), vnd.youtube 주소는 바뀐다.
@@ -158,6 +169,9 @@ internal class AppLauncher(private val context: Context) {
             "melon" to MELON_PACKAGE,
             "쿠팡" to COUPANG_PACKAGE,
             "coupang" to COUPANG_PACKAGE,
+            "크롬" to CHROME_PACKAGE,
+            "구글 크롬" to CHROME_PACKAGE,
+            "chrome" to CHROME_PACKAGE,
             // 메시지 앱은 기기마다 다르다. 실제로 열 때는 기본 SMS 앱으로 바꾼다([resolve]).
             "메시지" to SAMSUNG_MESSAGES_PACKAGE,
             "문자" to SAMSUNG_MESSAGES_PACKAGE,
@@ -206,7 +220,19 @@ internal class AppLauncher(private val context: Context) {
             value.lowercase(Locale.ROOT).filterNot(Char::isWhitespace)
 
         /** 고정 표에서만 찾는다. 컨텍스트가 없는 곳(계획 파서 등)에서 쓴다. 설치된 앱까지 찾으려면 [resolve]. */
-        fun packageFor(value: String): String? = PACKAGE_NAMES[normalizeName(value)]
+        fun packageFor(value: String): String? {
+            val key = normalizeName(value)
+            PACKAGE_NAMES[key]?.let { return it }
+            // "인스타 릴스", "유튜브 쇼츠" 처럼 앱 이름 뒤에 기능어가 붙은 말은 앞의 앱 이름으로 본다.
+            // 정확히 맞는 별칭(예: "유튜브 뮤직")이 먼저라서 별개 앱은 이 규칙에 걸리지 않는다.
+            val base = FEATURE_SUFFIXES.firstOrNull { key.length > it.length && key.endsWith(it) }
+                ?.let { key.removeSuffix(it) }
+                ?: return null
+            return PACKAGE_NAMES[base]
+        }
+
+        /** 앱 이름 뒤에 붙는 기능어. 혼자 쓰이는 "릴스" 같은 말은 앱으로 보지 않는다. */
+        private val FEATURE_SUFFIXES = listOf("릴스", "쇼츠", "스토리", "reels", "shorts", "stories")
 
         /** 유튜브 영상 id 형식(영문·숫자·_·-, 6~20자). 그 밖의 문자는 주소에 넣지 않는다. */
         fun isVideoId(value: String): Boolean = VIDEO_ID.matches(value)
@@ -214,7 +240,7 @@ internal class AppLauncher(private val context: Context) {
         private val VIDEO_ID = Regex("[A-Za-z0-9_-]{6,20}")
 
         fun supportsDirectSearch(value: String): Boolean = packageFor(value) in setOf(
-            NAVER_PACKAGE, GOOGLE_PACKAGE, YOUTUBE_PACKAGE, YOUTUBE_MUSIC_PACKAGE,
+            NAVER_PACKAGE, GOOGLE_PACKAGE, YOUTUBE_PACKAGE, YOUTUBE_MUSIC_PACKAGE, CHROME_PACKAGE,
         )
 
         const val NAVER_PACKAGE = "com.nhn.android.search"
@@ -225,6 +251,7 @@ internal class AppLauncher(private val context: Context) {
         const val KAKAOTALK_PACKAGE = "com.kakao.talk"
         const val MELON_PACKAGE = "com.iloen.melon"
         const val COUPANG_PACKAGE = "com.coupang.mobile"
+        const val CHROME_PACKAGE = "com.android.chrome"
         const val SAMSUNG_MESSAGES_PACKAGE = "com.samsung.android.messaging"
     }
 }

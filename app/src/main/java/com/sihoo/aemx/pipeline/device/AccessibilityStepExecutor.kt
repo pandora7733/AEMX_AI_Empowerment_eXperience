@@ -137,6 +137,7 @@ class AccessibilityStepExecutor(
         is Command.SendMessage -> command.appName.takeIf { isSupportedApp(it) }
         // 영상 열기는 유튜브 앱에서만 한다.
         is Command.OpenVideo -> YOUTUBE
+        Command.OpenShorts -> YOUTUBE
         // 첫 영상 재생을 받는 앱은 유튜브와 유튜브 뮤직뿐이다. 앞 화면이 유튜브 뮤직일 때만 그쪽으로 보내고,
         // 그 밖에는 앞 화면이나 직전 앱을 보지 않고 유튜브다. 서비스가 패키지를 비교하므로 이름이 틀리면 늘 NotReady 다.
         Command.PlayFirst, is Command.PlayNth ->

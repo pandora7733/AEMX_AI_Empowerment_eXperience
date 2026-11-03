@@ -35,12 +35,14 @@ object AppMentionGuard {
 
         // open_app 의 target 은 plan.app 과 같아야 실행모듈이 받아 준다. 모델이 target 만 깨뜨려 내면
         // ("넷플ิก스" 처럼 다른 문자가 섞임) 계획 전체가 거부되므로 app 에 맞춘다. 앱이 이미 맞아도 건다.
-        val steps = plan.steps.map { step ->
-            if (step.action == ActionType.OPEN_APP && step.target != app) step.copy(target = app) else step
-        }
         val appSame = (canonical(plan.app) ?: plan.app.trim()) == app
-        if (appSame && steps == plan.steps) return plan
-        return plan.copy(app = if (appSame) plan.app else app, steps = steps)
+        // 같은 앱이면 계획의 이름을 그대로 두고, open_app 도 그 이름에 맞춘다(둘이 다르면 실행모듈이 계획을 거부한다).
+        val kept = if (appSame) plan.app else app
+        val aligned = plan.steps.map { step ->
+            if (step.action == ActionType.OPEN_APP && step.target != kept) step.copy(target = kept) else step
+        }
+        if (appSame && aligned == plan.steps) return plan
+        return plan.copy(app = kept, steps = aligned)
     }
 
     /** 문장 앞에서 "앱 + 에서/에/에서는/에는" 으로 지목한 앱의 정식 이름. */
@@ -146,8 +148,10 @@ object AppMentionGuard {
      */
     private val ALIASES: List<Pair<String, String>> = listOf(
         "유튜브 뮤직" to "유튜브 뮤직", "유튜브뮤직" to "유튜브 뮤직", "유투브 뮤직" to "유튜브 뮤직", "유투브뮤직" to "유튜브 뮤직",
+        "인스타그램 릴스" to "인스타그램", "인스타 릴스" to "인스타그램",
         "인스타그램" to "인스타그램", "인스타" to "인스타그램",
         "카카오톡" to "카카오톡", "카톡" to "카카오톡", "쿠팡" to "쿠팡",
+        "구글 크롬" to "크롬", "크롬" to "크롬", "chrome" to "크롬",
         "문자 메시지" to "메시지", "메시지" to "메시지", "문자" to "메시지",
         "교보문고" to "교보문고", "알라딘" to "알라딘",
         "네이버" to "네이버", "구글" to "구글",

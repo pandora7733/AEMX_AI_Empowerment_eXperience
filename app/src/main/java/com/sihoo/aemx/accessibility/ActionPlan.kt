@@ -41,7 +41,10 @@ enum class ActionType(val wireName: String) {
     SEND_MESSAGE("send_message"),
 
     /** 유튜브 영상 하나를 바로 연다. target 은 영상 id(YouTube Data API 로 미리 찾은 것). */
-    OPEN_VIDEO("open_video");
+    OPEN_VIDEO("open_video"),
+
+    /** 유튜브 쇼츠 피드를 바로 연다. target 은 쓰지 않는다. */
+    OPEN_SHORTS("open_shorts");
 
     companion object {
         fun fromWireName(value: String): ActionType = entries.firstOrNull { it.wireName == value }
@@ -88,6 +91,9 @@ object ActionPlanParser {
                     )) { "next_video는 유튜브와 인스타그램에서만 지원합니다." }
                     require(action != ActionType.OPEN_VIDEO || AppLauncher.packageFor(app) == AppLauncher.YOUTUBE_PACKAGE) {
                         "open_video는 유튜브에서만 지원합니다."
+                    }
+                    require(action != ActionType.OPEN_SHORTS || AppLauncher.packageFor(app) == AppLauncher.YOUTUBE_PACKAGE) {
+                        "open_shorts는 유튜브에서만 지원합니다."
                     }
                     require(action != ActionType.OPEN_VIDEO || AppLauncher.isVideoId(target)) {
                         "open_video의 target은 유튜브 영상 id여야 합니다."

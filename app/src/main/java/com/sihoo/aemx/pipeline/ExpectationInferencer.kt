@@ -97,6 +97,15 @@ class ExpectationInferencer(
                 )
             }
 
+            // 쇼츠 열기도 영상 열기와 같다. 유튜브 앱 화면이 쇼츠 피드로 바뀌어야 한다.
+            ActionType.OPEN_SHORTS -> step.copy(
+                expect = Expectation(
+                    packageName = appResolver.resolvePackage(appName),
+                    requireScreenChange = true,
+                    note = "유튜브 쇼츠 화면으로 넘어가야 한다"
+                )
+            )
+
             // 영상 열기는 유튜브 앱 화면으로 바뀌어야 한다. 재생 화면 글자는 믿기 어려워 앱과 화면 변화만 본다.
             ActionType.OPEN_VIDEO -> step.copy(
                 expect = Expectation(

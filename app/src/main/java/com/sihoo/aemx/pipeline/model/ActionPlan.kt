@@ -97,6 +97,9 @@ enum class ActionType(val wire: String, val label: String) {
      */
     OPEN_VIDEO("open_video", "영상 열기"),
 
+    /** 유튜브 쇼츠 피드를 바로 연다. target 은 쓰지 않는다. 쇼츠를 말한 명령을 탭 대신 이걸로 바꾼다(ShortsShortcut). */
+    OPEN_SHORTS("open_shorts", "쇼츠 열기"),
+
     /** 파서가 모르는 action 문자열. 실행하지 않고 재분석 대상이 된다. */
     UNKNOWN("", "알 수 없는 동작");
 

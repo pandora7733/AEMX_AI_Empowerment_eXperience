@@ -74,6 +74,9 @@ interface ActionExecutor {
         /** 유튜브 영상 id 로 영상 화면을 바로 연다(검색·스크롤 없이). */
         data class OpenVideo(val videoId: String) : Command
 
+        /** 유튜브 쇼츠 피드를 바로 연다(재생 중이어도). 쇼츠를 말한 명령을 탭 여러 번 대신 이걸로 바꾼다. */
+        data object OpenShorts : Command
+
         data class Scroll(val direction: Direction) : Command
 
         /**
