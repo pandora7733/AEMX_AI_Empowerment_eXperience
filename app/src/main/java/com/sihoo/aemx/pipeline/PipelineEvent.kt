@@ -104,4 +104,26 @@ sealed interface PipelineEvent {
         override val sequence: Long,
         val completedStepIds: Set<String>
     ) : PipelineEvent
+
+    /**
+     * 듣기가 시작됐다(호출어를 들었거나 듣기 버튼을 눌렀다). 명령 전이라 runId 는 음성 세션마다 새로 붙는다.
+     * 화면은 "듣는 중" 파형을 띄운다.
+     */
+    data class ListeningStarted(
+        override val runId: String,
+        override val sequence: Long
+    ) : PipelineEvent
+
+    /** 듣는 중에 중간 인식 글이 왔다. 화면은 인식 중(흐린 파형)으로 바꾸고 글을 보여 준다. */
+    data class Recognizing(
+        override val runId: String,
+        override val sequence: Long,
+        val partial: String
+    ) : PipelineEvent
+
+    /** 듣기가 끝났다(명령으로 넘어갔거나 호출어 창이 닫혔거나 듣기를 껐다). 화면의 듣는 중 상태를 치운다. */
+    data class ListeningEnded(
+        override val runId: String,
+        override val sequence: Long
+    ) : PipelineEvent
 }

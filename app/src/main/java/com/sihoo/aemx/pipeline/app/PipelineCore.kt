@@ -1,0 +1,714 @@
+package com.sihoo.aemx.pipeline.app
+
+import android.content.Context
+import android.os.SystemClock
+import android.util.Log
+import com.sihoo.aemx.R
+import com.sihoo.aemx.accessibility.AemxAccessibilityService
+import com.sihoo.aemx.accessibility.PlanOutcome
+import com.sihoo.aemx.AndroidTtsController
+import com.sihoo.aemx.assistant.AssistantStore
+import com.sihoo.aemx.pipeline.PipelineConfig
+import com.sihoo.aemx.pipeline.PipelineEvent
+import com.sihoo.aemx.pipeline.PipelineLogEntry
+import com.sihoo.aemx.pipeline.PipelineOrchestrator
+import com.sihoo.aemx.pipeline.PipelineState
+import com.sihoo.aemx.pipeline.PlanStepPruner
+import com.sihoo.aemx.pipeline.device.AccessibilityAppResolver
+import com.sihoo.aemx.pipeline.device.AccessibilityScreenObserver
+import com.sihoo.aemx.pipeline.device.AccessibilityStepExecutor
+import com.sihoo.aemx.pipeline.device.AnnouncementTexts
+import com.sihoo.aemx.pipeline.device.AppNames
+import com.sihoo.aemx.pipeline.device.ServicePlanBridge
+import com.sihoo.aemx.pipeline.device.ServiceScreenSource
+import com.sihoo.aemx.pipeline.device.announcementFor
+import com.sihoo.aemx.pipeline.fake.FakeAppResolver
+import com.sihoo.aemx.pipeline.fake.FakePlanGenerator
+import com.sihoo.aemx.pipeline.fake.FakeScreenObserver
+import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
+import com.sihoo.aemx.pipeline.llm.CloudSettings
+import com.sihoo.aemx.pipeline.llm.CommandOutcome
+import com.sihoo.aemx.pipeline.llm.CommandTiming
+import com.sihoo.aemx.pipeline.llm.HybridPlanGenerator
+import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
+import com.sihoo.aemx.pipeline.model.ActionPlan
+import com.sihoo.aemx.pipeline.model.ScreenSnapshot
+import com.sihoo.aemx.pipeline.port.PlanGenerator
+import com.sihoo.aemx.pipeline.port.PlanRequest
+import com.sihoo.aemx.pipeline.port.PlanResult
+import com.sihoo.aemx.pipeline.port.SpeechResult
+import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
+import com.sihoo.aemx.pipeline.stt.SpeakerVerifier
+import com.sihoo.aemx.pipeline.stt.WakeWordSpeechSource
+import com.sihoo.aemx.pipeline.youtube.YouTubeSearch
+import com.sihoo.aemx.pipeline.youtube.YouTubeSearchClient
+import com.sihoo.aemx.pipeline.youtube.YouTubeShortcut
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+
+/**
+ * 호출어 → 음성 인식 → 계획 → 실행 → 말하기 → 오버레이 상태까지의 파이프라인 코어.
+ *
+ * 프로세스에 하나만 있고(object), 개발 화면과 앱 본체 서비스([VoiceService])가 같이 쓴다. 화면은 이 객체의
+ * 흐름([status] 등)을 보여 주고 명령을 넘길 뿐이다. 그래서 화면을 닫아도 듣기와 실행은 계속된다.
+ * 안전 로직(SendMessageGuard, 개인정보 차단, 취소 처리)은 이 코어가 부르는 쪽에 그대로 있고 여기서 바꾸지 않는다.
+ */
+object PipelineCore {
+
+    private const val TAG = "PipelineCore"
+
+    private lateinit var appContext: Context
+    private lateinit var settings: PipelineSettings
+    private lateinit var cloudSettings: CloudSettings
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var initialized = false
+
+    // ---------------------------------------------------------------- 화면이 보는 상태
+
+    private val _status = MutableStateFlow("")
+    /** 상태 한 줄. 화면의 상태 문장이다. */
+    val status: StateFlow<String> = _status.asStateFlow()
+
+    private val _log = MutableStateFlow<List<PipelineLogEntry>>(emptyList())
+    val log: StateFlow<List<PipelineLogEntry>> = _log.asStateFlow()
+
+    private val _planJson = MutableStateFlow("")
+    /** 실기기 경로가 만든 실행 계획 JSON. 화면의 로그 칸에 보여 준다. */
+    val planJson: StateFlow<String> = _planJson.asStateFlow()
+
+    private val _route = MutableStateFlow("")
+    /** 계획을 어디서 만들었는지(로컬·클라우드) 한 줄. */
+    val route: StateFlow<String> = _route.asStateFlow()
+
+    private val _timing = MutableStateFlow("")
+    /** 마지막 명령의 시간 한 줄. */
+    val timing: StateFlow<String> = _timing.asStateFlow()
+
+    private val _listening = MutableStateFlow(false)
+    /** 듣고 있는지. 듣기 버튼 문구와 서비스 상태가 이것을 본다. */
+    val listening: StateFlow<Boolean> = _listening.asStateFlow()
+
+    private val _runEnabled = MutableStateFlow(true)
+    /** 실행 버튼을 누를 수 있는지. 명령이 도는 동안과 LLM 준비 중에는 false. */
+    val runEnabled: StateFlow<Boolean> = _runEnabled.asStateFlow()
+
+    private val _heard = MutableStateFlow<String?>(null)
+    /** 마지막으로 들은 최종 문장. 개발 화면의 명령칸에 넣는다. */
+    val heard: StateFlow<String?> = _heard.asStateFlow()
+
+    private val _enrolling = MutableStateFlow(false)
+    /** 목소리 등록 중인지. 등록 버튼을 막는다. */
+    val enrolling: StateFlow<Boolean> = _enrolling.asStateFlow()
+
+    // ---------------------------------------------------------------- 명령 처리
+
+    private var orchestrator: PipelineOrchestrator? = null
+    private var deviceOrchestrator: PipelineOrchestrator? = null
+    private var deviceExecutor: AccessibilityStepExecutor? = null
+    private var announcer: AndroidTtsController? = null
+    private var collectJob: Job? = null
+    private var llmPlanner: LlamaPlanGenerator? = null
+    private var hybridPlanner: HybridPlanGenerator? = null
+
+    /** 지금 도는 명령의 시각. 계획 콜백은 백그라운드 스레드에서 오므로 volatile. */
+    @Volatile
+    private var currentTiming: CommandTiming? = null
+
+    /** [currentTiming] 의 끝 신호가 어느 경로에서 올지. 두 경로가 같은 타이머를 공유하지 않게 한다. */
+    private enum class TimingPath { ORCHESTRATOR, DIRECT }
+
+    @Volatile
+    private var timingPath: TimingPath? = null
+
+    /** 음성 최종 결과의 말 끝 시각과 문장. 같은 문장으로 명령을 실행할 때만 쓴다. */
+    private var pendingSpeech: Pair<String, Long>? = null
+
+    /** 듣기 한 번의 runId. 듣기 사건(ListeningStarted 등)이 같은 세션끼리 묶이게 한다. */
+    private var voiceRunId: String? = null
+
+    private val verifier by lazy { SpeakerVerifier(appContext) }
+    private val enrolledVoices = ArrayList<FloatArray>()
+    private var speech: SherpaSpeechSource? = null
+    private var gate: WakeWordSpeechSource? = null
+
+    /** 명령 하나를 실행한다. 실행 버튼, 음성 자동 실행, 호출 흐름이 모두 이 길을 탄다. */
+    fun runCommand(command: String) {
+        if (settings.orchestrator) {
+            runViaOrchestrator(command)
+            return
+        }
+        if (settings.realExecutor) {
+            runOnDevice(command)
+            return
+        }
+        // 진짜 LLM 은 준비 비용이 커서 매번 다시 만들지 않고 계속 쓴다.
+        if (!settings.realLlm) resetPipeline()
+        orchestrator?.submit(command)
+    }
+
+    /** 명령을 실행하는 중인지. 오케스트레이터가 바쁘거나 실제 기기 경로가 계획을 만드는 중이면 true. */
+    fun isRunning(): Boolean =
+        !_runEnabled.value || (orchestrator?.isBusy == true) || AemxAccessibilityService.isPlanRunning()
+
+    /** 명령의 시작 시각을 잡는다. 음성이면 말 끝 판정 시각부터, 글 입력이면 지금부터 잰다. */
+    private fun beginTiming(command: String, path: TimingPath) {
+        val speech = pendingSpeech?.takeIf { it.first == command }
+        pendingSpeech = null
+        timingPath = path
+        currentTiming = CommandTiming(
+            startMs = speech?.second ?: SystemClock.elapsedRealtime(),
+            fromSpeech = speech != null,
+        )
+    }
+
+    /** 같은 경로에서 온 끝 신호만 받아 한 줄을 로그와 화면에 남긴다. 계획 전의 신호는 타이머가 무시한다. */
+    private fun endTiming(path: TimingPath, outcome: CommandOutcome) {
+        if (timingPath != path) return
+        val line = currentTiming?.finish(SystemClock.elapsedRealtime(), outcome) ?: return
+        Log.i("AemxTiming", line)
+        _timing.value = line
+    }
+
+    /** 오케스트레이터가 끝 상태에 닿으면 명령 한 줄을 남긴다. */
+    private fun recordOrchestratorEnd(state: PipelineState) {
+        val outcome = when (state) {
+            is PipelineState.Finished -> CommandOutcome.SUCCESS
+            is PipelineState.Failed -> CommandOutcome.FAILED
+            is PipelineState.NeedsUser -> CommandOutcome.STOPPED
+            is PipelineState.NeedsSetup -> CommandOutcome.REFUSED
+            else -> return
+        }
+        endTiming(TimingPath.ORCHESTRATOR, outcome)
+    }
+
+    /**
+     * 가짜 파트들을 새로 만들어 붙인다. 가짜 LLM 은 준비된 응답을 순서대로 쓰고 가짜 실행모듈은 대본을 따라가므로,
+     * 한 번 돌고 나면 둘 다 바닥난다. 실행할 때마다 새로 조립해야 같은 시나리오를 반복해서 볼 수 있다.
+     */
+    fun resetPipeline() {
+        collectJob?.cancel()
+        val fresh = buildOrchestrator(planner = null)
+        orchestrator = fresh
+        collectJob = subscribe(fresh, announceEnds = false)
+    }
+
+    /** 오케스트레이터 하나의 흐름을 구독한다. 상태·로그·사건을 화면과 오버레이로 넘긴다. */
+    private fun subscribe(orch: PipelineOrchestrator, announceEnds: Boolean) = scope.launch {
+        launch { orch.state.collect { render(it) } }
+        if (announceEnds) {
+            // StateFlow 는 구독하자마자 마지막 값을 준다. 지난 명령의 끝 상태를 다시 말하지 않게 건너뛴다.
+            launch { orch.state.drop(1).collect { announce(it) } }
+        }
+        launch { orch.log.collect { entries -> _log.value = entries } }
+        launch { orch.events.collect { AssistantStore.shared.post(it) } }
+    }
+
+    /**
+     * 온디바이스 LLM 을 준비해서 파이프라인에 꽂는다. 모델이 1.2GB 라 처음에는 내려받는다(Wi-Fi 권장).
+     * 준비가 끝날 때까지 실행 버튼을 막고 진행 상황을 상태줄에 보여 준다.
+     */
+    private fun prepareRealLlm() {
+        _runEnabled.value = false
+        scope.launch {
+            val planner = llmPlanner ?: LlamaPlanGenerator(appContext).also { llmPlanner = it }
+            try {
+                withContext(Dispatchers.IO) {
+                    planner.prepare { _, message -> _status.value = message }
+                }
+                collectJob?.cancel()
+                val fresh = buildOrchestrator(planner = planner)
+                orchestrator = fresh
+                collectJob = subscribe(fresh, announceEnds = false)
+                _status.value = appContext.getString(R.string.pipeline_llm_ready)
+            } catch (e: Exception) {
+                Log.e(TAG, "LLM 준비 실패", e)
+                _status.value = appContext.getString(R.string.pipeline_llm_failed, e.message ?: "")
+                settings.realLlm = false
+            } finally {
+                _runEnabled.value = true
+            }
+        }
+    }
+
+    /** 실제 LLM 을 켜거나 끈다. 끄면 가짜 파트로 돌아간다. */
+    fun setRealLlm(enabled: Boolean) {
+        settings.realLlm = enabled
+        if (enabled) prepareRealLlm() else resetPipeline()
+    }
+
+    /**
+     * 말한 명령을 LLM 에 넣고, 나온 계획을 접근성 서비스에 넘겨 실제로 기기를 조작한다. 오케스트레이터를 거치지
+     * 않는다(이슈 #11 이 맞추는 중). 화면 검증과 재분석은 이 길에서는 돌지 않는다.
+     */
+    private fun runOnDevice(command: String) {
+        val planner = llmPlanner
+        if (planner == null || !planner.isReady()) {
+            _status.value = appContext.getString(R.string.pipeline_device_needs_llm)
+            return
+        }
+        if (!AemxAccessibilityService.isConnected()) {
+            _status.value = appContext.getString(R.string.pipeline_device_needs_service)
+            return
+        }
+
+        _runEnabled.value = false
+        _status.value = appContext.getString(R.string.pipeline_device_planning)
+        beginTiming(command, TimingPath.DIRECT)
+        scope.launch {
+            val result = withContext(Dispatchers.Default) {
+                planFor(planner).generate(PlanRequest(utterance = command, mode = PlanRequest.Mode.INITIAL))
+            }
+            when (result) {
+                is PlanResult.Success -> {
+                    // 오케스트레이터 경로와 같은 후처리(시간만 드는 앱 열기 제거, 유튜브 API 로 영상 열기)를 거친 뒤 보낸다.
+                    val pruned = PlanStepPruner.prune(result.plan)
+                    val plan = youtubeSearchOrNull()?.let { YouTubeShortcut.rewrite(pruned, command, it) } ?: pruned
+                    val json = plan.toWireJson()
+                    Log.i(TAG, "실기기 실행 계획: $json")
+                    _planJson.value = json
+                    AemxAccessibilityService.submitActionPlan(json).fold(
+                        onSuccess = { _status.value = appContext.getString(R.string.pipeline_device_running) },
+                        onFailure = {
+                            _status.value = appContext.getString(R.string.pipeline_device_failed, it.message ?: "")
+                            endTiming(TimingPath.DIRECT, CommandOutcome.FAILED)
+                        },
+                    )
+                }
+                is PlanResult.Malformed -> {
+                    _status.value = appContext.getString(R.string.pipeline_device_failed, result.reason)
+                    endTiming(TimingPath.DIRECT, CommandOutcome.FAILED)
+                }
+                is PlanResult.EngineError -> {
+                    _status.value = appContext.getString(R.string.pipeline_device_failed, result.message)
+                    endTiming(TimingPath.DIRECT, CommandOutcome.FAILED)
+                }
+                is PlanResult.Refused -> {
+                    _status.value = appContext.getString(R.string.pipeline_device_failed, result.message)
+                    endTiming(TimingPath.DIRECT, CommandOutcome.REFUSED)
+                }
+            }
+            _runEnabled.value = true
+        }
+    }
+
+    /**
+     * 말한 명령을 오케스트레이터를 거쳐 실제 기기에서 실행한다(이슈 #11). step 마다 화면이 기대대로 바뀌었는지
+     * 검사하고, 어긋나면 현재 화면을 넣어 LLM 에 다시 묻는다. 진짜 LLM 과 접근성 서비스가 연결돼 있어야 한다.
+     */
+    private fun runViaOrchestrator(command: String) {
+        val planner = llmPlanner
+        if (planner == null || !planner.isReady()) {
+            _status.value = appContext.getString(R.string.pipeline_device_needs_llm)
+            return
+        }
+        if (!AemxAccessibilityService.isConnected()) {
+            _status.value = appContext.getString(R.string.pipeline_device_needs_service)
+            return
+        }
+
+        if (announcer == null) announcer = AndroidTtsController(appContext) { }
+        val device = deviceOrchestrator ?: buildDeviceOrchestrator(planFor(planner)).also { deviceOrchestrator = it }
+        // 다른 경로가 orchestrator 를 갈아 끼웠을 수 있으니, 이쪽이 아니면 구독을 옮긴다.
+        if (orchestrator !== device) {
+            collectJob?.cancel()
+            orchestrator = device
+            collectJob = scope.launch {
+                launch {
+                    device.state.collect {
+                        recordOrchestratorEnd(it)
+                        render(it)
+                    }
+                }
+                // 지난 명령의 끝 상태를 다시 말하지 않게 건너뛴다.
+                launch { device.state.drop(1).collect { announce(it) } }
+                launch { device.events.collect { AssistantStore.shared.post(it) } }
+                launch { device.log.collect { entries -> _log.value = entries } }
+            }
+        }
+        beginTiming(command, TimingPath.ORCHESTRATOR)
+        device.submit(command)
+    }
+
+    /**
+     * 로컬 계획 생성기를 클라우드 하이브리드로 감싼다. 설정(켜짐·키)은 명령마다 읽으므로 화면에서 바꾸면
+     * 다음 명령부터 바로 적용된다. 키가 없으면 로컬과 똑같이 동작한다.
+     */
+    private fun planFor(local: PlanGenerator): PlanGenerator =
+        hybridPlanner ?: HybridPlanGenerator(
+            local = local,
+            cloud = { cloudSettings.generatorOrNull() },
+            log = { Log.i("CloudPlan", it) },
+            onRoute = { report ->
+                // 계획이 나온 시각. 끝 신호보다 먼저 일어나므로(같은 흐름에서 호출) 순서가 어긋나지 않는다.
+                currentTiming?.planned(SystemClock.elapsedRealtime(), report)
+                _route.value = report.summary()
+            },
+        ).also { hybridPlanner = it }
+
+    /**
+     * 유튜브 검색을 YouTube Data API 로 미리 푸는 통로. 설정이 꺼졌거나 키가 없으면 null(화면 검색 경로).
+     * 시간은 명령의 타이머에 "유튜브 API" 로 붙인다.
+     */
+    private fun youtubeSearchOrNull(): YouTubeSearch? {
+        if (!cloudSettings.youtubeApiEnabled || !cloudSettings.hasYoutubeKey) return null
+        val client = YouTubeSearchClient(
+            apiKey = cloudSettings.youtubeKey,
+            log = { Log.i("YouTubeApi", it) },
+        )
+        return { query, maxResults ->
+            val started = SystemClock.elapsedRealtime()
+            val ids = client.search(query, maxResults)
+            currentTiming?.youtubeApi(SystemClock.elapsedRealtime() - started, hit = ids != null)
+            ids
+        }
+    }
+
+    /** 명령이 끝나 최종 상태가 되거나 재분석에 들어가면 말한다. 오케스트레이터 경로에서만 불린다. */
+    private fun announce(state: PipelineState) {
+        val texts = AnnouncementTexts(
+            finished = appContext.getString(R.string.pipeline_announce_finished),
+            failed = appContext.getString(R.string.pipeline_announce_failed),
+            needsUser = appContext.getString(R.string.pipeline_announce_needs_user),
+            needsSetup = appContext.getString(R.string.pipeline_announce_needs_setup),
+            replanning = appContext.getString(R.string.pipeline_announce_replanning),
+        )
+        val text = announcementFor(state, texts) ?: return
+        announcer?.speak(text)
+    }
+
+    /** 진짜 LLM + 접근성 서비스 어댑터로 오케스트레이터를 조립한다. */
+    private fun buildDeviceOrchestrator(planner: PlanGenerator): PipelineOrchestrator {
+        val screenObserver = AccessibilityScreenObserver(ServiceScreenSource())
+        // 같은 리졸버를 오케스트레이터와 실행기가 나눠 써서, 풀린 앱 이름을 서비스에 그대로 넘긴다.
+        val appResolver = AccessibilityAppResolver(appContext)
+        val executor = AccessibilityStepExecutor(
+            bridge = ServicePlanBridge,
+            foregroundPackage = { screenObserver.capture()?.packageName },
+            nameForPackage = { pkg -> AppNames.forPackage(pkg) ?: appResolver.nameFor(pkg) },
+            isSupportedApp = appResolver::isResolvable,
+            // step 이 끝나면 화면이 원래 걸어 둔 콜백으로 되돌린다. 앱 본체는 화면과 무관하게 항상 받는다.
+            restoreObserver = { deviceObserver },
+        )
+        deviceExecutor = executor
+        return PipelineOrchestrator(
+            planner = planner,
+            executor = executor,
+            screenObserver = screenObserver,
+            appResolver = appResolver,
+            scope = scope,
+            logSink = { Log.i("AemxOrchestrator", it) },
+            youtubeSearch = { youtubeSearchOrNull() },
+        )
+    }
+
+    /**
+     * 가짜 파트로 파이프라인을 조립한다. 가짜 LLM 은 시스템 프롬프트의 예시 출력을 그대로 돌려주고, 가짜 실행모듈은
+     * 명령을 받을 때마다 미리 정해 둔 화면으로 넘어간다. 두 번째 명령에서는 일부러 화면이 바뀌지 않게 해서
+     * **재분석 경로가 눈에 보이도록** 해 뒀다.
+     */
+    private fun buildOrchestrator(planner: PlanGenerator?): PipelineOrchestrator {
+        val observer = FakeScreenObserver(
+            ScreenSnapshot(
+                packageName = "com.android.launcher",
+                className = "Home",
+                texts = listOf("홈 화면")
+            )
+        )
+
+        fun youtube(vararg texts: String) = ScreenSnapshot(
+            packageName = "com.example.fake.youtube",
+            className = "YoutubeScreen",
+            texts = texts.toList()
+        )
+
+        // 시나리오: "유튜브에서 고양이 영상 틀어줘" = open_app -> search -> play_first.
+        // 첫 영상을 눌렀는데 아무 반응이 없어(3번째 = null) 재분석이 돌고, 새 계획의 play_first 로 끝까지 진행된다.
+        val executor = ScriptedActionExecutor(
+            observer = observer,
+            screensAfterEach = listOf(
+                youtube("유튜브", "홈", "Shorts"),
+                youtube("고양이", "고양이 영상 모음", "고양이 브이로그"),
+                null,
+                youtube("고양이 영상 모음", "재생 중", "댓글")
+            )
+        )
+
+        val effectivePlanner = planner ?: FakePlanGenerator(
+            responses = listOf(
+                """{"app": "유튜브", "steps": [{"action": "open_app", "target": "유튜브"}, {"action": "search", "target": "고양이"}, {"action": "play_first"}]}""",
+                """{"app": "유튜브", "steps": [{"action": "play_first"}]}"""
+            ),
+            // 실기기 추론이 20~35초 걸리는 것을 짧게나마 흉내 낸다.
+            latencyMs = 800
+        )
+
+        return PipelineOrchestrator(
+            planner = effectivePlanner,
+            executor = executor,
+            screenObserver = observer,
+            appResolver = FakeAppResolver(),
+            scope = scope,
+            config = PipelineConfig(quietPeriodMs = 300),
+            logSink = { Log.i("AemxOrchestrator", it) },
+        )
+    }
+
+    private fun render(state: PipelineState) {
+        _status.value = when (state) {
+            is PipelineState.Idle -> "대기 중"
+            is PipelineState.Listening -> "듣는 중... ${state.partial}"
+            is PipelineState.Planning ->
+                if (state.replanCount > 0) "화면을 다시 분석하는 중 (${state.replanCount}번째)"
+                else "실행계획을 만드는 중..."
+            is PipelineState.Executing ->
+                "실행 중 (${state.position}/${state.total}) ${state.step.describe()}"
+            is PipelineState.Verifying -> "화면 확인 중..."
+            is PipelineState.NeedsUser -> "사람이 처리해야 함: ${state.reason}"
+            is PipelineState.NeedsSetup -> "준비 필요: ${state.reason}"
+            is PipelineState.Finished -> "완료: ${state.message}"
+            is PipelineState.Failed -> "실패: ${state.reason}"
+        }
+        _runEnabled.value = orchestrator?.isBusy != true
+    }
+
+    /** 접근성 서비스가 계획 하나를 끝냈을 때 상태를 바꾼다. 앱 본체는 화면과 무관하게 항상 받는다. */
+    private val deviceObserver: (PlanOutcome) -> Unit = { outcome ->
+        endTiming(
+            TimingPath.DIRECT,
+            when (outcome) {
+                is PlanOutcome.Completed -> CommandOutcome.SUCCESS
+                is PlanOutcome.Failed -> CommandOutcome.FAILED
+            },
+        )
+        _status.value = when (outcome) {
+            is PlanOutcome.Completed -> appContext.getString(R.string.pipeline_device_done)
+            is PlanOutcome.Failed -> appContext.getString(
+                R.string.pipeline_device_step_failed,
+                outcome.stepIndex + 1,
+                outcome.message,
+            )
+        }
+    }
+
+    // ---------------------------------------------------------------- 시작과 설정
+
+    /**
+     * 한 번만 준비한다. 서비스와 화면 어느 쪽이 먼저 불러도 된다. 실행 결과를 받는 통로도 여기서 건다.
+     * 접근성 서비스는 이 객체보다 오래 살아 있으므로 콜백은 떼지 않는다.
+     */
+    fun init(context: Context) {
+        if (initialized) return
+        initialized = true
+        appContext = context.applicationContext
+        settings = PipelineSettings(appContext)
+        cloudSettings = CloudSettings(appContext)
+        com.sihoo.aemx.pipeline.llm.SendMessageGuard.logSink = { Log.i("AemxMessageGuard", it) }
+        _status.value = appContext.getString(R.string.pipeline_state_idle)
+        AemxAccessibilityService.setPlanObserver(deviceObserver)
+        resetPipeline()
+        // 실제 LLM 을 쓰기로 했으면 시작할 때 올린다(이미 올라가 있으면 prepare 가 다시 올리지 않는다).
+        if (settings.realLlm) prepareRealLlm()
+        // 캡슐의 중단 버튼은 의도만 보낸다. 명령을 소유한 오케스트레이터가 받아 멈춘다.
+        scope.launch {
+            AssistantStore.shared.cancelRequests.collect { runId -> orchestrator?.requestCancel(runId) }
+        }
+    }
+
+    val isEnrolled: Boolean get() = verifier.isEnrolled
+
+    /** 설정 값. 화면이 체크박스를 채울 때 읽는다. */
+    val prefs: PipelineSettings get() = settings
+
+    /** 클라우드 설정. 화면의 클라우드 칸이 쓴다. */
+    val cloud: CloudSettings get() = cloudSettings
+
+    fun setWakeWord(enabled: Boolean) {
+        settings.wakeWord = enabled
+        gate?.required = enabled
+        speech?.useVad = enabled
+    }
+
+    fun setOwnerOnly(enabled: Boolean) {
+        settings.ownerOnly = enabled
+        speech?.requireOwnerVoice = enabled
+        if (enabled) scope.launch(Dispatchers.IO) { verifier.prepare() }
+    }
+
+    fun setAutoRun(enabled: Boolean) {
+        settings.autoRun = enabled
+    }
+
+    // ---------------------------------------------------------------- 음성
+
+    /**
+     * 음성 듣기를 켠다. 모델이 120MB 라 처음 켤 때 몇 초 걸린다. 준비하는 동안 상태줄로 알린다.
+     * 최종 결과는 명령칸에 넣고, 자동 실행이 켜져 있으면 실행 버튼과 같은 경로로 실행한다.
+     * 마이크 권한은 호출하는 쪽(화면이나 서비스)이 먼저 확인한다.
+     */
+    fun startVoice() {
+        if (_listening.value) return
+        val source = speech ?: SherpaSpeechSource(appContext, scope).also {
+            speech = it
+            // 호출어 문을 한 겹 씌워서 화면은 문을 통과한 결과만 받는다.
+            val wakeGate = WakeWordSpeechSource(it, scope)
+            gate = wakeGate
+            scope.launch { wakeGate.results.collect { result -> onSpeech(result) } }
+            scope.launch {
+                it.rejections.collect { text -> _status.value = appContext.getString(R.string.pipeline_owner_rejected, text) }
+            }
+            scope.launch {
+                wakeGate.ignored.collect { text -> _status.value = appContext.getString(R.string.pipeline_wake_ignored, text) }
+            }
+            scope.launch {
+                wakeGate.awake.collect { awake -> onAwake(awake) }
+            }
+        }
+        source.speakerVerifier = verifier
+        // 호출어를 쓸 때만 VAD 로 인식기를 쉬게 한다. 끄면 예전처럼 항상 듣는다.
+        val needWake = settings.wakeWord
+        gate?.required = needWake
+        source.useVad = needWake
+        source.requireOwnerVoice = settings.ownerOnly
+
+        _status.value = appContext.getString(R.string.pipeline_stt_preparing)
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    source.prepare()
+                    // 등록된 목소리가 있을 때만 화자 모델(28MB)을 올린다.
+                    if (verifier.isEnrolled) verifier.prepare()
+                }
+                source.start()
+                _listening.value = true
+                _status.value = appContext.getString(R.string.pipeline_stt_ready)
+            } catch (e: Exception) {
+                Log.e(TAG, "음성인식 준비 실패", e)
+                _status.value = appContext.getString(R.string.pipeline_stt_failed, e.message ?: "")
+            }
+        }
+    }
+
+    fun stopVoice() {
+        speech?.stop()
+        if (_listening.value) {
+            _listening.value = false
+            _status.value = appContext.getString(R.string.pipeline_stt_stopped)
+        }
+        voiceRunId?.let { AssistantStore.shared.post(PipelineEvent.ListeningEnded(it, PipelineOrchestrator.SEQUENCE.incrementAndGet())) }
+        voiceRunId = null
+    }
+
+    /** 호출어를 들었거나 호출어 창이 닫혔다. 화면의 듣는 중 캡슐을 켜고 끈다. */
+    private fun onAwake(awake: Boolean) {
+        if (awake) {
+            _status.value = appContext.getString(R.string.pipeline_wake_detected)
+            val id = UUID.randomUUID().toString().take(8)
+            voiceRunId = id
+            AssistantStore.shared.post(PipelineEvent.ListeningStarted(id, PipelineOrchestrator.SEQUENCE.incrementAndGet()))
+        } else {
+            voiceRunId?.let { AssistantStore.shared.post(PipelineEvent.ListeningEnded(it, PipelineOrchestrator.SEQUENCE.incrementAndGet())) }
+            voiceRunId = null
+        }
+    }
+
+    private fun onSpeech(result: SpeechResult) {
+        when (result) {
+            // 중간 결과는 화면에 보여 주기만 하고 캡슐은 인식 중(흐린 파형)으로 바꾼다.
+            is SpeechResult.Partial -> {
+                _status.value = "듣는 중... ${result.text}"
+                voiceRunId?.let {
+                    AssistantStore.shared.post(PipelineEvent.Recognizing(it, PipelineOrchestrator.SEQUENCE.incrementAndGet(), result.text))
+                }
+            }
+            is SpeechResult.Final -> {
+                pendingSpeech = result.text to SystemClock.elapsedRealtime()
+                _heard.value = result.text
+                _status.value = "들은 말: ${result.text}"
+                // 듣기는 여기서 끝난다. 자동 실행이 켜져 있으면 바로 명령으로 넘어간다(RunStarted 가 캡슐을 바꾼다).
+                voiceRunId?.let {
+                    AssistantStore.shared.post(PipelineEvent.ListeningEnded(it, PipelineOrchestrator.SEQUENCE.incrementAndGet()))
+                }
+                voiceRunId = null
+                if (settings.autoRun) {
+                    // 실행 중에 온 명령은 실행 버튼과 똑같이 무시하되, 왜 안 도는지 알린다.
+                    if (isRunning()) {
+                        _status.value = appContext.getString(R.string.pipeline_auto_run_busy, result.text)
+                    } else {
+                        runCommand(result.text)
+                    }
+                }
+            }
+            is SpeechResult.Error -> _status.value = result.message
+        }
+    }
+
+    /** 목소리를 등록한다. 같은 문장을 세 번 말하게 해서 평균을 낸다. 듣기가 켜져 있어야 한다. */
+    fun beginEnrollment() {
+        if (!_listening.value) {
+            _status.value = appContext.getString(R.string.pipeline_enroll_need_listening)
+            return
+        }
+        enrolledVoices.clear()
+        _enrolling.value = true
+        _status.value = appContext.getString(R.string.pipeline_enroll_prompt, 1, SpeakerVerifier.MIN_ENROLL_COUNT)
+
+        scope.launch(Dispatchers.IO) { verifier.prepare() }
+        speech?.enrollmentSink = { voice -> scope.launch { onEnrollmentUtterance(voice) } }
+    }
+
+    private suspend fun onEnrollmentUtterance(voice: FloatArray) {
+        // 0.8초 미만은 목소리 특징을 뽑기에 짧다.
+        if (voice.size < MIN_ENROLL_SAMPLES) {
+            _status.value = appContext.getString(R.string.pipeline_enroll_too_short)
+            return
+        }
+        enrolledVoices += voice
+        val done = enrolledVoices.size
+        if (done < SpeakerVerifier.MIN_ENROLL_COUNT) {
+            _status.value = appContext.getString(R.string.pipeline_enroll_prompt, done + 1, SpeakerVerifier.MIN_ENROLL_COUNT)
+            return
+        }
+
+        speech?.enrollmentSink = null
+        val ok = withContext(Dispatchers.IO) { verifier.enroll(enrolledVoices.toList()) }
+        enrolledVoices.clear()
+        _enrolling.value = false
+        _status.value = appContext.getString(if (ok) R.string.pipeline_enroll_done else R.string.pipeline_enroll_failed)
+    }
+
+    // ---------------------------------------------------------------- 가짜 경로가 쓰는 소소한 통로
+
+    private const val MIN_ENROLL_SAMPLES = 12_800
+}
+
+/**
+ * 접근성 서비스가 받는 형식으로 다시 직렬화한다. 모델 원문을 그대로 넘기지 않는 이유는 설명이나 코드블록이
+ * 섞여 오기 때문이다. 파서가 읽어 낸 계획만 다시 JSON 으로 만들어 넘긴다.
+ */
+private fun ActionPlan.toWireJson(): String {
+    val array = JSONArray()
+    steps.forEach { step ->
+        array.put(
+            JSONObject().apply {
+                put("action", step.action.wire)
+                put("target", step.target ?: "")
+                step.value?.let { put("value", it) }
+            }
+        )
+    }
+    return JSONObject().apply {
+        put("app", app)
+        put("steps", array)
+    }.toString()
+}

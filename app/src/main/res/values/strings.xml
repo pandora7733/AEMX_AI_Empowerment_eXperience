@@ -91,4 +91,7 @@
     <string name="pipeline_enroll_failed">등록하지 못했습니다. 다시 시도해 주세요.</string>
     <string name="pipeline_owner_not_enrolled">등록된 목소리가 없습니다.</string>
     <string name="pipeline_owner_rejected">다른 목소리로 판단해 무시함: %1$s</string>
+    <string name="voice_service_channel">음성 듣기</string>
+    <string name="voice_service_title">AEMX 가 듣고 있어요</string>
+    <string name="voice_service_text">호출어를 기다리는 중이에요. 끄려면 앱에서 듣기를 끄세요.</string>
 </resources>

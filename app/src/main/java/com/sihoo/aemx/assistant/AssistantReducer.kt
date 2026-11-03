@@ -30,6 +30,14 @@ object AssistantReducer {
             )
         }
 
+        // 듣기는 명령이 돌고 있지 않을 때만 새로 시작한다. 실행 중인 캡슐을 듣기 캡슐로 덮지 않는다.
+        if (event is PipelineEvent.ListeningStarted) {
+            val listeningNow = state.phase == AssistantPhase.Listening || state.phase == AssistantPhase.Recognizing
+            val commandRunning = state.phase != AssistantPhase.Idle && !state.phase.isTerminal && !listeningNow
+            if (commandRunning) return state
+            return AssistantUiState(runId = event.runId, sequence = event.sequence, phase = AssistantPhase.Listening)
+        }
+
         if (event.runId != state.runId) return state
         if (state.phase.isTerminal) return state
         if (state.cancellationRequested && event !is PipelineEvent.Cancelled && event !is PipelineEvent.Failed) {
@@ -38,6 +46,19 @@ object AssistantReducer {
 
         val next = when (event) {
             is PipelineEvent.RunStarted -> state // 위에서 처리했다.
+
+            is PipelineEvent.ListeningStarted -> state // 위에서 처리했다.
+
+            is PipelineEvent.Recognizing -> {
+                if (state.phase != AssistantPhase.Listening && state.phase != AssistantPhase.Recognizing) return state
+                state.copy(phase = AssistantPhase.Recognizing, transcript = event.partial)
+            }
+
+            is PipelineEvent.ListeningEnded -> {
+                if (state.phase != AssistantPhase.Listening && state.phase != AssistantPhase.Recognizing) return state
+                // 듣기만 끝난 것이라 화면을 치운다(Idle 이면 캡슐이 사라진다).
+                return AssistantUiState(sequence = event.sequence)
+            }
 
             is PipelineEvent.PlanValidated -> {
                 // 끝낸 단계는 그대로 두고 아직 안 끝낸 단계만 새 계획으로 바꾼다.
