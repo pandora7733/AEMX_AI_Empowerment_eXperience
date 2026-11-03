@@ -3,6 +3,7 @@ package com.sihoo.aemx.assistant
 import com.sihoo.aemx.pipeline.model.ActionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StepLabelFormatterTest {
@@ -50,5 +51,52 @@ class StepLabelFormatterTest {
     fun `스크롤은 방향만 말한다`() {
         assertEquals("위로 스크롤하기", StepLabelFormatter.label(ActionType.SCROLL, "up", "유튜브"))
         assertEquals("아래로 스크롤하기", StepLabelFormatter.label(ActionType.SCROLL, "down", "유튜브"))
+    }
+
+    @Test
+    fun `검색 관련 영문 식별자는 검색으로 말하고 따옴표에 넣지 않는다`() {
+        assertEquals("검색 누르기", StepLabelFormatter.label(ActionType.TAP, "search button", "교보문고"))
+        assertEquals("검색을 누르는 중…", StepLabelFormatter.progressText(ActionType.TAP, "search button", "교보문고"))
+        assertEquals("검색을 눌렀어요", StepLabelFormatter.doneText(ActionType.TAP, "search button", "교보문고"))
+        assertEquals("검색을 눌렀어요", StepLabelFormatter.doneText(ActionType.TAP, "searchMainKeyword", "교보문고"))
+    }
+
+    @Test
+    fun `쇼츠 식별자는 쇼츠로, 그 밖의 영문 식별자는 버튼으로 말한다`() {
+        assertEquals("쇼츠 누르기", StepLabelFormatter.label(ActionType.TAP, "Shorts", "유튜브"))
+        assertEquals("쇼츠를 눌렀어요", StepLabelFormatter.doneText(ActionType.TAP, "Shorts", "유튜브"))
+        assertEquals("버튼 누르기", StepLabelFormatter.label(ActionType.TAP, "more_option", "교보문고"))
+        assertEquals("버튼을 눌렀어요", StepLabelFormatter.doneText(ActionType.TAP, "more_option", "교보문고"))
+    }
+
+    @Test
+    fun `영문 입력칸 id 는 검색어 입력으로 말한다`() {
+        assertEquals("검색어 입력하기", StepLabelFormatter.label(ActionType.INPUT_TEXT, "edit_text", "쿠팡"))
+        assertEquals("검색어 입력 중…", StepLabelFormatter.progressText(ActionType.INPUT_TEXT, "edit_text", "쿠팡"))
+        assertEquals("검색어를 입력했어요", StepLabelFormatter.doneText(ActionType.INPUT_TEXT, "edit_text", "쿠팡"))
+    }
+
+    @Test
+    fun `검색 아이콘이나 버튼 같은 한글 라벨도 검색으로 말하고 검색창은 그대로 따옴표로 보인다`() {
+        assertEquals("검색 누르기", StepLabelFormatter.label(ActionType.TAP, "검색 아이콘", "쿠팡"))
+        assertEquals("'검색창' 누르기", StepLabelFormatter.label(ActionType.TAP, "검색창", "교보문고"))
+        assertEquals("'검색창'을 눌렀어요", StepLabelFormatter.doneText(ActionType.TAP, "검색창", "교보문고"))
+    }
+
+    @Test
+    fun `영문 식별자가 앱 이름 자리에 오면 대상 앱 이름을 쓴다`() {
+        assertEquals("쿠팡 열기", StepLabelFormatter.label(ActionType.OPEN_APP, "edit_text", "쿠팡"))
+        assertEquals("쿠팡을 여는 중…", StepLabelFormatter.progressText(ActionType.OPEN_APP, "edit_text", "쿠팡"))
+        assertEquals("쿠팡을 열었어요", StepLabelFormatter.doneText(ActionType.OPEN_APP, "edit_text", "쿠팡"))
+    }
+
+    @Test
+    fun `식별자 판정은 영문과 숫자 기호만 있을 때만 참이다`() {
+        assertTrue(StepLabelFormatter.isIdentifier("search button"))
+        assertTrue(StepLabelFormatter.isIdentifier("com.coupang.mobile:id/edit_text"))
+        assertFalse(StepLabelFormatter.isIdentifier("검색창"))
+        assertFalse(StepLabelFormatter.isIdentifier("search 창"))
+        assertFalse(StepLabelFormatter.isIdentifier("1234"))
+        assertFalse(StepLabelFormatter.isIdentifier(null))
     }
 }

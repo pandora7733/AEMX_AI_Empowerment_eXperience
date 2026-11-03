@@ -120,6 +120,12 @@ class PipelineDebugActivity : AppCompatActivity() {
      */
     private fun handleAdbCommand(intent: Intent?) {
         if (intent == null) return
+        if (intent.hasExtra(EXTRA_OVERLAY_DEMO)) {
+            val scene = intent.getStringExtra(EXTRA_OVERLAY_DEMO).orEmpty()
+            intent.removeExtra(EXTRA_OVERLAY_DEMO)
+            Log.i(TAG, "패널 시연 장면: $scene, 보여줌=${com.sihoo.aemx.assistant.OverlayDemo.play(scene)}")
+            return
+        }
         if (intent.hasExtra(EXTRA_LISTEN_DEMO)) {
             val on = intent.getBooleanExtra(EXTRA_LISTEN_DEMO, false)
             intent.removeExtra(EXTRA_LISTEN_DEMO)
@@ -416,5 +422,6 @@ class PipelineDebugActivity : AppCompatActivity() {
         private const val EXTRA_RUN = "run"
         /** 음성 없이 듣는 중 캡슐을 띄우거나 끄는 검증용 extra. */
         private const val EXTRA_LISTEN_DEMO = "listen_demo"
+        private const val EXTRA_OVERLAY_DEMO = "overlay_demo"
     }
 }

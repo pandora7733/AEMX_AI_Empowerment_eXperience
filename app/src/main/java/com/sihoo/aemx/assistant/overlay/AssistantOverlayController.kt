@@ -17,6 +17,7 @@ import com.sihoo.aemx.R
 import com.sihoo.aemx.assistant.AssistantPhase
 import com.sihoo.aemx.assistant.AssistantStore
 import com.sihoo.aemx.assistant.AssistantUiState
+import com.sihoo.aemx.assistant.OverlayDemo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -213,6 +214,8 @@ internal class AssistantOverlayController(
         ) {
             return false
         }
+        // 시연 장면(개발 훅)이 패널을 펼쳐 둘 때. 끝난 명령은 위에서 이미 접힌다.
+        if (OverlayDemo.panelOpen) return true
         if (panelClosedRunId == state.runId) return false
         return panelOpenRunId == state.runId || state.expanded
     }
