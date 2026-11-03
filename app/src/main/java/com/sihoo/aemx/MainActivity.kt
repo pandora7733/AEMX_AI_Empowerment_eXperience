@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
@@ -47,7 +49,14 @@ class MainActivity : AppCompatActivity() {
     private val contactsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 시작 화면은 준비 화면 위에서만 짧게 보인다. 모델이 먼저 준비되면 바로 내린다.
+        // 첫 실행의 1.2GB 다운로드 동안 붙잡아 두면 체크리스트가 가려지므로 최대 시간을 둔다.
+        val splash = installSplashScreen()
+        val startedAt = SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
+        splash.setKeepOnScreenCondition {
+            SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS && !PipelineCore.modelReady.value
+        }
         PipelineCore.init(applicationContext)
         setContentView(ScrollView(this).apply { addView(createContentView()) })
         observeCore()
@@ -238,5 +247,8 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         /** 프로세스 안에서 자동 듣기를 한 번만 켜기 위한 표시. */
         var autoListenStarted = false
+
+        /** 시작 화면의 최대 시간(ms). 모델이 이보다 빨리 준비되면 그때 내린다. */
+        const val SPLASH_MAX_MS = 2_000L
     }
 }

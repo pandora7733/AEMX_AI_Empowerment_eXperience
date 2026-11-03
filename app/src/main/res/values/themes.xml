@@ -13,4 +13,10 @@
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
         <!-- Customize your theme here. -->
     </style>
+    <!-- 시작 화면. 로고가 보이다가 준비가 되면 앱 테마로 넘어간다. 배경은 낮/밤 토큰을 따른다. -->
+    <style name="Theme.AEMX.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/aemx_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_aemx_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.AEMX</item>
+    </style>
 </resources>
