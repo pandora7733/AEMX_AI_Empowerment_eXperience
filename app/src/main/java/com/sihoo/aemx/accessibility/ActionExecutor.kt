@@ -248,16 +248,25 @@ internal class ActionExecutor(
         // Event package filters do not restrict rootInActiveWindow. Never act on another app.
         val appPackage = appLauncher.resolve(app)
             ?: return StepResult.Fatal("설치되지 않았거나 찾을 수 없는 앱입니다.")
-        if (root.packageName?.toString() != appPackage) {
+        // 브라우저로 연 검색은 앱 패키지가 아니므로 검색어 확인으로 판정한다(SearchCheck).
+        val browserSearch = step.action == ActionType.SEARCH && appLauncher.openedInBrowser
+        val packageMatches = root.packageName?.toString() == appPackage
+        if (!packageMatches && !browserSearch) {
             logIfOverlayFront(root)
             return StepResult.NotReady
         }
         return when (step.action) {
             ActionType.OPEN_APP, ActionType.OPEN_VIDEO -> StepResult.Success
             // 검색은 이번 검색어가 화면에 보일 때만 성공이다. 같은 앱의 옛 검색 결과도 앱 화면이라 패키지만으로는 구별되지 않는다.
-            ActionType.SEARCH ->
-                if (TextMatch.queryVisible(visibleTexts(root), step.target.orEmpty())) StepResult.Success
-                else StepResult.NotReady
+            ActionType.SEARCH -> {
+                val visible = TextMatch.queryVisible(visibleTexts(root), step.target.orEmpty())
+                if (SearchCheck.accept(browserSearch, packageMatches, visible)) {
+                    if (browserSearch) evidence = SearchCheck.BROWSER_EVIDENCE
+                    StepResult.Success
+                } else {
+                    StepResult.NotReady
+                }
+            }
             ActionType.TAP -> tap(root, step.target)
             ActionType.INPUT_TEXT -> inputText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {

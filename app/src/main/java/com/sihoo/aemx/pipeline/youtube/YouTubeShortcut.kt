@@ -18,6 +18,9 @@ typealias YouTubeSearch = suspend (query: String, maxResults: Int) -> List<Strin
  */
 object YouTubeShortcut {
 
+    /** 쇼츠를 말했는지. 발화에 이 말이 있으면 API 를 쓰지 않는다. */
+    private val SHORTS_WORD = Regex("쇼츠|shorts", RegexOption.IGNORE_CASE)
+
     /** 같은 검색을 최소 이만큼은 받는다. 순번이 작아도 여유 있게. */
     const val MIN_RESULTS = 5
 
@@ -28,6 +31,8 @@ object YouTubeShortcut {
     fun target(plan: ActionPlan, utterance: String): Target? {
         if (plan.app.filterNot { it.isWhitespace() } != "유튜브") return null
         if (CloudRoutingPolicy.isPersonal(utterance, plan)) return null
+        // 쇼츠를 말한 명령은 API 를 쓰지 않는다. 쇼츠는 화면 경로가 고른다(API 결과는 쇼츠를 뺀다).
+        if (SHORTS_WORD.containsMatchIn(utterance)) return null
         // 앞의 앱 열기가 남아 있어도 같은 계획으로 본다(열기는 검색이 함께 연다).
         val steps = plan.steps.dropWhile { it.action == ActionType.OPEN_APP }
         if (steps.size != 2) return null

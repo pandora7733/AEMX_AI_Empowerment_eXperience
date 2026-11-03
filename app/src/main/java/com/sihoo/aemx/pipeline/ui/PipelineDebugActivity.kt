@@ -2,6 +2,7 @@ package com.sihoo.aemx.pipeline.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -151,6 +152,8 @@ class PipelineDebugActivity : AppCompatActivity() {
         com.sihoo.aemx.pipeline.llm.SendMessageGuard.logSink = { Log.i("AemxMessageGuard", it) }
         setContentView(createContentView())
         resetPipeline()
+        // 처음 만들 때만 adb 명령을 읽는다. 화면을 다시 만들 때 같은 명령이 또 실행되지 않게 한다.
+        if (savedInstanceState == null) handleAdbIntent(intent)
         // 캡슐의 중단 버튼은 의도만 보낸다. 명령을 소유한 이 화면의 오케스트레이터가 받아 멈춘다.
         lifecycleScope.launch {
             AssistantStore.shared.cancelRequests.collect { runId -> orchestrator.requestCancel(runId) }
@@ -162,6 +165,28 @@ class PipelineDebugActivity : AppCompatActivity() {
         ) {
             contactsPermission.launch(Manifest.permission.READ_CONTACTS)
         }
+    }
+
+    /** 이미 떠 있을 때 adb 가 새 명령을 넘기면 여기로 온다(manifest 의 singleTop). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAdbIntent(intent)
+    }
+
+    /**
+     * adb 로 넘어온 명령(개발 훅). cmd 또는 cmd_b64 가 있으면 명령 입력칸에 채우고, run 이 true 면 실행 버튼과
+     * 같은 경로로 실행한다. 쓴 extra 는 지운다. 명령 내용은 로그에 남기지 않는다(길이만).
+     */
+    private fun handleAdbIntent(intent: Intent) {
+        val command = AdbCommand.resolve(intent.getStringExtra("cmd"), intent.getStringExtra("cmd_b64")) ?: return
+        val run = intent.getBooleanExtra("run", false)
+        intent.removeExtra("cmd")
+        intent.removeExtra("cmd_b64")
+        intent.removeExtra("run")
+        commandInput.setText(command)
+        Log.i(TAG, "adb 명령을 받았다(${command.length}자, 실행=$run)")
+        if (run) runCommand(command)
     }
 
     private val contactsPermission = registerForActivityResult(

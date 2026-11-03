@@ -21,8 +21,40 @@ class YouTubeQuota(private val now: () -> Long = { System.currentTimeMillis() })
         blockedUntil = nextPacificMidnight(now())
     }
 
+    private var dayEnd = 0L
+    private var dayUnits = 0
+
+    /**
+     * 이번 호출의 유닛을 오늘 예산에서 뗀다. 막혀 있거나 예산을 넘으면 false 다. 예산을 넘는 순간에는
+     * 오늘 자정까지 막는다(한도 초과 응답과 같은 처리).
+     */
+    @Synchronized
+    fun reserve(units: Int): Boolean {
+        if (isBlocked()) return false
+        val current = now()
+        if (current >= dayEnd) {
+            dayEnd = nextPacificMidnight(current)
+            dayUnits = 0
+        }
+        if (dayUnits + units > DAILY_UNITS) {
+            blockUntilPacificMidnight()
+            return false
+        }
+        dayUnits += units
+        return true
+    }
+
+    /** 오늘 쓴 유닛(확인용). 날이 바뀌었으면 0 이다. */
+    @Synchronized
+    fun unitsToday(): Int = if (now() >= dayEnd) 0 else dayUnits
+
     companion object {
         private val PACIFIC = TimeZone.getTimeZone("America/Los_Angeles")
+
+        /** 무료 하루 예산(유닛). search 한 번은 100, videos.list 한 번은 1. */
+        const val DAILY_UNITS = 10_000
+        const val SEARCH_UNITS = 100
+        const val VIDEOS_UNITS = 1
 
         /** [nowMs] 다음에 오는 태평양 시간 자정의 밀리초. 날짜 계산은 달력으로 하므로 서머타임도 맞는다. */
         fun nextPacificMidnight(nowMs: Long): Long {

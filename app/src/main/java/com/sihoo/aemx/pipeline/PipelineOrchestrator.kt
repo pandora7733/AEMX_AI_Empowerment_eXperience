@@ -12,6 +12,7 @@ import com.sihoo.aemx.pipeline.port.ActionExecutor
 import com.sihoo.aemx.pipeline.model.Expectation
 import com.sihoo.aemx.pipeline.model.TextMatch
 import com.sihoo.aemx.pipeline.youtube.YouTubeSearch
+import com.sihoo.aemx.accessibility.SearchCheck
 import com.sihoo.aemx.pipeline.youtube.YouTubeShortcut
 import com.sihoo.aemx.pipeline.port.AppResolver
 
@@ -480,10 +481,12 @@ class PipelineOrchestrator(
 
         _state.value = PipelineState.Verifying(step)
 
-        val settle = awaitSettle(step.timeoutMs, before, step.expect)
+        // 브라우저로 연 검색은 앱 패키지를 기대하지 않는다. 검색어가 화면에 보이는지만 본다(실행기가 이미 확인했다).
+        val expect = if (executorEvidence == SearchCheck.BROWSER_EVIDENCE) step.expect.copy(packageName = null) else step.expect
+        val settle = awaitSettle(step.timeoutMs, before, expect)
         val after = settle.snapshot
 
-        return when (val verdict = ScreenVerifier.verify(step.expect, before, after)) {
+        return when (val verdict = ScreenVerifier.verify(expect, before, after)) {
             is ScreenVerifier.Verdict.Match -> StepOutcome.Success(
                 after,
                 evidence = listOfNotNull(executorEvidence, verdict.evidence).joinToString(", ").ifEmpty { null }

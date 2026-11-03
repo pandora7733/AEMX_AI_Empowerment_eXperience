@@ -78,6 +78,11 @@ internal class AppLauncher(private val context: Context) {
         })
     }
 
+    /** 마지막 검색을 브라우저가 열었는지. 검색 확인은 앱 패키지 대신 검색어로 한다. */
+    @Volatile
+    var openedInBrowser = false
+        private set
+
     fun search(appName: String, query: String): Result<Unit> = runCatching {
         require(query.isNotBlank()) { "검색어가 비어 있습니다." }
         val found = resolution(appName)
@@ -86,9 +91,12 @@ internal class AppLauncher(private val context: Context) {
         if (routes.isEmpty()) error("이 앱은 직접 검색 실행을 지원하지 않습니다.")
         // 앞의 방법이 받을 앱이 없으면(ActivityNotFoundException) 다음 방법으로 넘어간다. 모두 실패하면 마지막 원인을 알린다.
         var lastError: Exception? = null
+        openedInBrowser = false
         for (route in routes) {
             try {
                 context.startActivity(route.toIntent().apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                // 패키지를 지정하지 않은 주소는 브라우저가 연다. 그 화면은 앱 패키지가 아니므로 검색어로만 확인한다.
+                openedInBrowser = route is SearchRoutes.Route.View && route.packageName == null
                 return@runCatching
             } catch (e: ActivityNotFoundException) {
                 lastError = e

@@ -13,6 +13,7 @@
             android:name=".pipeline.ui.PipelineDebugActivity"
             android:exported="true"
             android:label="@string/pipeline_title"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize" />
 
         <!--

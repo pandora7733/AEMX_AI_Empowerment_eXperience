@@ -2,6 +2,7 @@ package com.sihoo.aemx.pipeline.llm
 
 import com.arm.aichat.InferenceEngine
 import com.sihoo.aemx.pipeline.port.PlanRequest
+import com.sihoo.aemx.pipeline.port.PlanResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -24,6 +26,7 @@ class LlamaPlanGeneratorTest {
     private class FakeEngine : InferenceEngine {
         val calls = mutableListOf<String>()
         var failReset = false
+        var reply = """{"app":"네이버","steps":[{"id":0,"action":"open_app","target":"네이버"}]}"""
 
         override val state: StateFlow<InferenceEngine.State> =
             MutableStateFlow(InferenceEngine.State.ModelReady)
@@ -36,7 +39,7 @@ class LlamaPlanGeneratorTest {
         }
         override fun sendUserPrompt(message: String, predictLength: Int): Flow<String> {
             calls += "send"
-            return flowOf("""{"app":"네이버","steps":[{"id":0,"action":"open_app","target":"네이버"}]}""")
+            return flowOf(reply)
         }
         override suspend fun bench(pp: Int, tg: Int, pl: Int, nr: Int): String = ""
         override fun cleanUp() {}
@@ -45,6 +48,21 @@ class LlamaPlanGeneratorTest {
 
     private fun generator(engine: FakeEngine) =
         LlamaPlanGenerator(RuntimeEnvironment.getApplication(), { engine }).also { it.prepared = true }
+
+    @Test
+    fun `받는 사람을 발화에서 못 뽑으면 기기 계획도 보내지 않고 안내로 끝낸다`() = runTest {
+        val engine = FakeEngine().apply {
+            reply = """{"app":"카카오톡","steps":[{"id":0,"action":"send_message","target":"김철수","value":"안녕"}]}"""
+        }
+
+        val result = generator(engine).generate(PlanRequest("안녕이라고 보내줘", PlanRequest.Mode.INITIAL))
+
+        assertTrue("보내지 않고 끝나야 한다: $result", result is PlanResult.Refused)
+        assertEquals(
+            "누구에게 보낼지 확실하지 않아 보내지 않았어요",
+            (result as PlanResult.Refused).message,
+        )
+    }
 
     @Test
     fun `새 명령과 재분석은 요청 전에 대화 기록을 비운다`() = runTest {

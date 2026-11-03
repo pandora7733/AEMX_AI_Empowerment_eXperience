@@ -154,6 +154,8 @@ class LlamaPlanGenerator(
                 // 보낼 내용이 사용자가 말한 글에 없으면 계획을 버려 다시 받는다. 메시지는 되돌릴 수 없다.
                 // 잡담이나 받는 사람이 없는 말에 모델이 지어낸 send_message 는 다시 묻지 않고 끝낸다.
                 // 다시 물으면 모델이 또 지어낸다.
+                // 받는 사람을 발화에서 못 뽑거나 둘이면 누구에게 보낼지 확실하지 않으니 보내지 않는다(클라우드 경로와 같은 안내).
+                SendMessageGuard.recipientRefusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
                 MessageChannelGuard.refusal(request.utterance, plan)?.let { return PlanResult.Refused(it) }
                 // 보내 달라는 말인데 send_message 가 없으면 tap 같은 엉뚱한 계획이다. 첫 계획은 한 번 더 받고,
                 // 재분석이나 형식 재요청에서도 또 그러면 더 묻지 않고 끝낸다.

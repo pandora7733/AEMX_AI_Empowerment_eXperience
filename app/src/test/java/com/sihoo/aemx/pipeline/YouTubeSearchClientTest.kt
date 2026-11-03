@@ -67,6 +67,7 @@ class YouTubeSearchClientTest {
                 apiKey = "dummy-key",
                 quota = YouTubeQuota(),
                 endpoint = server.endpoint,
+                videosEndpoint = server.endpoint,
             )
 
             val ids = runBlocking { client.search("고양이 영상", 5) }
@@ -78,7 +79,7 @@ class YouTubeSearchClientTest {
     @Test
     fun `키가 없으면 요청을 보내지 않는다`() {
         LocalServer { socket -> reply(socket, "200 OK", okBody) }.use { server ->
-            val client = YouTubeSearchClient(apiKey = "", quota = YouTubeQuota(), endpoint = server.endpoint)
+            val client = YouTubeSearchClient(apiKey = "", quota = YouTubeQuota(), endpoint = server.endpoint, videosEndpoint = server.endpoint)
 
             assertNull(runBlocking { client.search("고양이", 5) })
             assertEquals(0, server.requests.get())
@@ -91,7 +92,7 @@ class YouTubeSearchClientTest {
         LocalServer { socket -> reply(socket, "403 Forbidden", quotaBody) }.use { server ->
             var now = 1_000_000L
             val quota = YouTubeQuota { now }
-            val client = YouTubeSearchClient(apiKey = "dummy-key", quota = quota, endpoint = server.endpoint)
+            val client = YouTubeSearchClient(apiKey = "dummy-key", quota = quota, endpoint = server.endpoint, videosEndpoint = server.endpoint)
 
             assertNull(runBlocking { client.search("고양이", 5) })
             assertTrue("한도 초과 뒤에는 막혀야 한다", quota.isBlocked())
@@ -109,7 +110,7 @@ class YouTubeSearchClientTest {
         val otherBody = """{"error":{"code":403,"errors":[{"reason":"forbidden"}]}}"""
         LocalServer { socket -> reply(socket, "403 Forbidden", otherBody) }.use { server ->
             val quota = YouTubeQuota()
-            val client = YouTubeSearchClient(apiKey = "dummy-key", quota = quota, endpoint = server.endpoint)
+            val client = YouTubeSearchClient(apiKey = "dummy-key", quota = quota, endpoint = server.endpoint, videosEndpoint = server.endpoint)
 
             assertNull(runBlocking { client.search("고양이", 5) })
             assertTrue(!quota.isBlocked())
@@ -125,6 +126,7 @@ class YouTubeSearchClientTest {
                 quota = YouTubeQuota(),
                 timeoutMs = 300L,
                 endpoint = server.endpoint,
+                videosEndpoint = server.endpoint,
             )
 
             val started = System.currentTimeMillis()
@@ -144,6 +146,7 @@ class YouTubeSearchClientTest {
                 apiKey = "dummy-key",
                 quota = YouTubeQuota(),
                 endpoint = server.endpoint,
+                videosEndpoint = server.endpoint,
                 log = { logs += it },
             )
 
