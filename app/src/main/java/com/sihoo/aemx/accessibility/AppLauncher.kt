@@ -68,14 +68,27 @@ internal class AppLauncher(private val context: Context) {
         context.startActivity(launchIntent)
     }
 
-    /** 유튜브 영상 하나를 유튜브 앱으로 연다. 영상 id 형식이 아니면 열지 않는다. */
+    /**
+     * 유튜브 영상 하나를 유튜브 앱으로 연다. 영상 id 형식이 아니면 열지 않는다.
+     *
+     * 재생 중인 영상이 있으면 https 주소는 무시되고(유튜브가 최상위 인스턴스에 전달만 한다), vnd.youtube 주소는 바뀐다.
+     * 그래서 vnd.youtube 를 먼저 쓰고, 받을 앱이 없을 때만 https 주소로 넘긴다.
+     */
     fun openVideo(videoId: String): Result<Unit> = runCatching {
         require(isVideoId(videoId)) { "영상 id 형식이 아닙니다." }
-        val uri = Uri.parse("https://www.youtube.com/watch?v=$videoId")
-        context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+        val native = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId")).apply {
             setPackage(YOUTUBE_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+        }
+        try {
+            context.startActivity(native)
+        } catch (_: ActivityNotFoundException) {
+            val uri = Uri.parse("https://www.youtube.com/watch?v=$videoId")
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(YOUTUBE_PACKAGE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
     }
 
     /** 마지막 검색을 브라우저가 열었는지. 검색 확인은 앱 패키지 대신 검색어로 한다. */

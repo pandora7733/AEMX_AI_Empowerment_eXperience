@@ -225,7 +225,11 @@ internal object KakaoShareRules {
     fun searchMove(stage: SearchStage?, rowCount: Int, sinceStageMs: Long, enterSupported: Boolean): SearchMove {
         if (stage == null) return SearchMove.Advance(SearchStage.OPEN)
         if (rowCount > 0) return SearchMove.Wait
-        val watch = if (stage == SearchStage.ENTER) RESULT_AFTER_ENTER_MS else WATCH_MS
+        val watch = when (stage) {
+            SearchStage.ENTER -> RESULT_AFTER_ENTER_MS
+            SearchStage.OPEN -> OPEN_WATCH_MS
+            else -> WATCH_MS
+        }
         if (sinceStageMs < watch) return SearchMove.Wait
         return when (stage) {
             SearchStage.OPEN -> SearchMove.Advance(SearchStage.PASTE)
@@ -236,6 +240,9 @@ internal object KakaoShareRules {
     }
 
     const val WATCH_MS = 1_500L
+
+    /** 열기만 하고 지켜보는 시간. 결과가 뜨면 [searchMove] 가 바로 기다리므로, 안 뜨는 경우에만 이만큼 더 걸린다. */
+    const val OPEN_WATCH_MS = 900L
     const val RESULT_AFTER_ENTER_MS = 4_000L
 
     /** 전체 목록을 훑는 화면 수 상한. 끝에 닿기 전에 이 수를 넘기면 끝까지 확인하지 못한 것이다. */
@@ -644,7 +651,7 @@ internal class KakaoShareFlow(
         private fun type(snapshot: Snapshot, now: Long): Outcome {
             val edit = snapshot.editText ?: return Outcome.Wait
             if (readySince == 0L) readySince = now
-            if (now - readySince < SETTLE_MS) return Outcome.Wait
+            if (now - readySince < SHEET_READY_MS) return Outcome.Wait
             if (!edit.isShowingHintText && !edit.text.isNullOrBlank()) {
                 if (variantsUsed == 0) {
                     setText(edit, "")
@@ -1032,8 +1039,11 @@ internal class KakaoShareFlow(
 
     private companion object {
         const val TAG = "AemxKakaoShare"
-        const val POLL_MS = 300L
+        const val POLL_MS = 150L
         const val SETTLE_MS = 800L
+
+        /** 공유 시트가 뜬 뒤 검색란을 누르기 전 기다리는 시간. 확인 창 대기([SETTLE_MS])와 따로 둔다. */
+        const val SHEET_READY_MS = 500L
         const val TIMEOUT_MS = 80_000L
         const val VERIFY_MS = 8_000L
         const val RETYPE_MS = 2_000L

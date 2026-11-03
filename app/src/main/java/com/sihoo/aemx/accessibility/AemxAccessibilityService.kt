@@ -89,7 +89,8 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         val previous = this.announceCompletion
         this.announceCompletion = announceCompletion
         try {
-            executor.execute(plan)
+            // announceCompletion=false 로 제출하는 쪽(step 단위 호출자)은 화면을 스스로 확인하므로 정착을 기다리지 않는다.
+            executor.execute(plan, settleAfterStep = announceCompletion)
         } catch (e: Throwable) {
             this.announceCompletion = previous
             throw e
@@ -208,6 +209,7 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
          *
          * @param announceCompletion false 면 이 계획이 끝나도 완료 음성 안내를 하지 않는다(기본 true).
          *   step 마다 계획을 따로 제출하는 호출자가 매 step 안내를 막으려고 쓴다. 이 계획에만 적용된다.
+         *   같은 호출자는 화면을 스스로 확인하므로 열기·검색·탭·입력 뒤 정착 대기도 건너뛴다([ActionExecutor.execute]).
          */
         fun submitActionPlan(json: String, announceCompletion: Boolean = true): Result<Unit> {
             val service = activeService?.get()

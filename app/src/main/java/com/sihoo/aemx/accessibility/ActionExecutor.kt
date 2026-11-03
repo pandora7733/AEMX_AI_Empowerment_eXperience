@@ -30,13 +30,21 @@ internal class ActionExecutor(
         private set
     private var lastTreeChange = 0L
 
-    fun execute(plan: ActionPlan) {
+    /**
+     * @param settleAfterStep false 면 열기·검색·탭·입력 뒤에 화면 정착을 기다리지 않는다. step 마다 계획을 따로
+     *   제출하는 호출자는 다음 step 전에 화면을 스스로 확인하므로 여기서 또 기다릴 필요가 없다(웹뷰는 화면이 계속
+     *   바뀌어 정착 대기가 상한 1.5초까지 간다). 재생·스크롤·메시지 전송은 그대로 기다린다.
+     */
+    fun execute(plan: ActionPlan, settleAfterStep: Boolean = true) {
         check(!isRunning) { "이미 실행 중입니다. 먼저 중단해 주세요." }
         isRunning = true
         evidence = null
+        settleSteps = settleAfterStep
         val currentId = ++executionId
         executeStep(plan, 0, currentId)
     }
+
+    private var settleSteps = true
 
     fun onAccessibilityTreeChanged() {
         lastTreeChange = SystemClock.uptimeMillis()
@@ -155,7 +163,8 @@ internal class ActionExecutor(
             }
             when (result) {
                 is StepResult.Success -> {
-                    awaitSettled(plan, index + 1, id)
+                    if (settleSteps || step.action !in FAST_SETTLE_ACTIONS) awaitSettled(plan, index + 1, id)
+                    else handler.post { executeStep(plan, index + 1, id) }
                 }
                 is StepResult.Fatal -> fail(index, step, result.message, id)
                 StepResult.NotReady -> {
@@ -654,6 +663,9 @@ internal class ActionExecutor(
     private companion object {
         const val MAX_TEXT_NODES = 600
         const val MAX_POPUP_DISMISSES = 2
+
+        /** step 마다 제출하는 호출자가 정착을 건너뛸 수 있는 행동. 재생·스크롤·메시지 전송은 빼 둔다. */
+        val FAST_SETTLE_ACTIONS = setOf(ActionType.OPEN_APP, ActionType.SEARCH, ActionType.TAP, ActionType.INPUT_TEXT)
 
         /** N번째 항목을 찾으려 한 단계 안에서 스크롤하는 상한. 유튜브 결과는 쇼츠·광고가 섞여 화면마다 몇 개뿐이다. */
         const val MAX_NTH_SCROLLS = 3
