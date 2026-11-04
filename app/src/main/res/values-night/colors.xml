@@ -10,4 +10,5 @@
     <color name="aemx_success_text">#FF55C99A</color>
     <color name="aemx_error_text">#FFFF9EAA</color>
     <color name="aemx_chip">#FF222938</color>
+    <color name="aemx_splash_background">#FF11141C</color>
 </resources>

@@ -26,4 +26,6 @@
     <color name="aemx_brand_cyan">#FF63D4EA</color>
     <color name="aemx_success">#FF55C99A</color>
     <color name="aemx_error">#FFF27480</color>
+    <!-- 시작 화면 배경. 로고 가장자리와 어울리는 연한 크림 분홍. 밤에는 어두운 배경을 쓴다(values-night). -->
+    <color name="aemx_splash_background">#FFFBF1EF</color>
 </resources>

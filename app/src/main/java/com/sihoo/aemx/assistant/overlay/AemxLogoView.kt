@@ -1,19 +1,17 @@
 package com.sihoo.aemx.assistant.overlay
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
-import android.graphics.Shader
-import android.graphics.Typeface
 import android.view.View
 import com.sihoo.aemx.R
 
 /**
- * 글자 위치 계산. 글자 TextView 는 글꼴 줄간격 여백과 x-height 때문에 소문자 "a" 가 원 중앙에서 아래로
- * 처져 보인다. 그래서 글자의 실제 외곽(getTextBounds 로 잰 bounds)을 원의 중심에 맞춰 그린다.
- * 안드로이드 없이 테스트하려고 숫자만 받는 순수 함수로 뒀다.
+ * 글자 위치 계산. 실제 로고 이미지로 바뀌어 화면에서는 쓰지 않는다. 안드로이드 없이 테스트하는 순수 함수로만 남겨 둔다.
+ * 글자의 외곽(getTextBounds 로 잰 bounds)을 원의 중심에 맞추는 계산이다.
  */
 object LogoGeometry {
 
@@ -35,52 +33,25 @@ object LogoGeometry {
 }
 
 /**
- * 캡슐 왼쪽의 "a" 로고. 파랑→보라 그라데이션 원 위에 가운데 맞춘 기울인 "a" 를 그린다.
- * 장식이라 접근성에서는 제외한다.
+ * 캡슐 왼쪽의 AEMX 로고. 실제 로고 이미지(ic_aemx_logo)를 칸에 맞춰 그린다. 장식이라 접근성에서는 제외한다.
+ * 로고 뒤 배경은 이미지가 가진 연한 분홍 바탕이라 어두운 캡슐 위에서도 가장자리가 보인다.
  */
 internal class AemxLogoView(context: Context) : View(context) {
 
-    private val circle = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        textAlign = Paint.Align.LEFT
-        color = context.getColor(R.color.aemx_logo_text)
-    }
-    private val bounds = Rect()
-    private var originX = 0f
-    private var originY = 0f
+    private val logo: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_aemx_logo)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val source = Rect(0, 0, logo.width, logo.height)
+    private val target = Rect()
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        circle.shader = LinearGradient(
-            0f, 0f, w.toFloat(), h.toFloat(),
-            context.getColor(R.color.aemx_logo), context.getColor(R.color.aemx_logo_end),
-            Shader.TileMode.CLAMP
-        )
-        glyph.textSize = minOf(w, h) * LogoGeometry.TEXT_SIZE_RATIO
-        glyph.getTextBounds(GLYPH, 0, GLYPH.length, bounds)
-        val (x, y) = LogoGeometry.drawOrigin(bounds.left, bounds.top, bounds.right, bounds.bottom, w.toFloat(), h.toFloat())
-        originX = x
-        originY = y
+        target.set(0, 0, w, h)
     }
 
     override fun onDraw(canvas: Canvas) {
-        val cx = width / 2f
-        val cy = height / 2f
-        canvas.drawCircle(cx, cy, minOf(cx, cy), circle)
-        // 글자 외곽의 중심(= 원 중심)을 축으로 기울여서, 기울여도 가로세로 중심이 그대로다.
-        canvas.save()
-        canvas.translate(cx, cy)
-        canvas.skew(LogoGeometry.SKEW, 0f)
-        canvas.translate(-cx, -cy)
-        canvas.drawText(GLYPH, originX, originY, glyph)
-        canvas.restore()
-    }
-
-    private companion object {
-        const val GLYPH = "a"
+        canvas.drawBitmap(logo, source, target, paint)
     }
 }
