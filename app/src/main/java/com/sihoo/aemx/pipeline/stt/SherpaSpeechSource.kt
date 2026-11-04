@@ -56,6 +56,9 @@ class SherpaSpeechSource(
     private var audioRecord: AudioRecord? = null
     private val audioEffects = mutableListOf<AudioEffect>()
     private var listenJob: Job? = null
+    /** 마이크가 무음으로 막혔는지 보는 판정. 듣기를 시작할 때마다 다시 센다. */
+    private val micHealth = MicHealth()
+
     private val vad = EnergyVad(
         threshold = VAD_MIN_THRESHOLD,
         hangoverFrames = VAD_HANGOVER_FRAMES,
@@ -134,13 +137,19 @@ class SherpaSpeechSource(
         }
 
         listening = true
+        micHealth.reset()
         audioRecord?.startRecording()
+        // 녹음이 실제로 시작됐는지 로그로 남긴다. 백그라운드에서 막히면 여기서 멈춰 있거나 무음이 온다.
+        if (audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            Log.w(TAG, "마이크 녹음이 시작되지 않았다(상태 ${audioRecord?.recordingState})")
+        }
         listenJob = scope.launch(Dispatchers.IO) { listen(engine) }
     }
 
     override fun stop() {
         if (!listening) return
         listening = false
+        MicStatus.silenced = false
         listenJob?.cancel()
         listenJob = null
         audioRecord?.stop()
@@ -201,6 +210,13 @@ class SherpaSpeechSource(
             while (listening) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: break
                 if (read <= 0) continue
+                // 소리가 3초 넘게 정확히 0 이면 마이크가 막힌 것이다(백그라운드 제한). 막힘이 시작되고 풀릴 때 한 번씩 남긴다.
+                val wasSilenced = MicStatus.silenced
+                if (micHealth.onFrame(buffer, read)) {
+                    Log.w(TAG, "마이크가 3초 넘게 무음이다(백그라운드 마이크 제한 의심). 앱을 열면 다시 시도한다")
+                }
+                MicStatus.silenced = micHealth.silenced
+                if (wasSilenced && !micHealth.silenced) Log.i(TAG, "마이크 소리가 다시 들어온다")
 
                 // 앱이 말하는 소리가 마이크로 되돌아 들어온 것이다. 인식기에 넣지 않고, 말끝이
                 // 이어 붙지 않게 지금까지 쌓인 것도 비운다.
@@ -234,8 +250,8 @@ class SherpaSpeechSource(
                     }
                     if (!open) {
                         // 문이 닫히는 순간 끝나지 않은 문장이 남아 있으면 여기서 끝낸다. 문이 닫히면 인식기에
-                        // 무음이 더 들어가지 않아 endpoint 의 무음 길이(1.2초)가 채워지지 않고, 문장이 다음
-                        // 말소리까지 매달려 앞뒤 문장이 이어 붙는다. 문이 열려 있던 hangover(1.2초) 동안의
+                        // 무음이 더 들어가지 않아 endpoint 의 무음 길이(1.8초)가 채워지지 않고, 문장이 다음
+                        // 말소리까지 매달려 앞뒤 문장이 이어 붙는다. 문이 열려 있던 hangover(1.8초) 동안의
                         // 무음은 인식기 지연만큼 덜 세어져서 이 경우가 생긴다.
                         if (shouldFlushOnGateClose(wasOpen, lastLoggedText)) {
                             stream.acceptWaveform(FloatArray(FLUSH_SILENCE_SAMPLES), sampleRate = SAMPLE_RATE)
@@ -414,7 +430,7 @@ class SherpaSpeechSource(
             featConfig = getFeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
             modelConfig = getModelConfig(type = KOREAN_STREAMING_ZIPFORMER)!!,
             // 말이 끝났다고 보는 무음 길이. 기본 1.4초를 2.0초로 늘렸더니 폰에서 말이 끝나고 실행까지
-            // 2초 넘게 걸려 1.2초로 줄였다. 명령 중간에 쉬는 0.5~0.8초는 견딘다.
+            // 2초 넘게 걸려 1.2초로 줄였다가, 생각하느라 멈추는 것이 문장을 끊어서 1.8초로 늘렸다.
             endpointConfig = EndpointConfig(
                 rule1 = EndpointRule(false, ENDPOINT_RULE1_SECONDS, 0.0f),
                 rule2 = EndpointRule(true, ENDPOINT_RULE2_SECONDS, 0.0f),
@@ -427,7 +443,7 @@ class SherpaSpeechSource(
             maxActivePaths = 8,
             // 핫워드 가중치. 기본 1.5는 체감이 약했다. 너무 키우면 비슷한 발음을 전부
             // 핫워드로 끌어당겨 오히려 틀린다.
-            hotwordsScore = 2.0f,
+            hotwordsScore = HotwordList.GLOBAL_SCORE,
         )
         // 예제는 1스레드 고정인데, 디코딩이 실시간을 못 따라가면 인식이 밀린다.
         config.modelConfig.numThreads = 4
@@ -453,15 +469,16 @@ class SherpaSpeechSource(
         const val VAD_MAX_THRESHOLD = 0.05
 
         // ---- 문장 끝을 정하는 값들 ----
-        // 소리가 멎은 뒤 VAD 문을 더 열어 두는 프레임 수(100ms 단위, 1.2초). 이 시간 동안 소리가 없으면 문이 닫히고
-        // 끝나지 않은 문장을 끝낸다. 인식기 끝점 규칙 rule2(글자 뒤 무음 1.2초)와 같다. 인식기 지연 때문에
+        // 소리가 멎은 뒤 VAD 문을 더 열어 두는 프레임 수(100ms 단위, 1.8초). 이 시간 동안 소리가 없으면 문이 닫히고
+        // 끝나지 않은 문장을 끝낸다. 인식기 끝점 규칙 rule2(글자 뒤 무음 1.8초)와 같다. 인식기 지연 때문에
         // rule2 가 먼저 채워지지 않아도 문이 닫힐 때 무음을 밀어 넣어(FLUSH_SILENCE_SAMPLES) 끝낸다.
         // 말이 중간에서 잘리면 이 값과 rule2/rule1 을 같이 본다.
-        const val VAD_HANGOVER_FRAMES = 12
+        const val VAD_HANGOVER_FRAMES = 18
 
         /** 끝점 규칙 1(글자 없이 무음)과 규칙 2(글자 뒤 무음)의 길이(초). */
-        const val ENDPOINT_RULE1_SECONDS = 1.5f
-        const val ENDPOINT_RULE2_SECONDS = 1.2f
+        // 생각하느라 잠깐 멈춘 것을 문장 끝으로 보지 않도록 1.2→1.8초, 1.5→2.2초로 늘렸다(늘어난 만큼 응답이 늦는다).
+        const val ENDPOINT_RULE1_SECONDS = 2.2f
+        const val ENDPOINT_RULE2_SECONDS = 1.8f
 
         /** 한 프레임의 길이(ms). READ_INTERVAL_SECONDS 와 같다. */
         const val FRAME_MS = 100L
@@ -472,8 +489,8 @@ class SherpaSpeechSource(
         /** 한 문장으로 모아 둘 수 있는 최대 길이. 100ms 프레임 300개, 30초. */
         const val MAX_UTTERANCE_FRAMES = 300
 
-        /** 문이 닫힐 때 인식기에 밀어 넣는 무음 길이. endpoint 무음 규칙(1.2초)을 넘기는 1.5초다. */
-        const val FLUSH_SILENCE_SAMPLES = (1.5 * SAMPLE_RATE).toInt()
+        /** 문이 닫힐 때 인식기에 밀어 넣는 무음 길이. endpoint 무음 규칙 2(1.8초)를 넘기는 2.4초다. */
+        const val FLUSH_SILENCE_SAMPLES = (2.4 * SAMPLE_RATE).toInt()
 
         /** 문이 열리기 전 몇 프레임을 들고 있을지. 100ms 단위라 0.3초다. */
         const val PRE_ROLL_FRAMES = 3
@@ -492,16 +509,7 @@ class SherpaSpeechSource(
          */
         const val TOKENS_ASSET = "sherpa-onnx-streaming-zipformer-korean-2024-06-16/tokens.txt"
 
-        val HOTWORDS_FIXED = listOf(
-            "교보문고", "알라딘", "유튜브", "네이버", "인스타그램",
-            "로그인", "로그아웃", "검색", "구매", "주문",
-            "장바구니", "회원가입", "결제", "취소", "재생",
-            // 호출어는 학습 데이터에 없는 단어라 가중치를 따로 높게 준다(": 점수").
-            "하이에이맥스 :3.5", "에이맥스 :3.0", "하이 :1.5",
-            // AppLauncher 별칭 표의 나머지 한글 이름. 표가 비공개라 같은 이름을 여기에 적었다. 점수는 낮게 둔다.
-            "카카오톡 :1.5", "카톡 :1.5", "인스타 :1.5", "유튜브 뮤직 :1.5", "멜론 :1.5",
-            "쿠팡 :1.5", "메시지 :1.5", "문자 :1.5", "구글 :1.5",
-        )
+        val HOTWORDS_FIXED = HotwordList.FIXED
     }
 }
 

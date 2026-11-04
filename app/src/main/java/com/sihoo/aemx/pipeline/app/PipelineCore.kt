@@ -1,13 +1,18 @@
 package com.sihoo.aemx.pipeline.app
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.SystemClock
+import android.provider.ContactsContract
 import android.util.Log
 import com.sihoo.aemx.R
 import com.sihoo.aemx.accessibility.AemxAccessibilityService
 import com.sihoo.aemx.accessibility.PlanOutcome
+import com.sihoo.aemx.accessibility.RecipientFallback
 import com.sihoo.aemx.AndroidTtsController
 import com.sihoo.aemx.assistant.AssistantStore
+import com.sihoo.aemx.assistant.SendDecision
 import com.sihoo.aemx.pipeline.PipelineConfig
 import com.sihoo.aemx.pipeline.PipelineEvent
 import com.sihoo.aemx.pipeline.PipelineLogEntry
@@ -94,6 +99,17 @@ object PipelineCore {
     /** 계획을 어디서 만들었는지(로컬·클라우드) 한 줄. */
     val route: StateFlow<String> = _route.asStateFlow()
 
+    /** 최근 실행 기록 한 줄. 명령 내용은 화면에만 보이고 로그에는 글자 수만 남는다. */
+    data class RecentRun(val command: String, val success: Boolean, val seconds: Double)
+
+    private val _recent = MutableStateFlow<List<RecentRun>>(emptyList())
+    /** 최근 실행 두 개(새것이 앞). 메모리에만 있어서 앱을 끄면 빈다. */
+    val recent: StateFlow<List<RecentRun>> = _recent.asStateFlow()
+
+    /** 지금 도는 명령의 글과 시작 시각. 끝나면 최근 실행에 넣는다. */
+    private var runningCommand: String? = null
+    private var runningStartedAt: Long = 0L
+
     private val _timing = MutableStateFlow("")
     /** 마지막 명령의 시간 한 줄. */
     val timing: StateFlow<String> = _timing.asStateFlow()
@@ -101,6 +117,10 @@ object PipelineCore {
     private val _listening = MutableStateFlow(false)
     /** 듣고 있는지. 듣기 버튼 문구와 서비스 상태가 이것을 본다. */
     val listening: StateFlow<Boolean> = _listening.asStateFlow()
+
+    /** 마이크를 여는 중인지. 준비가 끝나기 전에 다시 여는 것을 막는다. */
+    @Volatile
+    private var preparingMic = false
 
     private val _runEnabled = MutableStateFlow(true)
     /** 실행 버튼을 누를 수 있는지. 명령이 도는 동안과 LLM 준비 중에는 false. */
@@ -117,6 +137,18 @@ object PipelineCore {
     private val _modelMessage = MutableStateFlow("")
     /** 모델 내려받기와 준비 진행 문장. */
     val modelMessage: StateFlow<String> = _modelMessage.asStateFlow()
+
+    private val _modelFailed = MutableStateFlow(false)
+    /** 마지막 모델 내려받기가 실패했는지. 첫 실행 안내의 "다시 받기"가 본다. */
+    val modelFailed: StateFlow<Boolean> = _modelFailed.asStateFlow()
+
+    /** 지금 모델을 받고 있는지. 같은 요청이 겹치지 않게 막는다. */
+    @Volatile
+    private var modelPreparing = false
+
+    /** 실기기 직접 경로가 계획을 만들고 보내는 동안 참. 그 코루틴이 끝나는 순간 거짓으로 돌아간다. */
+    @Volatile
+    private var directBusy = false
 
     private val _enrolling = MutableStateFlow(false)
     /** 목소리 등록 중인지. 등록 버튼을 막는다. */
@@ -150,7 +182,11 @@ object PipelineCore {
 
     /** 보내기 확인을 기다리는 중의 답 상자. null 이면 확인 대기 중이 아니다. */
     @Volatile
-    private var pendingSend: CompletableDeferred<Boolean>? = null
+    private var pendingSend: CompletableDeferred<String?>? = null
+
+    /** 확인 화면에서 고를 수 있는 받는 사람 후보. 비어 있으면 고르지 않는다. 음성 이름 고르기에 쓴다. */
+    @Volatile
+    private var pendingChoices: List<String> = emptyList()
 
     /** 개발 화면과 adb 훅이 끈 보내기 확인. 프로세스가 끝나면 사라지고 설정([PipelineSettings.confirmSend])이 다시 쓰인다. */
     @Volatile
@@ -184,16 +220,34 @@ object PipelineCore {
     }
 
     /** 명령을 실행하는 중인지. 오케스트레이터가 바쁘거나 실제 기기 경로가 계획을 만드는 중이면 true. */
-    fun isRunning(): Boolean =
-        !_runEnabled.value || (orchestrator?.isBusy == true) || AemxAccessibilityService.isPlanRunning()
+    fun isRunning(): Boolean = busyReason() != null
+
+    /** 명령을 받지 못하는 이유. 막힌 것이 없으면 null. 자동 실행이 건너뛸 때 로그에 남긴다. */
+    private fun busyReason(): String? = RunGate.busyReason(
+        modelPreparing = modelPreparing,
+        directRunning = directBusy,
+        orchestratorBusy = orchestrator?.isBusy == true,
+        planRunning = AemxAccessibilityService.isPlanRunning(),
+    )
+
+    /** 실행 버튼 표시를 지금 실제 상태로 맞춘다. 명령이 끝나는 순간에도 부른다([RunGate]). */
+    private fun syncRunEnabled() {
+        _runEnabled.value = !RunGate.locked(modelPreparing, directBusy, orchestrator?.isBusy == true)
+    }
+
+    /** 마이크가 꺼져 있고 여는 중도 아니다. 화면이나 접근성이 다시 켜 볼지 정할 때 쓴다. */
+    fun isMicIdle(): Boolean = !_listening.value && !preparingMic
 
     /** 명령의 시작 시각을 잡는다. 음성이면 말 끝 판정 시각부터, 글 입력이면 지금부터 잰다. */
     private fun beginTiming(command: String, path: TimingPath) {
         val speech = pendingSpeech?.takeIf { it.first == command }
         pendingSpeech = null
         timingPath = path
+        val startedAt = speech?.second ?: SystemClock.elapsedRealtime()
+        runningCommand = command
+        runningStartedAt = startedAt
         currentTiming = CommandTiming(
-            startMs = speech?.second ?: SystemClock.elapsedRealtime(),
+            startMs = startedAt,
             fromSpeech = speech != null,
         )
     }
@@ -204,6 +258,12 @@ object PipelineCore {
         val line = currentTiming?.finish(SystemClock.elapsedRealtime(), outcome) ?: return
         Log.i("AemxTiming", line)
         _timing.value = line
+        // 최근 실행은 메모리에만 두고 화면에만 보여 준다. 앱을 끄면 사라진다.
+        val command = runningCommand
+        if (command != null) {
+            val seconds = (SystemClock.elapsedRealtime() - runningStartedAt) / 1000.0
+            _recent.value = (listOf(RecentRun(command, outcome == CommandOutcome.SUCCESS, seconds)) + _recent.value).take(RECENT_LIMIT)
+        }
     }
 
     /** 오케스트레이터가 끝 상태에 닿으면 명령 한 줄을 남긴다. */
@@ -245,7 +305,11 @@ object PipelineCore {
      * 준비가 끝날 때까지 실행 버튼을 막고 진행 상황을 상태줄에 보여 준다.
      */
     private fun prepareRealLlm() {
-        _runEnabled.value = false
+        // 이미 받고 있으면 두 번 받지 않는다(다시 받기 버튼을 여러 번 눌러도 안전하다).
+        if (modelPreparing) return
+        modelPreparing = true
+        _modelFailed.value = false
+        syncRunEnabled()
         scope.launch {
             val planner = llmPlanner ?: LlamaPlanGenerator(appContext).also { llmPlanner = it }
             try {
@@ -263,13 +327,23 @@ object PipelineCore {
                 _modelReady.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "LLM 준비 실패", e)
-                _status.value = appContext.getString(R.string.pipeline_llm_failed, e.message ?: "")
+                // 내려받기 실패는 일시적일 수 있다. 설정을 끄지 않고, 화면에서 다시 받게 둔다.
+                val message = appContext.getString(R.string.pipeline_llm_failed, e.message ?: "")
+                _status.value = message
+                _modelMessage.value = message
                 _modelReady.value = false
-                settings.realLlm = false
+                _modelFailed.value = true
             } finally {
-                _runEnabled.value = true
+                modelPreparing = false
+                syncRunEnabled()
             }
         }
+    }
+
+    /** 모델 내려받기를 다시 시도한다. 이미 받는 중이거나 이미 준비됐으면 아무 일도 하지 않는다. */
+    fun retryModel() {
+        if (_modelReady.value) return
+        prepareRealLlm()
     }
 
     /** 실제 LLM 을 켜거나 끈다. 끄면 가짜 파트로 돌아간다. */
@@ -293,7 +367,8 @@ object PipelineCore {
             return
         }
 
-        _runEnabled.value = false
+        directBusy = true
+        syncRunEnabled()
         _status.value = appContext.getString(R.string.pipeline_device_planning)
         beginTiming(command, TimingPath.DIRECT)
         scope.launch {
@@ -309,7 +384,6 @@ object PipelineCore {
                     if (sendConfirmEnabled && plan.steps.any { it.action == ActionType.SEND_MESSAGE }) {
                         _status.value = appContext.getString(R.string.send_needs_orchestrator)
                         endTiming(TimingPath.DIRECT, CommandOutcome.REFUSED)
-                        _runEnabled.value = true
                         return@launch
                     }
                     val json = plan.toWireJson()
@@ -336,7 +410,9 @@ object PipelineCore {
                     endTiming(TimingPath.DIRECT, CommandOutcome.REFUSED)
                 }
             }
-            _runEnabled.value = true
+        }.invokeOnCompletion {
+            directBusy = false
+            syncRunEnabled()
         }
     }
 
@@ -447,8 +523,10 @@ object PipelineCore {
             scope = scope,
             logSink = { Log.i("AemxOrchestrator", it) },
             youtubeSearch = { youtubeSearchOrNull() },
-            confirmSend = { recipient, content -> awaitSendConfirmation(recipient, content) },
+            confirmSend = { recipient, content, forced, choices -> awaitSendConfirmation(recipient, content, forced, choices) },
             confirmRequired = { sendConfirmEnabled },
+            recipientCandidates = { spoken -> contactCandidates(spoken) },
+            onRunEnded = { syncRunEnabled() },
         )
     }
 
@@ -519,7 +597,7 @@ object PipelineCore {
             is PipelineState.Finished -> "완료: ${state.message}"
             is PipelineState.Failed -> "실패: ${state.reason}"
         }
-        _runEnabled.value = orchestrator?.isBusy != true
+        syncRunEnabled()
     }
 
     /** 접근성 서비스가 계획 하나를 끝냈을 때 상태를 바꾼다. 앱 본체는 화면과 무관하게 항상 받는다. */
@@ -548,35 +626,95 @@ object PipelineCore {
      * 15초 안에 답이 없으면 보내지 않는다. 확인을 기다리는 동안은 호출어 문을 열어 짧은 답을 듣는다.
      * 중단 요청은 이 코루틴을 취소하므로 중단이 우선한다.
      */
-    private suspend fun awaitSendConfirmation(recipient: String, content: String): Boolean {
-        if (!sendConfirmEnabled) return true
-        val answer = CompletableDeferred<Boolean>()
+    private suspend fun awaitSendConfirmation(
+        recipient: String,
+        content: String,
+        forced: Boolean,
+        choices: List<String>,
+    ): String? {
+        // 받는 사람을 바꿨거나 고를 후보가 있으면([forced], [choices]) 확인 설정이 꺼져 있어도 묻는다.
+        if (!forced && choices.isEmpty() && !sendConfirmEnabled) return recipient
+        val answer = CompletableDeferred<String?>()
         pendingSend = answer
+        pendingChoices = choices
         if (announcer == null) announcer = AndroidTtsController(appContext) { }
-        announcer?.speak(appContext.getString(R.string.send_confirm_question, recipient, content))
+        // 후보가 하나면 확인 글을 읽는다. 여럿이면 고르라고 짧게 묻고 후보 이름을 읽는다.
+        val question = if (choices.isEmpty()) {
+            appContext.getString(R.string.send_confirm_question, recipient, content)
+        } else {
+            appContext.getString(R.string.send_confirm_pick, choices.joinToString(", "))
+        }
+        announcer?.speak(question)
         val gateBefore = gate
         gateBefore?.required = false
         try {
-            return withTimeoutOrNull(SEND_CONFIRM_TIMEOUT_MS) { answer.await() } ?: false
+            // 시간이 지나거나 취소하면 null 이다. null 이면 보내지 않는다.
+            return withTimeoutOrNull(SEND_CONFIRM_TIMEOUT_MS) { answer.await() }
         } finally {
             pendingSend = null
+            pendingChoices = emptyList()
             gateBefore?.required = settings.wakeWord
         }
     }
 
-    /** 확인 화면의 답 한 번. 확인 대기 중이 아니면 아무 일도 없다. */
-    private fun answerPendingSend(send: Boolean) {
-        pendingSend?.complete(send)
+    /**
+     * 말한 카톡 받는 사람이 연락처에 정확히 없을 때 가까운 연락처 이름들을 돌려준다([RecipientFallback]). 권한이 없거나
+     * 후보가 없으면 빈 목록. 로그에는 이름 대신 후보 수와 사유만 남긴다. 연락처는 폰 밖으로 보내지 않는다.
+     */
+    private fun contactCandidates(spoken: String): List<String> {
+        if (appContext.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return emptyList()
+        return when (val pick = RecipientFallback.pick(spoken, contactDisplayNames())) {
+            is RecipientFallback.Pick.Candidates -> {
+                Log.i("AemxRecipientFallback", "받는 사람 후보: ${pick.names.size}명")
+                pick.names
+            }
+            is RecipientFallback.Pick.None -> {
+                Log.i("AemxRecipientFallback", "받는 사람 후보 없음: ${pick.reason}")
+                emptyList()
+            }
+            RecipientFallback.Pick.Exact -> emptyList()
+        }
     }
 
-    /** 음성 답을 읽는다. 답이 아니면 상태줄에 안내만 하고 명령으로 넘기지 않는다. */
+    private fun contactDisplayNames(): List<String> {
+        val names = ArrayList<String>()
+        appContext.contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME),
+            null, null, null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) cursor.getString(0)?.let { names += it }
+        }
+        return names
+    }
+
+    /** 확인 화면의 답 한 번. 보내기면 고른 이름을, 취소면 null 을 기다리는 쪽에 넘긴다. 확인 대기 중이 아니면 아무 일도 없다. */
+    private fun answerPendingSend(decision: SendDecision) {
+        pendingSend?.complete(if (decision.send) decision.recipient else null)
+    }
+
+    /**
+     * 음성 답을 읽는다. 후보가 있으면 이름을 말해 고를 수 있다("김정우"). 그 밖의 답은 "응"/"아니"다.
+     * 후보가 여럿이면 고르기 전 "응"은 보내지 않고 고르라고 안내한다. 답이 아니면 안내만 하고 명령으로 넘기지 않는다.
+     */
     private fun onSendVoiceAnswer(text: String) {
+        val choices = pendingChoices
+        val spokenName = text.filterNot(Char::isWhitespace)
+        val named = choices.firstOrNull { it.filterNot(Char::isWhitespace) == spokenName }
+        if (named != null) {
+            AssistantStore.shared.selectRecipient(named)
+            return
+        }
         val answer = SendAnswer.parse(text)
         if (answer == null) {
             _status.value = appContext.getString(R.string.send_confirm_hint)
             return
         }
-        answerPendingSend(answer)
+        if (answer && choices.isNotEmpty() && AssistantStore.shared.state.value.confirmSelected == null) {
+            _status.value = appContext.getString(R.string.send_confirm_pick_first)
+            return
+        }
+        AssistantStore.shared.answerSend(answer)
     }
 
     /**
@@ -630,7 +768,16 @@ object PipelineCore {
         scope.launch {
             AssistantStore.shared.cancelRequests.collect { runId ->
                 // 듣는 중 캡슐의 중단은 듣기를 끈다. 명령의 중단은 오케스트레이터가 받는다.
-                if (runId == voiceRunId) stopVoice() else orchestrator?.requestCancel(runId)
+                if (runId == voiceRunId) {
+                    cancelWakeCall()
+                    return@collect
+                }
+                if (orchestrator?.requestCancel(runId) == true) return@collect
+                // 멈출 명령이 없다(이미 끝났거나 시작 전). 캡슐이 "중단하는 중"으로 남아 멈춰 보이지 않게 끝낸다.
+                // 화면은 실행 번호가 맞는 사건만 받으므로 지난 명령의 번호면 무시된다.
+                val seq = PipelineOrchestrator.SEQUENCE
+                AssistantStore.shared.post(PipelineEvent.CancelRequested(runId, seq.incrementAndGet()))
+                AssistantStore.shared.post(PipelineEvent.Cancelled(runId, seq.incrementAndGet(), emptySet()))
             }
         }
     }
@@ -667,7 +814,7 @@ object PipelineCore {
      * 마이크 권한은 호출하는 쪽(화면이나 서비스)이 먼저 확인한다.
      */
     fun startVoice() {
-        if (_listening.value) return
+        if (_listening.value || preparingMic) return
         val source = speech ?: SherpaSpeechSource(appContext, scope).also {
             speech = it
             // 호출어 문을 한 겹 씌워서 화면은 문을 통과한 결과만 받는다.
@@ -692,6 +839,7 @@ object PipelineCore {
         source.requireOwnerVoice = settings.ownerOnly
 
         _status.value = appContext.getString(R.string.pipeline_stt_preparing)
+        preparingMic = true
         scope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -705,6 +853,8 @@ object PipelineCore {
             } catch (e: Exception) {
                 Log.e(TAG, "음성인식 준비 실패", e)
                 _status.value = appContext.getString(R.string.pipeline_stt_failed, e.message ?: "")
+            } finally {
+                preparingMic = false
             }
         }
     }
@@ -731,6 +881,17 @@ object PipelineCore {
         }
         voiceRunId?.let { AssistantStore.shared.post(PipelineEvent.ListeningEnded(it, PipelineOrchestrator.SEQUENCE.incrementAndGet())) }
         voiceRunId = null
+    }
+
+    /**
+     * 듣는 중 캡슐의 중단. 이번 호출만 닫는다. 마이크와 인식기는 그대로 둬서 다음 호출을 바로 받는다.
+     * 마이크를 끄는 것은 [stopVoice] 가 맡는다(서비스 종료, 마이크 버튼, 알림).
+     */
+    private fun cancelWakeCall() {
+        gate?.cancelAwake()
+        voiceRunId?.let { AssistantStore.shared.post(PipelineEvent.ListeningEnded(it, PipelineOrchestrator.SEQUENCE.incrementAndGet())) }
+        voiceRunId = null
+        _status.value = appContext.getString(R.string.pipeline_stt_ready)
     }
 
     /** 호출어를 들었거나 호출어 창이 닫혔다. 화면의 듣는 중 캡슐을 켜고 끈다. */
@@ -771,7 +932,15 @@ object PipelineCore {
                 voiceRunId = null
                 if (settings.autoRun) {
                     // 실행 중에 온 명령은 실행 버튼과 똑같이 무시하되, 왜 안 도는지 알린다.
-                    if (isRunning()) {
+                    val reason = busyReason()
+                    // 표시가 잠겨 있는데 돌고 있는 것이 없으면 낡은 값이다. 다시 맞추고 이번 명령을 받는다.
+                    if (RunGate.isStale(mirrorLocked = !_runEnabled.value, reason = reason)) {
+                        Log.i("AemxCommandSkip", "stuck 복구: 실행 표시가 잠겨 있었지만 돌고 있는 것이 없어 다시 열었다")
+                        syncRunEnabled()
+                    }
+                    if (reason != null) {
+                        // 명령 내용은 남기지 않고 글자 수만 남긴다(개인정보).
+                        Log.i("AemxCommandSkip", "건너뜀: $reason, ${result.text.length}글자")
                         _status.value = appContext.getString(R.string.pipeline_auto_run_busy, result.text)
                     } else {
                         runCommand(result.text)
@@ -822,6 +991,9 @@ object PipelineCore {
 
     /** 보내기 확인을 기다리는 최대 시간. 답이 없으면 보내지 않는다. */
     private const val SEND_CONFIRM_TIMEOUT_MS = 15_000L
+
+    /** 최근 실행 기록의 개수. */
+    private const val RECENT_LIMIT = 2
 }
 
 /**

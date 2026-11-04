@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- 듣는 중 알림을 띄운다(안드로이드 13 이상은 사용자 허용이 필요하다). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 부팅이 끝나면 호출어 듣기를 다시 켜려고 부팅 완료 신호를 받는다. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 앱을 닫아도 호출어를 듣도록 배터리 사용 제한 해제를 요청한다. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- 문자 보내기: 받는 사람 이름이 연락처에 정확히 한 명 있는지 확인한다. 실행 중에 사용자에게 물어본다. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -94,6 +98,16 @@
             android:name=".pipeline.app.VoiceService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- 부팅 완료와 앱 업데이트 뒤에 호출어 듣기를 자동으로 다시 켠다(저장된 끈 상태와 마이크 권한을 따른다). -->
+        <receiver
+            android:name=".pipeline.app.VoiceBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

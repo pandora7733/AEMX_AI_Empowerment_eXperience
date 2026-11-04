@@ -136,6 +136,11 @@ sealed interface PipelineEvent {
         override val sequence: Long,
         val stepId: String,
         val recipient: String,
-        val content: String
+        val content: String,
+        /**
+         * 사용자가 고를 받는 사람 후보(카톡). 비어 있으면 [recipient] 하나를 확인한다. 후보가 있으면 [recipient] 는
+         * 미리 고른 이름이거나 비어 있고(여럿일 때), 보내기는 후보 중 하나를 고른 뒤에만 된다.
+         */
+        val choices: List<String> = emptyList(),
     ) : PipelineEvent
 }

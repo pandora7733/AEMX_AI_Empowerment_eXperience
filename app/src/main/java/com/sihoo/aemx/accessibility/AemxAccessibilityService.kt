@@ -33,6 +33,9 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
             it.setEnabled(overlayEnabled)
             it.attach()
         }
+        // 접근성 서비스는 앱을 최근 앱에서 지워도 시스템이 다시 연결한다. 그래서 여기서 호출어 듣기를 켜 두면
+        // 앱 화면을 열지 않아도 된다. 마이크 권한과 사용자의 끈 상태는 확인한다. 떠 있는데 꺼진 마이크는 다시 켠다.
+        com.sihoo.aemx.pipeline.app.VoiceService.resumeIfIdle(this)
     }
 
     /** 다른 앱 위에 뜨는 캡슐. 서비스가 닫힐 때 꼭 떼어야 한다. */

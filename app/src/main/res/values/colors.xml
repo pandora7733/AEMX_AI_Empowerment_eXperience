@@ -28,4 +28,23 @@
     <color name="aemx_error">#FFF27480</color>
     <!-- 시작 화면 배경. 로고 가장자리와 어울리는 연한 크림 분홍. 밤에는 어두운 배경을 쓴다(values-night). -->
     <color name="aemx_splash_background">#FFFBF1EF</color>
+    <!-- 첫 실행과 홈 화면 디자인 확정안(docs/디자인_확정.md). 캡슐 토큰(aemx_*)과 따로 둔다. -->
+    <color name="onb_bg">#FFFFF8F2</color>
+    <color name="onb_card">#FFFFFFFF</color>
+    <color name="onb_ink">#FF2B1F2E</color>
+    <color name="onb_muted">#FF7C6B80</color>
+    <color name="onb_hint">#FF8A7A8E</color>
+    <color name="onb_plum">#FF8A4A86</color>
+    <color name="onb_pink">#FFD9729B</color>
+    <color name="onb_sky">#FF4BA3D3</color>
+    <color name="onb_green">#FF34B27B</color>
+    <color name="onb_green_ink">#FF1F8A5B</color>
+    <color name="onb_green_pill">#FFE6F6EE</color>
+    <color name="onb_chip">#FFF7D6DC</color>
+    <color name="onb_warn">#FFE8925A</color>
+    <color name="onb_track">#FFE9E1EA</color>
+    <!-- 주요 버튼과 마이크 버튼의 그라데이션. 밤에도 같은 색이라 흰 글자가 읽힌다. -->
+    <color name="onb_brand_plum">#FF8A4A86</color>
+    <color name="onb_brand_pink">#FFD9729B</color>
+    <color name="onb_on_brand">#FFFFFFFF</color>
 </resources>

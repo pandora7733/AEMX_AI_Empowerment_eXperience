@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 카드: 흰색(다크는 어두운 카드), 모서리 16. 그림자는 쓰지 않는다. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/onb_card" />
+    <corners android:radius="16dp" />
+</shape>

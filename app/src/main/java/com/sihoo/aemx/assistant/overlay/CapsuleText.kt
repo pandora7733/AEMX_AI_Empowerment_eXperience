@@ -32,9 +32,6 @@ object CapsuleTextFactory {
     const val REPLANNING = "화면을 다시 확인하고 있어요…"
     const val LISTENING = "듣고 있어요…"
 
-    /** 인식 중(흐린 파형)에는 중간 결과 글자를 보이지 않는다. 짧은 고정 문구만 보인다. */
-    const val RECOGNIZING = "알아듣고 있어요…"
-
     /** 최종 문장을 보여 주는 줄의 길이 상한. 넘으면 말줄임으로 자른다. */
     const val SENTENCE_MAX = 28
     const val CONFIRMING = "이렇게 보낼까요?"
@@ -44,17 +41,23 @@ object CapsuleTextFactory {
     const val ERROR = "문제가 생겨 멈췄어요"
     const val VERIFIED_SUB = "결과 확인됨"
 
-    fun from(state: AssistantUiState): CapsuleText {
+    /**
+     * 화면 상태를 캡슐 글자로. [liveCaption] 은 듣는 중에 보일 최근 말(이미 줄여 다듬은 것)이다.
+     * 아직 말이 없으면 "듣고 있어요…"를 보인다.
+     */
+    fun from(state: AssistantUiState, liveCaption: String = ""): CapsuleText {
         if (state.phase == AssistantPhase.Idle) return CapsuleText(visible = false)
 
         val running = !state.phase.isTerminal
+        val listening = state.phase == AssistantPhase.Listening || state.phase == AssistantPhase.Recognizing
         val title = when {
             // 중단을 눌렀지만 멈춘 것이 확인되기 전에는 "중단했어요"가 아니라 "중단하는 중…"이다.
             running && state.cancellationRequested -> CANCELLING
+            listening -> liveCaption.ifBlank { LISTENING }
             else -> when (state.phase) {
                 AssistantPhase.Idle -> ""
                 AssistantPhase.Listening -> LISTENING
-                AssistantPhase.Recognizing -> RECOGNIZING
+                AssistantPhase.Recognizing -> LISTENING
                 AssistantPhase.Understanding -> UNDERSTANDING
                 AssistantPhase.Planning -> PLANNING
                 AssistantPhase.ConfirmingAction -> CONFIRMING

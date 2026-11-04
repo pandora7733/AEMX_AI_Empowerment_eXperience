@@ -82,8 +82,18 @@ object OverlayMotion {
     private val pulses = WeakHashMap<View, Animator>()
     private val typers = WeakHashMap<TextView, Animator>()
 
+    /**
+     * 나타내기가 끝나는 것을 보장하는 시간. 애니메이션이 프레임을 제때 받지 못해 멈춰도 이 시간 뒤에는 최종 모양이 된다
+     * (나타내기 시간 [CAPSULE_IN_MS] 보다 넉넉하다. 정상이면 이 시점에는 이미 끝나 있어서 아무 일도 하지 않는다).
+     */
+    const val CAPSULE_IN_FALLBACK_MS = 400L
+
+    /** 나타내기 뒤처리를 예약해 둔 것. 다음 움직임이 시작되면 [dropEnterFallback] 으로 지운다. */
+    private val enterFallbacks = WeakHashMap<View, Runnable>()
+
     /** 캡슐이 나타난다. 살짝 작은 크기에서 커지고 밝아진다. [distancePx] 만큼 아래에서 올라온다. */
     fun enter(view: View, distancePx: Float, reduced: Boolean = isReduced()) {
+        dropEnterFallback(view)
         view.animate().cancel()
         if (reduced) {
             view.alpha = 1f
@@ -98,10 +108,29 @@ object OverlayMotion {
         view.scaleY = SUCCESS_FROM_SCALE
         view.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
             .setDuration(CAPSULE_IN_MS).setInterpolator(EASE).start()
+        // 프레임 콜백이 오지 않아 애니메이션이 멈춰도 몸통이 투명한 채 남지 않도록, 시간이 지나면 최종 모양으로 맞춘다.
+        val fallback = Runnable { settleShown(view) }
+        enterFallbacks[view] = fallback
+        view.postDelayed(fallback, CAPSULE_IN_FALLBACK_MS)
+    }
+
+    /** 나타내기를 최종 모양으로 맞추고 끝낸다. 이미 끝난 뒤라면 같은 값을 다시 쓸 뿐이다. */
+    private fun settleShown(view: View) {
+        enterFallbacks.remove(view)
+        view.animate().cancel()
+        view.alpha = 1f
+        view.translationY = 0f
+        view.scaleX = 1f
+        view.scaleY = 1f
+    }
+
+    private fun dropEnterFallback(view: View) {
+        enterFallbacks.remove(view)?.let { view.removeCallbacks(it) }
     }
 
     /** 캡슐이 사라진다. [end] 는 끝난 뒤(또는 바로) 한 번 부른다. 끊기면 부르지 않는다. */
     fun exit(view: View, reduced: Boolean = isReduced(), end: () -> Unit) {
+        dropEnterFallback(view)
         view.animate().cancel()
         if (reduced) {
             end()
@@ -113,6 +142,7 @@ object OverlayMotion {
 
     /** 사라지는 움직임을 끊고 보이는 상태로 되돌린다. */
     fun cancelExit(view: View) {
+        dropEnterFallback(view)
         view.animate().cancel()
         view.alpha = 1f
         view.scaleX = 1f

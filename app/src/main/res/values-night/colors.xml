@@ -11,4 +11,21 @@
     <color name="aemx_error_text">#FFFF9EAA</color>
     <color name="aemx_chip">#FF222938</color>
     <color name="aemx_splash_background">#FF11141C</color>
+    <color name="onb_bg">#FF14131A</color>
+    <color name="onb_card">#FF1E1C27</color>
+    <color name="onb_ink">#FFF4EEF6</color>
+    <color name="onb_muted">#FFB9AEC0</color>
+    <color name="onb_hint">#FF9C8FA3</color>
+    <color name="onb_plum">#FFB98BB5</color>
+    <color name="onb_pink">#FFE58FB3</color>
+    <color name="onb_sky">#FF7CC0EA</color>
+    <color name="onb_green">#FF3FCB8E</color>
+    <color name="onb_green_ink">#FF7BE0B2</color>
+    <color name="onb_green_pill">#FF1D3A2E</color>
+    <color name="onb_chip">#FF3A2A3E</color>
+    <color name="onb_warn">#FFF0A46F</color>
+    <color name="onb_track">#FF3A3442</color>
+    <color name="onb_brand_plum">#FF8A4A86</color>
+    <color name="onb_brand_pink">#FFD9729B</color>
+    <color name="onb_on_brand">#FFFFFFFF</color>
 </resources>

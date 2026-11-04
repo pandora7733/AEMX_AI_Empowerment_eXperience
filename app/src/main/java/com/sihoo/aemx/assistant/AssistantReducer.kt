@@ -94,6 +94,9 @@ object AssistantReducer {
                     phase = AssistantPhase.ConfirmingAction,
                     confirmRecipient = event.recipient,
                     confirmContent = event.content,
+                    confirmChoices = event.choices,
+                    // 후보가 없으면 확인 중인 이름이 곧 고른 이름이다. 후보가 있으면 미리 고른 것만 골라진 상태로 둔다.
+                    confirmSelected = if (event.choices.isEmpty()) event.recipient else event.recipient.ifEmpty { null },
                     expanded = true
                 )
 

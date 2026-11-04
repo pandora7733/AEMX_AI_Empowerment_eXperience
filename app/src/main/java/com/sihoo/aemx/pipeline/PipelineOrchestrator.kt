@@ -1,6 +1,7 @@
 package com.sihoo.aemx.pipeline
 
 import com.sihoo.aemx.accessibility.Ordinal
+import com.sihoo.aemx.accessibility.RecipientFallback
 import com.sihoo.aemx.accessibility.WaitDuration
 import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ActionStep
@@ -79,9 +80,20 @@ class PipelineOrchestrator(
      * 메시지를 보내기 직전에 사용자에게 받는 사람과 내용을 확인받는다. true 면 보낸다. 기본은 확인 없이 보낸다(시험용).
      * 확인을 기다리는 동안 중단 요청은 이 코루틴을 취소하므로 취소가 우선한다.
      */
-    private val confirmSend: suspend (recipient: String, content: String) -> Boolean = { _, _ -> true },
+    private val confirmSend: suspend (recipient: String, content: String, forced: Boolean, choices: List<String>) -> String? =
+        { recipient, _, _, _ -> recipient },
     /** 지금 메시지 보내기를 확인받아야 하는지. 꺼져 있으면 확인 사건도 내지 않는다. */
     private val confirmRequired: () -> Boolean = { false },
+    /**
+     * 카톡 받는 사람 후보를 연락처에서 모은다. 말한 이름을 받아 후보 이름들을 돌려준다(앞쪽이 먼저). 정확히 있으면 빈 목록.
+     * 기본은 후보가 없다.
+     */
+    private val recipientCandidates: (spoken: String) -> List<String> = { emptyList() },
+    /**
+     * 명령 처리 코루틴이 완전히 끝난 뒤에 한 번 부른다. 상태 방출은 코루틴 안에서 일어나므로, 끝난 뒤 바깥 상태(실행 버튼 잠금 등)를
+     * 다시 맞추려면 이 통로가 필요하다. 끝나는 순서와 상관없이 항상 부른다(중단, 실패, 완료 모두).
+     */
+    private val onRunEnded: () -> Unit = {},
 ) {
 
     private val inferencer = ExpectationInferencer(appResolver)
@@ -194,7 +206,7 @@ class PipelineOrchestrator(
             } catch (e: Exception) {
                 fail("예상 못한 오류: ${e.message ?: e::class.java.simpleName}", run)
             }
-        }
+        }.also { job -> job.invokeOnCompletion { onRunEnded() } }
         return true
     }
 
@@ -218,15 +230,20 @@ class PipelineOrchestrator(
      * [PipelineEvent.Cancelled] 는 명령 처리가 끝나고 실행모듈도 멈춘 것을 확인한 뒤에만 나간다.
      * LLM 추론 중이면 추론이 돌아올 때까지 기다렸다가 결과를 버리고 아무것도 실행하지 않은 채 끝낸다.
      */
-    fun requestCancel(runId: String? = null) {
-        val job = runJob ?: return
-        if (!job.isActive) return
-        val run = activeRun ?: return
+    fun requestCancel(runId: String? = null): Boolean {
+        val job = runJob
+        val run = activeRun
+        // 멈출 명령이 없으면(이미 끝났거나 아직 시작 전) 돌아온 값으로 알린다. 호출한 쪽이 캡슐을 치운다.
+        if (job == null || !job.isActive || run == null) {
+            append(PipelineLogEntry.Level.WARN, "중단을 요청했지만 멈출 명령이 없다")
+            return false
+        }
         // 화면이 누른 중단이 지난 명령의 것이면(그 사이 새 명령이 시작됐다) 새 명령을 멈추지 않는다.
-        if (runId != null && runId != run.id) return
+        if (runId != null && runId != run.id) return false
         append(PipelineLogEntry.Level.WARN, "중단을 요청했다. 멈췄는지 확인한다")
         job.cancel()
         beginCancelConfirmation(job, run)
+        return true
     }
 
     private fun beginCancelConfirmation(job: Job?, run: Run) {
@@ -300,22 +317,41 @@ class PipelineOrchestrator(
                 return
             }
 
-            val step = plan.steps[stepIndex]
+            val planned = plan.steps[stepIndex]
+            // 카톡 받는 사람이 연락처에 정확히 없으면 가까운 연락처 이름을 후보로 모은다. 후보가 하나면 미리 고르고 확인을 강제한다.
+            // 여럿이면 아무것도 고르지 않고 확인 화면에서 사용자가 고른다.
+            val spoken = planned.target.orEmpty()
+            val candidates = if (planned.action == ActionType.SEND_MESSAGE && plan.app == "카카오톡") {
+                recipientCandidates(spoken)
+            } else {
+                emptyList()
+            }
+            var step = candidates.singleOrNull()?.let { planned.copy(target = it) } ?: planned
             val stepId = stepIdOf(run, stepIndex)
             _state.value = PipelineState.Executing(step, stepIndex + 1, plan.steps.size)
             append(PipelineLogEntry.Level.STEP, step.describe(), sensitive = step.action == ActionType.SEND_MESSAGE)
             emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
 
-            if (step.action == ActionType.SEND_MESSAGE && confirmRequired()) {
+            if (step.action == ActionType.SEND_MESSAGE && (candidates.isNotEmpty() || confirmRequired())) {
                 // 보내기 전에 받는 사람과 내용을 확인받는다. 거절하면 아무것도 보내지 않고 끝낸다.
-                val recipient = step.target.orEmpty()
+                // 후보가 있으면 말한 이름도 마지막 칩으로 보여 준다. 여럿이면 미리 고르지 않는다(빈 이름).
+                val choices = if (candidates.isEmpty()) emptyList() else (candidates + spoken).distinct()
+                val recipient = if (candidates.size == 1) candidates.single() else if (candidates.isEmpty()) step.target.orEmpty() else ""
                 val content = step.value.orEmpty()
-                emit(run) { id, seq -> PipelineEvent.ConfirmSend(id, seq, stepId, recipient, content) }
-                if (!confirmSend(recipient, content)) {
+                emit(run) { id, seq -> PipelineEvent.ConfirmSend(id, seq, stepId, recipient, content, choices) }
+                val picked = confirmSend(recipient, content, candidates.isNotEmpty(), choices)
+                // 고른 이름은 반드시 보인 후보 중 하나여야 한다. 없으면 보내지 않는다.
+                val target = if (choices.isEmpty()) {
+                    picked?.takeIf { it == step.target }
+                } else {
+                    RecipientFallback.accepted(choices, picked)
+                }
+                if (target == null) {
                     emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.Cancelled) }
                     fail("보내지 않았어요", run, sensitive = true)
                     return
                 }
+                step = planned.copy(target = target)
                 // 승인되면 같은 단계가 다시 실행 중이라고 알린다(확인 화면에서 실행 화면으로 돌아간다).
                 emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
             }

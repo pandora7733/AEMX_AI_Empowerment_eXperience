@@ -71,15 +71,33 @@ class AssistantStore(scope: CoroutineScope) {
         _continueRequests.tryEmit(current.runId)
     }
 
-    private val _sendAnswers = MutableSharedFlow<Boolean>(extraBufferCapacity = 4)
+    private val _sendAnswers = MutableSharedFlow<SendDecision>(extraBufferCapacity = 4)
 
-    /** 보내기 확인에 대한 답. true 는 보내기, false 는 취소다. 명령을 소유한 쪽이 받아 이어 간다. */
-    val sendAnswers: SharedFlow<Boolean> = _sendAnswers.asSharedFlow()
+    /** 보내기 확인에 대한 답. 명령을 소유한 쪽이 받아 이어 간다. */
+    val sendAnswers: SharedFlow<SendDecision> = _sendAnswers.asSharedFlow()
 
-    /** 확인 화면의 보내기·취소 버튼. 확인 대기 중일 때만 보낸다. */
+    /**
+     * 확인 화면의 보내기·취소 버튼. 확인 대기 중일 때만 보낸다. 후보가 있으면 고른 이름이 있어야 보낼 수 있다.
+     * 보내기 답에는 고른 이름을 함께 싣는다(후보가 없으면 확인 중인 받는 사람).
+     */
     fun answerSend(send: Boolean) {
-        if (_state.value.phase != AssistantPhase.ConfirmingAction) return
-        _sendAnswers.tryEmit(send)
+        val current = _state.value
+        if (current.phase != AssistantPhase.ConfirmingAction) return
+        if (!send) {
+            _sendAnswers.tryEmit(SendDecision(send = false, recipient = null))
+            return
+        }
+        val chosen = if (current.confirmChoices.isEmpty()) current.confirmRecipient else current.confirmSelected
+        if (chosen.isNullOrEmpty()) return
+        _sendAnswers.tryEmit(SendDecision(send = true, recipient = chosen))
+    }
+
+    /** 확인 화면에서 후보 이름 하나를 고른다. 확인 대기 중이고 후보 목록에 있는 이름일 때만 바뀐다. */
+    fun selectRecipient(name: String) {
+        val current = _state.value
+        if (current.phase != AssistantPhase.ConfirmingAction) return
+        if (name !in current.confirmChoices) return
+        _state.value = current.copy(confirmSelected = name)
     }
 
     companion object {

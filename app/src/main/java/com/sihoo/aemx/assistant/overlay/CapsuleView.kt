@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -11,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.TouchDelegate
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
 import android.view.View.MeasureSpec
@@ -129,8 +131,9 @@ internal class CapsuleView(
         // 같은 글자로 다시 그릴 때 인식 문장을 처음부터 다시 나타내지 않도록, 목표 글자와 비교한다.
         if (titleTarget != text.title) {
             titleTarget = text.title
-            if (text.voice == VoiceState.Recognizing) {
-                OverlayMotion.typewrite(title, text.title)
+            if (text.voice != VoiceState.None) {
+                // 듣는 중 글자는 깜빡이지 않게 바로 바꾼다(흐려졌다 선명해지는 효과를 쓰지 않는다).
+                OverlayMotion.finishTypewrite(title, text.title)
             } else {
                 OverlayMotion.finishTypewrite(title, text.title)
                 OverlayMotion.swap(title)
@@ -169,6 +172,9 @@ internal class CapsuleView(
         voice = next
         val listening = next != VoiceState.None
         applyFrame(listening)
+        // 듣는 중 글자는 한 줄로 고정하고, 바뀔 때마다 읽어 주지 않는다(중간 결과가 자주 바뀐다).
+        title.maxLines = if (listening) 1 else 2
+        title.accessibilityLiveRegion = if (listening) View.ACCESSIBILITY_LIVE_REGION_NONE else View.ACCESSIBILITY_LIVE_REGION_POLITE
         val pad = if (listening) px(R.dimen.aemx_glow_pad) else 0
         (body.layoutParams as LayoutParams).setMargins(0, pad, 0, pad)
         body.minimumHeight = px(if (listening) R.dimen.aemx_listening_min_height else R.dimen.aemx_capsule_min_height)
@@ -218,9 +224,30 @@ internal class CapsuleView(
             lp.leftMargin + body.measuredWidth,
             lp.topMargin + body.measuredHeight,
         )
+        updateStopTouchArea()
+    }
+
+    /**
+     * 중단 버튼의 터치 영역만 넓힌다. 버튼은 글자 폭(약 56dp)만큼이라 손가락이 빗나가기 쉽다. 보이는 모양은 그대로 두고,
+     * 본체(몸통)에 [TouchDelegate] 를 달아 가로 [STOP_TOUCH_MIN_DP] 까지 왼쪽으로 늘린다(본체 안에서만 늘어난다).
+     */
+    private fun updateStopTouchArea() {
+        val hit = Rect()
+        // 버튼의 위치는 부모(본체) 기준이다. 본체가 받은 터치를 TouchDelegate 가 버튼에 넘긴다.
+        stop.getHitRect(hit)
+        val want = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, STOP_TOUCH_MIN_DP, resources.displayMetrics
+        ).toInt()
+        if (hit.width() < want) hit.left = hit.right - want
+        body.touchDelegate = TouchDelegate(hit, stop)
     }
 
     private fun px(dimen: Int) = resources.getDimensionPixelSize(dimen)
+
+    private companion object {
+        /** 중단 버튼이 받는 최소 가로 터치 폭(dp). 보이는 크기와는 따로 잡는다. */
+        const val STOP_TOUCH_MIN_DP = 72f
+    }
 }
 
 /**

@@ -14,6 +14,9 @@ import android.util.Log
 
 private const val TAG = "WakeWord"
 
+/** 호출어 판정의 진단 로그 태그. 인식된 글자는 짧은 앞부분만 남긴다. */
+private const val WAKE_TAG = "AemxWake"
+
 /**
  * 인식된 글에서 호출어("하이 에이맥스")를 찾는다.
  *
@@ -23,7 +26,8 @@ private const val TAG = "WakeWord"
  *     하이 ax? / 아 예이맥스. / 아 이 a맥스? / 하이 a믹스? / 아 에이맥스? / 하이 에이맥스
  *
  * 그래서 두 가지로 받는다.
- * - "하이" 는 자주 "아" 로 들리거나 사라지므로, 이름 앞의 짧은 글자는 무엇이든 건너뛴다.
+ * - "하이" 는 자주 "아" 로 들리거나 사라지므로, 이름 앞에는 인사말 목록에 있는 짧은 글자만 건너뛴다.
+ *   아무 글자나 건너뛰면 "어제하이넥스트" 처럼 앞말이 잘린 대화가 호출로 잡힌다.
  * - "에이맥스" 는 영문(ax, a)이나 비슷한 발음(예이, 믹스)으로 갈리므로, 영문은 한글 발음으로
  *   바꾸고 흔한 변형은 하나로 합친 뒤 비교한다.
  *
@@ -37,15 +41,68 @@ object WakeWordMatcher {
         val units = toUnits(text)
         for (skip in 0..MAX_GREETING_UNITS) {
             if (skip >= units.size) break
+            // 이름 앞은 인사말 목록에 있을 때만 본다. "어제 하이 …" 처럼 앞말이 붙은 글은 호출이 아니다.
+            val greeting = skippedText(units, skip)
+            if (greeting !in GREETINGS) continue
             for (name in NAMES) {
                 if (startsWith(units, skip, name)) {
                     val end = units[skip + name.length - 1].end
                     return text.substring(end).trim { it.isWhitespace() || it in SEPARATORS }
                 }
             }
+            // 정확히 맞지 않으면 글자 하나 차이까지 받는다. 긴 이름만, 그리고 앞이 비었거나 "하이"/"아"일 때만 한다.
+            if (greeting !in FUZZY_PREFIXES) continue
+            for (name in NAMES) {
+                val end = fuzzyEnd(units, skip, name) ?: continue
+                return text.substring(units[end - 1].end).trim { it.isWhitespace() || it in SEPARATORS }
+            }
         }
         return null
     }
+
+    /**
+     * 호출어로 판정하지 못한 글의 앞부분. 로그에 남기는 용도다. 개인정보라 호출어 후보 길이(최대 6글자)만 보인다.
+     */
+    fun debugHead(text: String): String =
+        toUnits(text).take(DEBUG_HEAD_UNITS).joinToString("") { it.char.toString() }
+
+    /**
+     * [units] 의 [from] 에서 시작하는 글을 [name] 과 비교한다. 길이가 [name] 과 한 글자 차이까지 맞으면
+     * 그 끝 위치(배타)를 돌려준다. [FUZZY_MIN_LENGTH] 보다 짧은 이름에는 쓰지 않는다.
+     */
+    private fun fuzzyEnd(units: List<Unit>, from: Int, name: String): Int? {
+        if (name.length < FUZZY_MIN_LENGTH) return null
+        for (length in name.length - 1..name.length + 1) {
+            if (length <= 0 || from + length > units.size) continue
+            val window = String(CharArray(length) { units[from + it].char })
+            if (editDistance(window, name) <= 1) return from + length
+        }
+        return null
+    }
+
+    /** 글자 단위 편집 거리(삽입, 삭제, 바꿈). 이름과 창이 짧아서 단순한 표로 충분하다. */
+    internal fun editDistance(a: String, b: String): Int {
+        var previous = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val current = IntArray(b.length + 1)
+            current[0] = i
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+            }
+            previous = current
+        }
+        return previous[b.length]
+    }
+
+    private fun skippedText(units: List<Unit>, skip: Int): String =
+        String(CharArray(skip) { units[it].char })
+
+    /** 한 글자 차이를 받아 주는 앞말. 빈 것, 인사 "하이", 짧은 "아" 뿐이다. */
+    private val FUZZY_PREFIXES = setOf("", "하이", "아")
+
+    private const val FUZZY_MIN_LENGTH = 4
+    private const val DEBUG_HEAD_UNITS = 6
 
     /** 비교용 글자 하나. [end] 는 원문에서 이 글자가 끝나는 위치다. */
     private class Unit(val char: Char, val end: Int)
@@ -89,9 +146,17 @@ object WakeWordMatcher {
     /** 이름 앞에서 건너뛸 수 있는 글자 수. "하이야" 까지 들어간다. */
     private const val MAX_GREETING_UNITS = 3
 
+    /**
+     * 이름 앞에 올 수 있는 인사말 글자. 빈 것은 이름으로 바로 시작하는 경우다.
+     * 비교는 [SIMILAR] 로 바꾼 뒤라서 "헤이" 는 "에이" 로 들어온다.
+     * STT 가 "하이" 를 "할", "하", "아이", "하긴" 으로 적는 것까지 넣었다("하긴 A맥스" 가 실기기에서 나왔다).
+     */
+    private val GREETINGS = setOf("", "하이", "하", "아", "아이", "할", "하긴", "에이", "야", "하이야", "아이야")
+
     /** STT 가 "맥스" 를 영단어로 적은 것. 단어째로 바꾸고, 여기 없는 영문만 글자별로 바꾼다. */
     private val WORD_SOUNDS = mapOf(
         "max" to "맥스", "macs" to "맥스", "mex" to "맥스", "maks" to "맥스", "amax" to "에이맥스", "imax" to "아이맥스",
+        "aimax" to "에이맥스", "eimax" to "에이맥스", "ai" to "에이", "i" to "아이",
     )
 
     /** 영문으로 적힌 것을 한글 발음으로 바꾼다. */
@@ -105,7 +170,11 @@ object WakeWordMatcher {
     )
 
     /** 합친 뒤의 모양. 긴 것부터 맞춰야 짧은 것이 먼저 걸려 나머지가 어긋나지 않는다. */
-    private val NAMES = listOf("에이엠엑스", "에이엠맥스", "에이맥스", "에이엑스", "이맥스")
+    private val NAMES = listOf(
+        "에이엠엑스", "에이엠맥스", "에이맥스", "에이엑스", "이맥스", "에이맥", "이맥",
+        // 실기기 로그에서 본 변형. 발음 규칙으로는 못 잡는 글자라 그대로 넣는다. 세 글자짜리는 흐림 비교를 하지 않는다.
+        "엠엑스", "엠맥스", "이넥스", "이미트", "컴스트", "맥을라",
+    )
 }
 
 /**
@@ -274,8 +343,11 @@ class WakeWordSpeechSource(
                 sleep()
                 _results.emit(SpeechResult.Final(text))
             }
-            // 호출어가 없는 말은 버린다.
-            else -> _ignored.emit(text)
+            // 호출어가 없는 말은 버린다. 다음에 무엇이 들렸는지 보려고 앞부분 몇 글자만 로그에 남긴다(개인정보라 짧게).
+            else -> {
+                Log.i(WAKE_TAG, "호출어 아님: 앞 글자 [${WakeWordMatcher.debugHead(text)}] 전체 ${text.length}글자")
+                _ignored.emit(text)
+            }
         }
     }
 
@@ -287,5 +359,12 @@ class WakeWordSpeechSource(
     private fun sleep() {
         awakeUntil = 0L
         _awake.value = false
+    }
+
+    /**
+     * 호출어 창만 닫는다(듣는 중 캡슐의 중단). 마이크와 인식기는 그대로 둔다. 창이 열려 있지 않으면 아무 일도 없다.
+     */
+    fun cancelAwake() {
+        sleep()
     }
 }

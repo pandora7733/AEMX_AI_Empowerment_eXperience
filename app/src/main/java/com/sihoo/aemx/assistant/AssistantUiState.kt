@@ -61,6 +61,12 @@ data class VerifiedResult(
     val evidence: String?
 )
 
+/**
+ * 보내기 확인의 답. [recipient] 는 보내기일 때만 있고, 보낼 받는 사람(고른 후보 또는 확인 중인 이름)이다.
+ * 취소면 [send] 가 거짓이고 [recipient] 는 null 이다.
+ */
+data class SendDecision(val send: Boolean, val recipient: String?)
+
 data class AssistantUiState(
     val runId: String = "",
     val sequence: Long = 0,
@@ -79,7 +85,11 @@ data class AssistantUiState(
     val expanded: Boolean = false,
     /** 보내기 확인 중인 받는 사람과 내용. [AssistantPhase.ConfirmingAction] 일 때만 있다. */
     val confirmRecipient: String? = null,
-    val confirmContent: String? = null
+    val confirmContent: String? = null,
+    /** 보내기 확인에서 고를 받는 사람 후보. 비어 있으면 고르지 않는다. */
+    val confirmChoices: List<String> = emptyList(),
+    /** 지금 고른 받는 사람. 후보가 있으면 이 값이 있어야 보내기를 누를 수 있다. */
+    val confirmSelected: String? = null,
 ) {
     /**
      * 화면이 "성공"을 보여도 되는지. 모든 단계가 끝났고 그 결과를 관찰로 확인했을 때만 true 다.

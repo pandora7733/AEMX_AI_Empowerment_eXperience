@@ -6,6 +6,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
@@ -104,15 +105,30 @@ internal class AssistantOverlayController(
     }
 
     private fun render(state: AssistantUiState) {
-        val previous = lastState.phase
+        val before = lastState
+        val previous = before.phase
         lastState = state
-        val text = CapsuleTextFactory.from(state)
-        if (!text.visible || !CapsuleVisibility.shouldShow(state, enabled, dismissedRunId)) {
+        val listening = state.phase == AssistantPhase.Listening || state.phase == AssistantPhase.Recognizing
+        // 듣는 중의 중간 결과는 갱신 간격과 큰 변동 규칙([LiveCaption])을 거쳐서 보인다. 듣기가 끝나면 지운다.
+        if (listening) {
+            // 새 듣기가 시작되면 이전 말의 글자를 버린다. 그 사이의 Idle 이 건너뛰어졌을 수도 있어서 상태로 본다.
+            if (LiveCaption.startsNewListening(before, state)) caption.reset()
+            caption.offer(state.transcript, SystemClock.uptimeMillis())
+            handler.removeCallbacks(captionTick)
+            if (caption.waiting) handler.postDelayed(captionTick, CAPTION_TICK_MS)
+        } else {
+            caption.reset()
+            handler.removeCallbacks(captionTick)
+        }
+        val text = CapsuleTextFactory.from(state, if (listening) LiveCaption.display(caption.shown) else "")
+        val shouldShow = CapsuleVisibility.shouldShow(state, enabled, dismissedRunId)
+        // 진단용. 글자나 명령 내용은 남기지 않는다(단계와 상태 이름, 표시 여부만).
+        Log.i(STATE_TAG, "phase=${state.phase} visible=${text.visible} shouldShow=$shouldShow exiting=$exiting added=$added")
+        if (!text.visible || !shouldShow) {
             hide()
             return
         }
-        show(DockPolicy.dockFor(state.phase))
-        view?.bind(text, dismissible = state.phase.isTerminal)
+        show(DockPolicy.dockFor(state.phase), text, dismissible = state.phase.isTerminal)
         if (state.phase == AssistantPhase.Success && previous != AssistantPhase.Success) view?.popSuccess()
         updatePanel(state, text)
 
@@ -123,6 +139,10 @@ internal class AssistantOverlayController(
         }
     }
 
+    /** 듣는 중 중간 결과를 다듬는 상태. 보류된 값이 있으면 [captionTick] 이 다시 그린다. */
+    private val caption = LiveCaption.Throttle()
+    private val captionTick = Runnable { render(lastState) }
+
     private var autoHideRunId: String? = null
     private val autoHide = Runnable { dismiss(autoHideRunId) }
 
@@ -131,7 +151,7 @@ internal class AssistantOverlayController(
         hide()
     }
 
-    private fun show(newDock: Dock) {
+    private fun show(newDock: Dock, text: CapsuleText, dismissible: Boolean) {
         // 사라지는 중에 다시 나타나면 사라지는 움직임을 끊고 그대로 보여 준다.
         if (exiting) {
             exiting = false
@@ -143,6 +163,9 @@ internal class AssistantOverlayController(
             onDismiss = { dismiss(lastState.runId) },
             onToggle = { togglePanel() },
         ).also { view = it }
+        // 붙이기 전에 글자와 모양을 맞춘다. 캡슐은 재사용되므로 예전 듣는 중 모양(88dp + 광원 여백)이 남아 있으면
+        // 창이 그 높이(450px)로 먼저 잡혔다가 줄어든다.
+        capsule.bind(text, dismissible)
         val content = root ?: LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             setOnApplyWindowInsetsListener { v, insets -> onInsets(insets); v.onApplyWindowInsets(insets) }
@@ -154,6 +177,7 @@ internal class AssistantOverlayController(
             onCollapse = { togglePanel() },
             onSend = { store.answerSend(true) },
             onCancelSend = { store.answerSend(false) },
+            onChoose = { store.selectRecipient(it) },
         ).also {
             panel = it
             it.visibility = View.GONE
@@ -163,6 +187,8 @@ internal class AssistantOverlayController(
         dock = newDock
         arrangeContent(content, capsule, expanded, dock)
         if (!added) {
+            // 예전에 펼쳐 둔 패널이 숨기기 때 그대로 남아 있으면 창 높이에 들어간다. 펼칠 상태가 아니면 붙이기 전에 접는다.
+            if (!panelOpen(lastState)) expanded.visibility = View.GONE
             val lp = buildParams()
             params = lp
             try {
@@ -256,6 +282,7 @@ internal class AssistantOverlayController(
         capsule.animateOut {
             // 사라지는 중에 다시 나타나지 않았을 때만 뗀다([show] 가 exiting 을 끈다).
             if (exiting) {
+                Log.i(STATE_TAG, "퇴장이 끝나 창을 뗀다 phase=${lastState.phase}")
                 exiting = false
                 removeWindow()
             }
@@ -389,7 +416,11 @@ internal class AssistantOverlayController(
 
     private companion object {
         const val TAG = "AemxOverlay"
+        const val STATE_TAG = "AemxOverlayState"
         const val MAX_CORRECTIONS = 3
         const val CORRECT_DELAY_MS = 80L
+
+        /** 보류된 듣는 중 글자를 다시 볼 간격. 갱신 간격(200ms)과 큰 변동 유예(300ms)보다 짧게 둔다. */
+        const val CAPTION_TICK_MS = 100L
     }
 }

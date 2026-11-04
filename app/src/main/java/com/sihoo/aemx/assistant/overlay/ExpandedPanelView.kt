@@ -29,6 +29,8 @@ internal class ExpandedPanelView(
     private val onSend: () -> Unit = {},
     /** 보내기 확인에서 "취소"를 눌렀다. */
     private val onCancelSend: () -> Unit = {},
+    /** 보내기 확인에서 받는 사람 후보 칩 하나를 눌렀다. 이름을 그대로 돌려준다. */
+    private val onChoose: (String) -> Unit = {},
 ) : LinearLayout(context) {
 
     private val title: TextView
@@ -40,7 +42,13 @@ internal class ExpandedPanelView(
     private val cont: TextView
     private val confirmBox: LinearLayout
     private val confirmText: TextView
+    private val chipRow: LinearLayout
+    private val sendButton: TextView
     private val confirmActions: LinearLayout
+
+    /** 지금 그린 후보 칩의 목록과 고른 이름. 같을 때는 다시 그리지 않는다. */
+    private var chipKey: List<String> = emptyList()
+    private var chipSelected: String? = null
 
     /** 지금 그린 단계 줄들. 다시 그릴 때 펄스를 먼저 멈추려고 기억한다. */
     private val rowViews = mutableListOf<TextView>()
@@ -76,15 +84,18 @@ internal class ExpandedPanelView(
         confirmText.maxLines = 6
         confirmText.ellipsize = TextUtils.TruncateAt.END
         confirmBox.addView(confirmText, matchWrap())
+        // 받는 사람 후보 칩. 후보가 있을 때만 보인다(카톡 받는 사람을 고를 때).
+        chipRow = LinearLayout(context).apply { orientation = HORIZONTAL; visibility = View.GONE }
+        confirmBox.addView(chipRow, matchWrap().apply { topMargin = space })
         val voiceHint = label(context, R.dimen.aemx_text_caption, R.color.aemx_text_secondary)
         voiceHint.setText(R.string.send_confirm_voice_hint)
         confirmBox.addView(voiceHint, matchWrap().apply { topMargin = space })
         confirmActions = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.END }
-        val send = button(context, context.getString(R.string.send_confirm_send), primary = true)
-        send.setOnClickListener { onSend() }
+        sendButton = button(context, context.getString(R.string.send_confirm_send), primary = true)
+        sendButton.setOnClickListener { onSend() }
         val cancelSend = button(context, context.getString(R.string.send_confirm_cancel))
         cancelSend.setOnClickListener { onCancelSend() }
-        confirmActions.addView(send, LayoutParams(LayoutParams.WRAP_CONTENT, px(R.dimen.aemx_touch_min)))
+        confirmActions.addView(sendButton, LayoutParams(LayoutParams.WRAP_CONTENT, px(R.dimen.aemx_touch_min)))
         confirmActions.addView(cancelSend, LayoutParams(LayoutParams.WRAP_CONTENT, px(R.dimen.aemx_touch_min)).apply { marginStart = space })
         confirmBox.addView(confirmActions, matchWrap().apply { topMargin = space })
         addView(confirmBox, matchWrap().apply { topMargin = space })
@@ -141,12 +152,40 @@ internal class ExpandedPanelView(
         val confirming = state.phase == AssistantPhase.ConfirmingAction
         confirmBox.visibility = if (confirming) View.VISIBLE else View.GONE
         if (confirming) {
-            confirmText.text = "${context.getString(R.string.send_confirm_recipient)}  ${state.confirmRecipient.orEmpty()}\n" +
+            confirmText.text = "${context.getString(R.string.send_confirm_recipient)}  ${state.confirmSelected ?: state.confirmRecipient.orEmpty()}\n" +
                 "${context.getString(R.string.send_confirm_content)}  ${state.confirmContent.orEmpty()}"
+            bindChoices(state)
         }
 
         // 재계획 중에는 파랑 테두리로 회복 중임을 보여 준다. 다른 상태는 기본 테두리다.
         background = surface(if (state.phase == AssistantPhase.Replanning) R.color.aemx_action else R.color.aemx_stroke)
+    }
+
+    /**
+     * 받는 사람 후보 칩을 그린다. 고른 이름은 주요 버튼 모양으로 보인다. 후보가 여럿이고 아무도 안 골랐으면 보내기를 막는다.
+     * 같은 상태면 다시 그리지 않는다.
+     */
+    private fun bindChoices(state: AssistantUiState) {
+        val choices = state.confirmChoices
+        val selected = state.confirmSelected
+        if (choices != chipKey || selected != chipSelected) {
+            chipKey = choices
+            chipSelected = selected
+            chipRow.removeAllViews()
+            choices.forEach { name ->
+                val chip = button(context, name, primary = name == selected)
+                chip.maxLines = 1
+                chip.ellipsize = TextUtils.TruncateAt.END
+                chip.setOnClickListener { onChoose(name) }
+                chipRow.addView(chip, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = px(R.dimen.aemx_space_8)
+                })
+            }
+        }
+        chipRow.visibility = if (choices.isEmpty()) View.GONE else View.VISIBLE
+        val canSend = choices.isEmpty() || selected != null
+        sendButton.isEnabled = canSend
+        sendButton.alpha = if (canSend) 1f else 0.5f
     }
 
     /** 패널을 연다. 패널이 떠오르고 단계 줄이 50ms 간격으로 차례로 나타난다. 높이는 바꾸지 않는다(창 위치 보정과 충돌). */

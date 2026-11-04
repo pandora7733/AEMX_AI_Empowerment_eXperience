@@ -7,22 +7,34 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 음성 캡슐의 글자: 인식 중에는 고정 문구, 이해 단계에서는 최종 문장을 한 줄로 한 번만. */
+/** 음성 캡슐의 글자: 듣는 중에는 말한 내용(줄여서), 말이 없으면 "듣고 있어요…", 이해 단계에서는 최종 문장을 한 번만. */
 class VoiceCaptionTest {
 
-    @Test fun `인식 중에는 중간 결과 글자 대신 고정 문구만 보인다`() {
+    @Test fun `듣는 중에는 들은 말을 캡슐 글자에 보인다`() {
         val text = CapsuleTextFactory.from(
-            AssistantUiState(phase = AssistantPhase.Recognizing, transcript = "유튜브에서 고양이 영상을"),
+            AssistantUiState(phase = AssistantPhase.Recognizing, transcript = "날씨 알려줘"),
+            liveCaption = LiveCaption.display("날씨 알려줘"),
         )
 
-        assertEquals(CapsuleTextFactory.RECOGNIZING, text.title)
+        assertEquals("날씨 알려줘", text.title)
         assertEquals(VoiceState.Recognizing, text.voice)
     }
 
-    @Test fun `듣는 중에는 듣고 있어요 한 줄만 보인다`() {
-        val text = CapsuleTextFactory.from(AssistantUiState(phase = AssistantPhase.Listening))
+    @Test fun `말이 아직 없으면 듣고 있어요 한 줄이 보인다`() {
+        val listening = CapsuleTextFactory.from(AssistantUiState(phase = AssistantPhase.Listening))
+        val recognizingEmpty = CapsuleTextFactory.from(AssistantUiState(phase = AssistantPhase.Recognizing), liveCaption = "")
 
-        assertEquals(CapsuleTextFactory.LISTENING, text.title)
+        assertEquals(CapsuleTextFactory.LISTENING, listening.title)
+        assertEquals(CapsuleTextFactory.LISTENING, recognizingEmpty.title)
+        assertEquals("", listening.subtitle)
+    }
+
+    @Test fun `듣는 중에는 보조 줄이 없다(글자 줄 하나로 끝난다)`() {
+        val text = CapsuleTextFactory.from(
+            AssistantUiState(phase = AssistantPhase.Listening, transcript = "날씨"),
+            liveCaption = "날씨",
+        )
+
         assertEquals("", text.subtitle)
     }
 
