@@ -16,7 +16,8 @@ import java.lang.reflect.Field
  * 돌려주고(오케스트레이터는 화면 검증을 못 하고 실행만 한다) 로그를 한 번 남긴다.
  *
  * 근본 해결은 서비스에 읽기 전용 훅을 하나 여는 것이다. 예: `AemxAccessibilityService` 에
- * `internal fun activeRootOrNull(): AccessibilityNodeInfo?` 를 추가하면 이 리플렉션을 지울 수 있다.
+ * `internal fun activeRootOrNull(): AccessibilityNodeInfo?` 같은 함수를 추가하면 이 리플렉션을 지울 수 있다.
+ * 아직 그런 함수는 없다. 지금은 위에서 말한 리플렉션으로 읽는다.
  * 화면 라벨 요약은 서비스가 실패 때 쓰는 [NodeFinder.describeScreen] 을 그대로 재사용한다.
  */
 internal class ServiceScreenSource : ScreenSource {

@@ -220,10 +220,6 @@ internal object NodeFinder {
         return false
     }
 
-    private fun isClickableNode(node: AccessibilityNodeInfo): Boolean =
-        node.isVisibleToUser && node.isEnabled &&
-            (node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
-
     private fun findById(root: AccessibilityNodeInfo, suffix: String): AccessibilityNodeInfo? {
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0

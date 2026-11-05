@@ -2,7 +2,6 @@ package com.sihoo.aemx.pipeline
 
 import com.sihoo.aemx.accessibility.AppLauncher
 import com.sihoo.aemx.pipeline.model.ActionPlan
-import com.sihoo.aemx.pipeline.model.ActionStep
 import com.sihoo.aemx.pipeline.model.ActionType
 
 /**

@@ -4,7 +4,6 @@ import com.sihoo.aemx.pipeline.model.ActionPlan
 import com.sihoo.aemx.pipeline.model.ActionStep
 import com.sihoo.aemx.pipeline.model.ActionType
 import com.sihoo.aemx.pipeline.model.Expectation
-import com.sihoo.aemx.pipeline.model.UnchangedOk
 import com.sihoo.aemx.pipeline.port.AppResolver
 
 /**
