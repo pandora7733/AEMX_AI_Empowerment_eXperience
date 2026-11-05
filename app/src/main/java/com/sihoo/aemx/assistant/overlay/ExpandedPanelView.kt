@@ -168,12 +168,12 @@ internal class ExpandedPanelView(
     private fun bindChoices(state: AssistantUiState) {
         val choices = state.confirmChoices
         val selected = state.confirmSelected
-        if (choices != chipKey || selected != chipSelected) {
+        // 칩 목록이 바뀔 때만 뷰를 새로 만든다. 고르기는 같은 칩 뷰의 모양만 바꾼다(탭 도중에 뷰가 바뀌면 탭이 사라진다).
+        if (choices != chipKey) {
             chipKey = choices
-            chipSelected = selected
             chipRow.removeAllViews()
             choices.forEach { name ->
-                val chip = button(context, name, primary = name == selected)
+                val chip = button(context, name)
                 chip.maxLines = 1
                 chip.ellipsize = TextUtils.TruncateAt.END
                 chip.setOnClickListener { onChoose(name) }
@@ -182,6 +182,11 @@ internal class ExpandedPanelView(
                 })
             }
         }
+        for (i in 0 until chipRow.childCount) {
+            val chip = chipRow.getChildAt(i) as? TextView ?: continue
+            styleButton(chip, primary = chip.text.toString() == selected)
+        }
+        chipSelected = selected
         chipRow.visibility = if (choices.isEmpty()) View.GONE else View.VISIBLE
         val canSend = choices.isEmpty() || selected != null
         sendButton.isEnabled = canSend
@@ -225,13 +230,17 @@ internal class ExpandedPanelView(
         setPadding(px(R.dimen.aemx_space_12), 0, px(R.dimen.aemx_space_12), 0)
         setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.aemx_text_label))
         setTypeface(typeface, Typeface.BOLD)
-        // 주요 버튼은 브랜드 파랑 바탕에 어두운 글자로 대비를 확보한다(디자인 원칙).
-        setTextColor(context.getColor(if (primary) R.color.aemx_surface else R.color.aemx_action))
-        background = GradientDrawable().apply {
+        styleButton(this, primary)
+        isClickable = true
+    }
+
+    /** 버튼 색. 주요 버튼은 브랜드 파랑 바탕에 어두운 글자로 대비를 확보한다(디자인 원칙). 색 토큰은 그대로다. */
+    private fun styleButton(view: TextView, primary: Boolean) {
+        view.setTextColor(context.getColor(if (primary) R.color.aemx_surface else R.color.aemx_action))
+        view.background = GradientDrawable().apply {
             setColor(context.getColor(if (primary) R.color.aemx_action else R.color.aemx_chip))
             cornerRadius = px(R.dimen.aemx_space_12).toFloat()
         }
-        isClickable = true
     }
 
     private fun matchWrap() = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)

@@ -24,6 +24,12 @@ class WakeWordMatcherTest {
         for (text in variants) assertNotNull("호출어여야 한다: $text", WakeWordMatcher.match(text))
     }
 
+    @Test fun `2026-11-05 시험에서 본 애맥스 변형을 받아들인다`() {
+        // "하이 애맥스" 는 "애" 가 "에" 로 합쳐져 "에맥스" 가 된다. 발음 기반 변형("뷔 레미드")은 넣지 않는다(오탐 위험).
+        val variants = listOf("하이 애맥스", "하이 예맥스", "애맥스", "하이 에맥스")
+        for (text in variants) assertNotNull("호출어여야 한다: $text", WakeWordMatcher.match(text))
+    }
+
     @Test fun `실기기에서 실제로 수락됐던 중간 결과를 모두 받아들인다`() {
         // 2026-11-05 bg3_1105 로그에서 호출로 받아 캡슐이 떴던 글. 하나라도 거절되면 안 된다.
         val accepted = listOf("아이맥스", "IMAX", "하이 MX", "하이 MX.", "아 MX?", "하이맥스", "하긴 A맥스?")

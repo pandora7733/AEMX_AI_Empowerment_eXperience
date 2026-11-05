@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -30,7 +31,8 @@ class AssistantStore(scope: CoroutineScope) {
     init {
         scope.launch {
             for (event in inbox) {
-                _state.value = AssistantReducer.reduce(_state.value, event)
+                // 고르기([selectRecipient])도 같은 상태를 바꾸므로 읽고 쓰기를 한 번에 해야 서로의 변경을 잃지 않는다.
+                _state.update { AssistantReducer.reduce(it, event) }
             }
         }
     }
@@ -94,10 +96,11 @@ class AssistantStore(scope: CoroutineScope) {
 
     /** 확인 화면에서 후보 이름 하나를 고른다. 확인 대기 중이고 후보 목록에 있는 이름일 때만 바뀐다. */
     fun selectRecipient(name: String) {
-        val current = _state.value
-        if (current.phase != AssistantPhase.ConfirmingAction) return
-        if (name !in current.confirmChoices) return
-        _state.value = current.copy(confirmSelected = name)
+        _state.update { current ->
+            if (current.phase != AssistantPhase.ConfirmingAction) return@update current
+            if (name !in current.confirmChoices) return@update current
+            current.copy(confirmSelected = name)
+        }
     }
 
     companion object {
