@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.util.Log
 
-private const val TAG = "WakeWord"
 
 /** 호출어 판정의 진단 로그 태그. 인식된 글자는 짧은 앞부분만 남긴다. */
 private const val WAKE_TAG = "AemxWake"
@@ -319,7 +318,6 @@ class WakeWordSpeechSource(
             if (WakeWordMatcher.match(result.text) == null) return
             awakeUntil = now() + awakeWindowMs
             _awake.value = true
-            Log.d(TAG, "중간 결과에서 호출어 감지: ${result.text}")
         }
         // 호출어 부분은 빼고 명령만 보여 준다.
         val rest = WakeWordMatcher.match(result.text) ?: result.text
@@ -327,7 +325,6 @@ class WakeWordSpeechSource(
     }
 
     private suspend fun onFinal(text: String) {
-        Log.d(TAG, "최종 결과: $text")
         val command = WakeWordMatcher.match(text)
         when {
             // 호출어와 명령을 한 번에 말했다.
