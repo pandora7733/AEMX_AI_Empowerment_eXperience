@@ -14,6 +14,9 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.ArrayDeque
 
+/** 카톡 검색 전용(받는 사람 후보 모으기)의 제한 시간. 보내기 전체 시간([KakaoShareFlow] 의 TIMEOUT_MS)보다 짧다. */
+internal const val KAKAO_LOOKUP_TIMEOUT_MS = 25_000L
+
 /**
  * 카카오톡 공유 선택 화면의 판정 로직 중 안드로이드 없이 돌릴 수 있는 부분.
  *
@@ -441,6 +444,38 @@ internal class KakaoShareFlow(
         }
     }
 
+    /**
+     * 검색 결과에 나온 친구 이름을 모은다. 보내지 않는다. [query] 로 검색해서 결과가 안정되면 이름 목록을 [onNames] 로
+     * 넘기고, 공유 화면을 뒤로가기로 닫는다. 결과가 없으면 빈 목록이다. 실패하면 [onFailed] 만 부르고 화면은 그대로 둔다
+     * (뒤로가기는 공유 화면이 확실히 보일 때만 누른다).
+     */
+    fun lookup(
+        query: String,
+        isCurrent: () -> Boolean,
+        onNames: (List<String>) -> Unit,
+        onFailed: (String) -> Unit,
+    ) {
+        if (query.isBlank()) return onFailed("찾을 이름이 비어 있습니다.")
+        try {
+            if (!startShare(query, fresh = false)) return onFailed("카카오톡 공유 화면을 열지 못했습니다.")
+            handler.post(
+                Run(
+                    recipient = query,
+                    value = query,
+                    isCurrent = isCurrent,
+                    onDone = {},
+                    onFailed = onFailed,
+                    attempt = 0,
+                    overallStart = SystemClock.uptimeMillis(),
+                    lookup = onNames,
+                ),
+            )
+        } catch (error: Throwable) {
+            Log.e(TAG, "카톡 이름 검색을 시작하지 못했다", error)
+            onFailed("카카오톡 이름 검색을 시작하지 못했습니다.")
+        }
+    }
+
     private inner class Run(
         private val recipient: String,
         private val value: String,
@@ -449,9 +484,14 @@ internal class KakaoShareFlow(
         private val onFailed: (String) -> Unit,
         private val attempt: Int,
         overallStart: Long,
+        /** 검색 전용 모드면 결과 이름을 받는 콜백. null 이면 보내는 흐름이다. */
+        private val lookup: ((List<String>) -> Unit)? = null,
     ) : Runnable {
         /** 전체 제한 시간의 시작. 다시 하는 실행은 처음 실행의 시작을 이어받아 전체가 한도를 넘지 않게 한다. */
         private val startedAt = overallStart
+
+        /** 검색 전용은 짧게 끝낸다(보내기 흐름의 전체 시간보다 짧다). */
+        private val limitMs = if (lookup != null) LOOKUP_TIMEOUT_MS else TIMEOUT_MS
         private var phase = Phase.OPEN
         private var openedAt = SystemClock.uptimeMillis()
         private var goneSince = 0L
@@ -505,6 +545,30 @@ internal class KakaoShareFlow(
 
         private fun fail(message: String) = onFailed(message)
 
+        /** 검색 전용: 결과 이름 목록이 [RESULT_STABLE_MS] 동안 같으면 공유 화면을 닫고 목록을 넘긴다. */
+        private var lookupKey: String? = null
+
+        private fun lookupReady(rows: List<Row>, now: Long): Outcome {
+            val names = rows.mapNotNull { it.info.name?.takeIf(String::isNotBlank) }.distinct()
+            val key = names.joinToString("\u0001")
+            if (key != lookupKey) {
+                lookupKey = key
+                stableSince = now
+                return Outcome.Wait
+            }
+            if (now - stableSince < RESULT_STABLE_MS) return Outcome.Wait
+            finishLookup(names)
+            return Outcome.Wait
+        }
+
+        /** 공유 화면이 보이는 것을 확인한 뒤에만 뒤로가기로 닫는다. 화면이 없는데 누르면 사용자의 앱이 뒤로 넘어간다. */
+        private fun finishLookup(names: List<String>) {
+            finish {
+                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                lookup?.invoke(names)
+            }
+        }
+
         /** 성공이나 실패 콜백은 한 번만 부른다. 부르기 전에 예약한 작업과 클립보드를 정리한다. */
         private fun finish(block: () -> Unit) {
             if (finished) return
@@ -542,7 +606,7 @@ internal class KakaoShareFlow(
                 }
                 Outcome.Restart -> restart()
                 Outcome.Wait -> {
-                    val deadline = if (phase == Phase.SENT) sentAt + VERIFY_MS else startedAt + TIMEOUT_MS
+                    val deadline = if (phase == Phase.SENT) sentAt + VERIFY_MS else startedAt + limitMs
                     if (now >= deadline) {
                         finish {
                             Log.i(TAG, "카톡 공유 끝: 시간 초과 단계=$phase")
@@ -584,7 +648,9 @@ internal class KakaoShareFlow(
 
         /** 보내기 전이면 한 번만 다시 하고, 아니면 실패한다. */
         private fun retryOrFail(message: String, now: Long): Outcome =
-            if (KakaoShareRules.mayRetry(phase, attempt, startedAt + TIMEOUT_MS - now)) Outcome.Restart else Outcome.Fail(message)
+            // 검색 전용은 다시 하지 않는다(다시 하면 공유 화면을 또 열어 검색한다). 실패로 끝낸다.
+            if (lookup == null && KakaoShareRules.mayRetry(phase, attempt, startedAt + limitMs - now)) Outcome.Restart
+            else Outcome.Fail(message)
 
         private fun timeoutMessage(): String = when (phase) {
             Phase.OPEN -> "카카오톡 공유 화면이 열리지 않았습니다."
@@ -736,8 +802,13 @@ internal class KakaoShareFlow(
                 }
                 KakaoShareRules.SearchMove.GiveUp -> {
                     restoreClipboard()
+                    if (lookup != null) {
+                        // 검색 전용: 결과가 없으면 빈 목록이다. 변형 검색도 전체 훑기도 하지 않는다.
+                        finishLookup(emptyList())
+                        return Outcome.Wait
+                    }
                     // 결과 행이 하나도 없으면 ㅐ/ㅔ 를 바꾼 이름으로 한 번씩 다시 검색한다. 전체 목록 훑기에 쓸 시간은 남긴다.
-                    val remaining = startedAt + TIMEOUT_MS - now
+                    val remaining = startedAt + limitMs - now
                     if (variantsUsed < variants.size && remaining >= VARIANT_MIN_REMAINING_MS) {
                         query = variants[variantsUsed++]
                         Log.i(TAG, "카톡 검색 결과가 없어 변형 이름으로 다시 검색한다 ($variantsUsed/${variants.size})")
@@ -751,6 +822,8 @@ internal class KakaoShareFlow(
                     return Outcome.Wait
                 }
             }
+            // 검색 전용: 고르거나 보내지 않고, 결과 이름이 안정되면 목록을 넘기고 공유 화면을 닫는다.
+            if (lookup != null) return lookupReady(rows, now)
             val pick = KakaoShareRules.pickRow(rows.map { it.info }, recipient, nameMatch, looseMatch, alternate)
             val key = when (pick) {
                 is KakaoShareRules.RowPick.Found -> "found:${rows.size}"
@@ -1045,6 +1118,9 @@ internal class KakaoShareFlow(
         /** 공유 시트가 뜬 뒤 검색란을 누르기 전 기다리는 시간. 확인 창 대기([SETTLE_MS])와 따로 둔다. */
         const val SHEET_READY_MS = 500L
         const val TIMEOUT_MS = 80_000L
+
+        /** 검색 전용(받는 사람 후보 모으기)의 제한 시간. 보내기 전체보다 짧다. */
+        const val LOOKUP_TIMEOUT_MS = KAKAO_LOOKUP_TIMEOUT_MS
         const val VERIFY_MS = 8_000L
         const val RETYPE_MS = 2_000L
         const val RESULT_STABLE_MS = 1_200L

@@ -54,6 +54,12 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
 
     private fun isExecutorRunning(): Boolean = ::executor.isInitialized && executor.isRunning
 
+    /** 메인 스레드에서 카톡 이름 검색을 돌린다([lookupKakaoRecipients] 가 부른다). */
+    private fun lookupKakaoNow(query: String, onNames: (List<String>) -> Unit, onFailed: (String) -> Unit) {
+        if (!::executor.isInitialized) return onFailed("접근성 서비스가 아직 준비되지 않았습니다.")
+        executor.lookupKakao(query, isCurrent = { true }, onNames = onNames, onFailed = onFailed)
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (::executor.isInitialized) executor.onAccessibilityTreeChanged()
     }
@@ -224,5 +230,16 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
 
         /** 서비스가 지금 계획을 실행 중인지. 서비스가 없거나 아직 준비 전이면 false. 읽기 전용이다. */
         fun isPlanRunning(): Boolean = activeService?.get()?.isExecutorRunning() == true
+
+        /**
+         * 카톡 검색 결과의 친구 이름을 모은다(보내지 않는다). 서비스가 없거나 계획이 도는 중이면 false 를 돌려주고 아무것도 하지 않는다.
+         * 결과는 [onNames] 또는 [onFailed] 로 한 번 알린다(메인 스레드에서). 받는 쪽은 기다리는 시간을 따로 정한다.
+         */
+        fun lookupKakaoRecipients(query: String, onNames: (List<String>) -> Unit, onFailed: (String) -> Unit): Boolean {
+            val service = activeService?.get() ?: return false
+            if (service.isExecutorRunning()) return false
+            Handler(Looper.getMainLooper()).post { service.lookupKakaoNow(query, onNames, onFailed) }
+            return true
+        }
     }
 }

@@ -53,6 +53,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import com.sihoo.aemx.accessibility.KAKAO_LOOKUP_TIMEOUT_MS
+import com.sihoo.aemx.pipeline.RecipientLookup
 import com.sihoo.aemx.pipeline.model.ActionType
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -525,7 +529,8 @@ object PipelineCore {
             youtubeSearch = { youtubeSearchOrNull() },
             confirmSend = { recipient, content, forced, choices -> awaitSendConfirmation(recipient, content, forced, choices) },
             confirmRequired = { sendConfirmEnabled },
-            recipientCandidates = { spoken -> contactCandidates(spoken) },
+            recipientLookup = { spoken -> lookupKakaoFriends(spoken) },
+            hasExactContact = { spoken -> hasExactContact(spoken) },
             onRunEnded = { syncRunEnabled() },
         )
     }
@@ -657,22 +662,31 @@ object PipelineCore {
         }
     }
 
+    /** 말한 받는 사람이 연락처에 정확히 있는지. 있으면 카톡 검색 없이 그대로 보낸다(기존 동작). 권한이 없으면 없는 것으로 본다. */
+    private fun hasExactContact(spoken: String): Boolean {
+        if (appContext.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return false
+        return RecipientFallback.pick(spoken, contactDisplayNames()) == RecipientFallback.Pick.Exact
+    }
+
     /**
-     * 말한 카톡 받는 사람이 연락처에 정확히 없을 때 가까운 연락처 이름들을 돌려준다([RecipientFallback]). 권한이 없거나
-     * 후보가 없으면 빈 목록. 로그에는 이름 대신 후보 수와 사유만 남긴다. 연락처는 폰 밖으로 보내지 않는다.
+     * 카톡 검색으로 받는 사람 후보 이름을 모은다. 보내지 않는다([AemxAccessibilityService.lookupKakaoRecipients]).
+     * 로그에는 이름 대신 결과 개수만 남긴다. 시간이 넘으면 실패로 돌려준다.
      */
-    private fun contactCandidates(spoken: String): List<String> {
-        if (appContext.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return emptyList()
-        return when (val pick = RecipientFallback.pick(spoken, contactDisplayNames())) {
-            is RecipientFallback.Pick.Candidates -> {
-                Log.i("AemxRecipientFallback", "받는 사람 후보: ${pick.names.size}명")
-                pick.names
-            }
-            is RecipientFallback.Pick.None -> {
-                Log.i("AemxRecipientFallback", "받는 사람 후보 없음: ${pick.reason}")
-                emptyList()
-            }
-            RecipientFallback.Pick.Exact -> emptyList()
+    private suspend fun lookupKakaoFriends(spoken: String): RecipientLookup {
+        val result = CompletableDeferred<RecipientLookup>()
+        val started = AemxAccessibilityService.lookupKakaoRecipients(
+            spoken,
+            onNames = { names ->
+                Log.i("AemxKakaoLookup", "카톡 검색 결과 ${names.size}개")
+                result.complete(RecipientLookup.Names(names))
+            },
+            onFailed = { reason -> result.complete(RecipientLookup.Unavailable(reason)) },
+        )
+        if (!started) return RecipientLookup.Unavailable("접근성 서비스가 연결되어 있지 않거나 다른 계획이 실행 중이다")
+        return try {
+            withTimeout(KAKAO_LOOKUP_TIMEOUT_MS + LOOKUP_GRACE_MS) { result.await() }
+        } catch (e: TimeoutCancellationException) {
+            RecipientLookup.Unavailable("카톡 검색이 시간 안에 끝나지 않았다")
         }
     }
 
@@ -991,6 +1005,9 @@ object PipelineCore {
 
     /** 보내기 확인을 기다리는 최대 시간. 답이 없으면 보내지 않는다. */
     private const val SEND_CONFIRM_TIMEOUT_MS = 15_000L
+
+    /** 카톡 검색 제한 시간 위에 더해 두는 여유. 검색 쪽이 먼저 실패로 끝나게 하려는 것이다. */
+    private const val LOOKUP_GRACE_MS = 5_000L
 
     /** 최근 실행 기록의 개수. */
     private const val RECENT_LIMIT = 2

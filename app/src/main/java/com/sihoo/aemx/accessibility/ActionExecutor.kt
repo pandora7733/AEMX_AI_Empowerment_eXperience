@@ -27,6 +27,15 @@ internal class ActionExecutor(
     // 이번 계획이 끝나며 알릴, 실행모듈이 직접 확인한 결과(메시지 전송 확인). 계획을 시작할 때 비운다.
     private var evidence: String? = null
     private val messageSender = MessageSender(service, handler, appLauncher, onEvidence = { evidence = it })
+
+    /** 카톡 검색 결과의 친구 이름을 모은다(보내지 않는다). 메인 스레드에서 부른다. [MessageSender.lookupKakao] 참고. */
+    fun lookupKakao(
+        query: String,
+        isCurrent: () -> Boolean,
+        onNames: (List<String>) -> Unit,
+        onFailed: (String) -> Unit,
+    ) = messageSender.lookupKakao(query, isCurrent, onNames, onFailed)
+
     private var executionId = 0L
     // 메인 스레드에서 바뀌고 다른 스레드(파이프라인)가 읽는다.
     @Volatile

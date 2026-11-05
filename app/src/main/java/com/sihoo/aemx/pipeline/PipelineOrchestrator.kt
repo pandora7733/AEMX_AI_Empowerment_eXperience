@@ -48,6 +48,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
+/** 카톡 받는 사람 후보를 검색 결과에서 얻은 결과. [Names] 는 검색 결과 친구 이름들, [Unavailable] 은 검색을 못 한 사유다. */
+sealed interface RecipientLookup {
+    data class Names(val names: List<String>) : RecipientLookup
+    data class Unavailable(val reason: String) : RecipientLookup
+}
+
 /**
  * STT -> LLM -> 실행모듈을 잇는 지휘자.
  *
@@ -85,10 +91,12 @@ class PipelineOrchestrator(
     /** 지금 메시지 보내기를 확인받아야 하는지. 꺼져 있으면 확인 사건도 내지 않는다. */
     private val confirmRequired: () -> Boolean = { false },
     /**
-     * 카톡 받는 사람 후보를 연락처에서 모은다. 말한 이름을 받아 후보 이름들을 돌려준다(앞쪽이 먼저). 정확히 있으면 빈 목록.
-     * 기본은 후보가 없다.
+     * 카톡 받는 사람 후보를 카톡 검색 결과에서 얻는다. 말한 이름으로 검색해 결과 이름을 돌려준다. null 이면 검색 통로가 없어서
+     * 말한 이름 그대로 보낸다(기본).
      */
-    private val recipientCandidates: (spoken: String) -> List<String> = { emptyList() },
+    private val recipientLookup: suspend (spoken: String) -> RecipientLookup? = { null },
+    /** 받는 사람 이름이 연락처에 정확히 있는지. 있으면 카톡 검색을 건너뛰고 그대로 보낸다. */
+    private val hasExactContact: (spoken: String) -> Boolean = { false },
     /**
      * 명령 처리 코루틴이 완전히 끝난 뒤에 한 번 부른다. 상태 방출은 코루틴 안에서 일어나므로, 끝난 뒤 바깥 상태(실행 버튼 잠금 등)를
      * 다시 맞추려면 이 통로가 필요하다. 끝나는 순서와 상관없이 항상 부른다(중단, 실패, 완료 모두).
@@ -318,16 +326,38 @@ class PipelineOrchestrator(
             }
 
             val planned = plan.steps[stepIndex]
-            // 카톡 받는 사람이 연락처에 정확히 없으면 가까운 연락처 이름을 후보로 모은다. 후보가 하나면 미리 고르고 확인을 강제한다.
-            // 여럿이면 아무것도 고르지 않고 확인 화면에서 사용자가 고른다.
             val spoken = planned.target.orEmpty()
-            val candidates = if (planned.action == ActionType.SEND_MESSAGE && plan.app == "카카오톡") {
-                recipientCandidates(spoken)
-            } else {
-                emptyList()
-            }
-            var step = candidates.singleOrNull()?.let { planned.copy(target = it) } ?: planned
             val stepId = stepIdOf(run, stepIndex)
+            // 카톡 받는 사람은 카톡 검색 결과에서 고른다(연락처에 정확히 있으면 그대로 보낸다). 후보가 하나면 미리 고르고 확인을 강제한다.
+            // 여럿이면 아무것도 고르지 않고 확인 화면에서 사용자가 고른다. 검색 결과가 없거나 검색이 실패하면 보내지 않는다.
+            val candidates: List<String> =
+                if (planned.action == ActionType.SEND_MESSAGE && plan.app == "카카오톡" && !hasExactContact(spoken)) {
+                    when (val lookup = recipientLookup(spoken)) {
+                        null -> emptyList()
+                        is RecipientLookup.Unavailable -> {
+                            emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.Cancelled) }
+                            fail(
+                                "카카오톡에서 받는 사람을 찾지 못해 보내지 않았어요",
+                                run,
+                                sensitive = true,
+                                logReason = "카톡 이름 검색 실패: ${lookup.reason}",
+                            )
+                            return
+                        }
+                        is RecipientLookup.Names -> {
+                            val found = RecipientFallback.fromSearch(spoken, lookup.names)
+                            if (found.isEmpty()) {
+                                emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.Cancelled) }
+                                fail("카카오톡에서 \"$spoken\" 받는 사람을 찾지 못해 보내지 않았어요", run, sensitive = true)
+                                return
+                            }
+                            found
+                        }
+                    }
+                } else {
+                    emptyList()
+                }
+            var step = candidates.singleOrNull()?.let { planned.copy(target = it) } ?: planned
             _state.value = PipelineState.Executing(step, stepIndex + 1, plan.steps.size)
             append(PipelineLogEntry.Level.STEP, step.describe(), sensitive = step.action == ActionType.SEND_MESSAGE)
             emit(run) { id, seq -> PipelineEvent.StepChanged(id, seq, stepId, StepStatus.InProgress) }
@@ -335,7 +365,8 @@ class PipelineOrchestrator(
             if (step.action == ActionType.SEND_MESSAGE && (candidates.isNotEmpty() || confirmRequired())) {
                 // 보내기 전에 받는 사람과 내용을 확인받는다. 거절하면 아무것도 보내지 않고 끝낸다.
                 // 후보가 있으면 말한 이름도 마지막 칩으로 보여 준다. 여럿이면 미리 고르지 않는다(빈 이름).
-                val choices = if (candidates.isEmpty()) emptyList() else (candidates + spoken).distinct()
+                // 후보는 카톡 검색 결과 이름만이다(말한 이름을 더하지 않는다. 검색에 없던 이름으로 보내지 않게 한다).
+                val choices = candidates
                 val recipient = if (candidates.size == 1) candidates.single() else if (candidates.isEmpty()) step.target.orEmpty() else ""
                 val content = step.value.orEmpty()
                 emit(run) { id, seq -> PipelineEvent.ConfirmSend(id, seq, stepId, recipient, content, choices) }

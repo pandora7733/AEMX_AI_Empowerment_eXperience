@@ -50,6 +50,22 @@ internal object RecipientFallback {
     }
 
     /**
+     * 카톡 검색 결과에 나온 친구 이름에서 받는 사람 후보를 고른다. 같은 이름이 먼저, 그다음 말한 이름으로 끝나는 것
+     * ("정우" -> "김정우"), 그다음 말한 이름을 포함하는 것. 부분 일치는 말한 이름이 두 글자 이상일 때만 본다.
+     * 최대 [MAX_CANDIDATES] 명. 연락처는 쓰지 않는다(카톡 친구 이름은 연락처와 다를 수 있다).
+     */
+    fun fromSearch(spoken: String, names: Collection<String>): List<String> {
+        val wanted = spoken.filterNot(Char::isWhitespace)
+        if (wanted.isEmpty()) return emptyList()
+        val found = names.map { it.filterNot(Char::isWhitespace) }.filter { it.isNotEmpty() }.distinct()
+        val exact = found.filter { it == wanted }
+        val partial = if (wanted.length < MIN_SYLLABLES) emptyList() else found.filter { it != wanted && it.contains(wanted) }
+        val suffix = partial.filter { it.endsWith(wanted) }.sorted()
+        val inside = partial.filterNot { it.endsWith(wanted) }.sorted()
+        return (exact + suffix + inside).take(MAX_CANDIDATES)
+    }
+
+    /**
      * 사용자가 고른 이름을 검증한다. 후보([allowed]) 중 하나일 때만 그 이름을 돌려주고, 아니면 null 이다.
      * 확인 화면이 보낸 선택이라도 후보 목록에 없는 이름으로는 보내지 않는다.
      */

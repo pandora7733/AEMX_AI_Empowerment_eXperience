@@ -367,6 +367,23 @@ internal class MessageSender(
         }
     }
 
+    /**
+     * 카톡 검색 결과의 친구 이름을 모은다(보내지 않는다). 카톡 친구 이름은 연락처와 달라서, 받는 사람 후보를 여기서 얻는다.
+     * 결과는 [onNames] 로, 실패는 [onFailed] 로 한 번만 알린다.
+     */
+    fun lookupKakao(
+        query: String,
+        isCurrent: () -> Boolean,
+        onNames: (List<String>) -> Unit,
+        onFailed: (String) -> Unit,
+    ) {
+        KakaoShareFlow(
+            service,
+            handler,
+            looseMatch = KakaoShareRules.NameMatch { wanted, shown -> MessageRules.looselyNamed(shown, wanted) },
+        ).lookup(query, isCurrent, onNames, onFailed)
+    }
+
     // ---- 문자 ----
 
     /** 연락처를 확인하고 기본 SMS 앱을 연다. 여기서 막히면 실패를 알리고 null. */
