@@ -56,7 +56,7 @@ data class PipelineLogEntry(
  */
 data class PipelineConfig(
     /** 화면 이벤트가 이만큼 잠잠하면 "화면이 안정됐다"고 본다. */
-    val quietPeriodMs: Long = 200L,
+    val quietPeriodMs: Long = 300L,
 
     /** 한 명령을 처리하며 허용하는 재분석 횟수. 넘으면 포기한다. */
     val maxReplans: Int = 3,
