@@ -131,6 +131,11 @@ data class Expectation(
      * 화면이 그대로인데, 그 앱 화면이고 검색어가 보이면 이미 도착한 것이다.
      */
     val unchangedOk: UnchangedOk? = null,
+    /**
+     * 목표 앱을 여는 단계용. 목표 앱이 이미 앞에 있던 상태에서 화면이 그대로면, 바뀔 것이 없으니 그 앱 화면이면 통과시킨다.
+     * 다른 앱이 앞에 있었다면 여전히 화면 변화를 요구한다.
+     */
+    val alreadyOpenOk: Boolean = false,
     /** 사람이 읽는 기대 설명. */
     val note: String = ""
 ) {

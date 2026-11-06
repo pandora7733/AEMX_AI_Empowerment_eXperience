@@ -44,6 +44,7 @@ class ExpectationInferencer(
                         // 앱이 안 깔려 있을 수도 있고, 라벨이 다를 수도 있다.
                         packageName = packageName,
                         requireScreenChange = true,
+                        alreadyOpenOk = packageName != null,
                         note = if (packageName != null) {
                             "$wanted 앱($packageName) 화면이 떠야 한다"
                         } else {

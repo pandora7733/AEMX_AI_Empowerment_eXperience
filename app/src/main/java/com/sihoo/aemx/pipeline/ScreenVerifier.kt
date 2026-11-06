@@ -43,13 +43,19 @@ object ScreenVerifier {
         }
 
         var alreadyThere = false
+        var appAlreadyOpen = false
         if (expect.requireScreenChange && before.signature() == after.signature()) {
             // 같은 검색 결과가 이미 떠 있으면 바뀔 것이 없다. 그 앱 화면이고 검색어가 보일 때만 통과다.
             val ok = expect.unchangedOk
             val shown = ok != null && ok.packageName.equals(after.packageName, ignoreCase = true) &&
                 ok.texts.any { after.containsText(it) }
-            if (!shown) return Verdict.Mismatch("화면이 전혀 바뀌지 않았다")
-            alreadyThere = true
+            // 목표 앱을 여는 단계인데 목표 앱이 이미 앞에 있었다. 그 앱 화면이 맞으면(위에서 확인함) 도착한 것이다.
+            val wanted = expect.packageName
+            val openedAlready = expect.alreadyOpenOk && wanted != null &&
+                wanted.equals(before.packageName, ignoreCase = true)
+            if (!shown && !openedAlready) return Verdict.Mismatch("화면이 전혀 바뀌지 않았다")
+            alreadyThere = shown
+            appAlreadyOpen = openedAlready && !shown
         }
 
         if (expect.anyText.isNotEmpty() && expect.anyText.none { after.containsText(it) }) {
@@ -62,17 +68,18 @@ object ScreenVerifier {
             return Verdict.Mismatch("화면에 \"$forbidden\" 이 떠 있다")
         }
 
-        return Verdict.Match(evidenceFor(expect, alreadyThere))
+        return Verdict.Match(evidenceFor(expect, alreadyThere, appAlreadyOpen))
     }
 
     /**
      * 통과한 조건을 사람이 읽는 증거 한 줄로. 화면 글자나 검색어는 담지 않는다(UI·로그로 흘러가도
      * 사용자가 말한 내용이 새지 않게 어떤 조건을 확인했는지만 적는다).
      */
-    private fun evidenceFor(expect: Expectation, alreadyThere: Boolean): String? {
+    private fun evidenceFor(expect: Expectation, alreadyThere: Boolean, appAlreadyOpen: Boolean): String? {
         val checked = buildList {
             if (expect.packageName != null) add("앞 화면이 기대한 앱임")
-            if (alreadyThere) add("같은 검색 결과가 이미 떠 있음")
+            if (appAlreadyOpen) add("이미 그 앱 화면")
+            else if (alreadyThere) add("같은 검색 결과가 이미 떠 있음")
             else if (expect.requireScreenChange) add("화면이 바뀜")
             if (expect.anyText.isNotEmpty()) add("기대한 글자가 화면에 보임")
             if (expect.absentText.isNotEmpty()) add("없어야 할 글자가 없음")
