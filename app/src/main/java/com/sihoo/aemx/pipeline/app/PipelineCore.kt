@@ -13,6 +13,7 @@ import com.sihoo.aemx.accessibility.RecipientFallback
 import com.sihoo.aemx.AndroidTtsController
 import com.sihoo.aemx.assistant.AssistantStore
 import com.sihoo.aemx.assistant.SendDecision
+import com.sihoo.aemx.debug.SpeechTrace
 import com.sihoo.aemx.pipeline.PipelineConfig
 import com.sihoo.aemx.pipeline.PipelineEvent
 import com.sihoo.aemx.pipeline.PipelineLogEntry
@@ -835,6 +836,9 @@ object PipelineCore {
             val wakeGate = WakeWordSpeechSource(it, scope)
             gate = wakeGate
             scope.launch { wakeGate.results.collect { result -> onSpeech(result) } }
+            // 디버깅 패널용. 호출어 문을 지나기 전의 원본 결과와 소리 크기를 넘긴다(모드가 꺼져 있으면 버린다).
+            it.levelListener = SpeechTrace::onLevel
+            scope.launch { it.results.collect { result -> SpeechTrace.onResult(result) } }
             scope.launch {
                 it.rejections.collect { text -> _status.value = appContext.getString(R.string.pipeline_owner_rejected, text) }
             }

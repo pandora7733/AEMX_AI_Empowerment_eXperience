@@ -27,6 +27,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -35,6 +36,9 @@ import androidx.lifecycle.lifecycleScope
 import com.sihoo.aemx.accessibility.AccessibilityState
 import com.sihoo.aemx.accessibility.AccessibilityStatus
 import com.sihoo.aemx.accessibility.AemxAccessibilityService
+import com.sihoo.aemx.debug.DebugPanelView
+import com.sihoo.aemx.debug.SpeechTrace
+import com.sihoo.aemx.pipeline.PipelineRedaction
 import com.sihoo.aemx.pipeline.app.PipelineCore
 import com.sihoo.aemx.pipeline.app.VoiceService
 import kotlinx.coroutines.flow.launchIn
@@ -107,6 +111,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
     private var pillAnimator: ValueAnimator? = null
 
+    /** 디버그 빌드인지. 디버깅 모드 스위치는 디버그 빌드에만 보인다. */
+    private val debuggable by lazy { PipelineRedaction.isDebuggable(this) }
+
+    /** 디버깅 모드가 켜져 있는지. 저장해 두고 다음 실행에도 이어 간다. */
+    private var debugMode = false
+    private var debugPanel: DebugPanelView? = null
+
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         onPermissionResult(Manifest.permission.RECORD_AUDIO, granted)
     }
@@ -128,6 +139,8 @@ class MainActivity : AppCompatActivity() {
         }
         PipelineCore.init(applicationContext)
         walkthrough = !prefs().getBoolean(KEY_ONBOARDING_SEEN, false)
+        debugMode = debuggable && prefs().getBoolean(KEY_DEBUG_MODE, false)
+        SpeechTrace.enabled = debugMode
         // 화면 회전이나 프로세스 복구에서도 있던 자리를 잃지 않게 되살린다.
         savedInstanceState?.let { saved ->
             cursor = saved.getInt(STATE_CURSOR, 0)
@@ -156,12 +169,14 @@ class MainActivity : AppCompatActivity() {
         if (accessibilityState() != AccessibilityState.Connected) handler.postDelayed(accessPoll, ACCESS_POLL_MS)
         // 홈이 보이는 동안만 알약을 흐리게 한다.
         if (::homeView.isInitialized && homeView.visibility == View.VISIBLE) startPill()
+        if (debugMode) debugPanel?.start(lifecycleScope)
     }
 
     override fun onPause() {
-        // 화면을 떠나면 폴링과 알약 애니메이션을 멈춘다. 돌아오면 onResume 이 다시 맞춘다.
+        // 화면을 떠나면 폴링과 알약 애니메이션, 디버깅 패널의 측정을 멈춘다. 돌아오면 onResume 이 다시 맞춘다.
         handler.removeCallbacks(accessPoll)
         stopPill()
+        debugPanel?.stop()
         super.onPause()
     }
 
@@ -418,7 +433,32 @@ class MainActivity : AppCompatActivity() {
 
             statusView = text(13f, R.color.onb_hint)
             addView(statusView, matchWrap().apply { topMargin = dp(16) })
+
+            // 디버깅 모드 스위치와 패널. 인식된 말이 화면에 그대로 보이므로 디버그 빌드에만 둔다(#16 과 같은 기준).
+            if (debuggable) {
+                addView(SwitchCompat(this@MainActivity).apply {
+                    text = "디버깅 모드"
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    setTextColor(getColor(R.color.onb_ink))
+                    minHeight = dp(48)
+                    isChecked = debugMode
+                    setOnCheckedChangeListener { _, on -> setDebugMode(on) }
+                }, matchWrap().apply { topMargin = dp(12) })
+                debugPanel = DebugPanelView(this@MainActivity).apply {
+                    visibility = if (debugMode) View.VISIBLE else View.GONE
+                }
+                addView(debugPanel, matchWrap().apply { topMargin = dp(4) })
+            }
         }
+    }
+
+    /** 디버깅 모드를 켜고 끈다. 켜면 홈 아래에 패널이 붙고, 끄면 모아 둔 인식 내용을 지운다. */
+    private fun setDebugMode(on: Boolean) {
+        debugMode = on
+        prefs().edit().putBoolean(KEY_DEBUG_MODE, on).apply()
+        SpeechTrace.enabled = on
+        debugPanel?.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) debugPanel?.start(lifecycleScope) else debugPanel?.stop()
     }
 
     // ---------------------------------------------------------------- 상태에 따라 그리기
@@ -864,6 +904,9 @@ class MainActivity : AppCompatActivity() {
         /** 첫 실행 안내를 마쳤는지 저장하는 곳과 키. */
         const val PREFS_ONBOARDING = "aemx_onboarding"
         const val KEY_ONBOARDING_SEEN = "onboarding_seen"
+
+        /** 디버깅 모드를 켜 두었는지. 같은 저장소에 둔다. */
+        const val KEY_DEBUG_MODE = "debug_mode"
 
         /** 화면 회전 때 되살릴 값들의 이름. */
         const val STATE_CURSOR = "cursor"

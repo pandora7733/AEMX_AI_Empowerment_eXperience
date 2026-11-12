@@ -87,6 +87,13 @@ class SherpaSpeechSource(
     @Volatile
     var enrollmentSink: ((FloatArray) -> Unit)? = null
 
+    /**
+     * 프레임(100ms)마다 소리 크기, 문턱, VAD 문 상태를 알려 준다. 디버깅 패널이 본다.
+     * 보기만 하고 인식에는 영향을 주지 않는다. 녹음 스레드에서 불린다.
+     */
+    @Volatile
+    var levelListener: ((rms: Double, threshold: Double, gateOpen: Boolean) -> Unit)? = null
+
     private val _rejections = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
     /** 다른 사람 목소리로 판단해 버린 말. 화면에서 "들리긴 했다"를 보여 주기 위한 것이다. */
@@ -240,6 +247,7 @@ class SherpaSpeechSource(
                 val samples = FloatArray(read) { buffer[it] / 32768.0f }
                 if (useVad) {
                     val open = vad.accept(buffer, read)
+                    levelListener?.invoke(vad.lastRms, vad.currentThreshold, open)
                     peakRms = maxOf(peakRms, vad.lastRms)
                     // 문이 열리거나 닫힐 때만 그 사이 가장 컸던 소리를 남긴다. 문턱값이 맞는지 보는 용도다.
                     // 1초마다 찍으면 logcat 버퍼가 금방 넘쳐 앞부분 로그가 지워진다.
@@ -272,6 +280,9 @@ class SherpaSpeechSource(
                         preRoll.clear()
                         wasOpen = true
                     }
+                } else {
+                    // VAD 를 쓰지 않으면 문이 항상 열려 있다. 소리 크기만 알린다.
+                    levelListener?.let { it(EnergyVad.rms(buffer, read), vad.currentThreshold, true) }
                 }
                 stream.acceptWaveform(samples, sampleRate = SAMPLE_RATE)
                 utterance += samples
