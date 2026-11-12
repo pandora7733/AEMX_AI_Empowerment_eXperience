@@ -13,6 +13,8 @@ data class HardwareSample(
     val cores: Int,
     /** 코어별 현재 클럭(MHz). 사용률이 아니라 클럭이다. */
     val coreMhz: List<Int?>,
+    /** 코어별 최대 클럭(MHz). 막대의 끝이다. */
+    val coreMaxMhz: List<Int?>,
     /** 이 앱이 실제로 차지한 메모리(MB). 모델 파일을 올린 부분도 들어간다. */
     val appRssMb: Long?,
     val nativeHeapMb: Long,
@@ -24,6 +26,9 @@ data class HardwareSample(
     val batteryMilliAmps: Double?,
     val batteryVolts: Double?,
     val batteryTempC: Double?,
+    /** CPU 와 GPU 온도 센서 중 가장 뜨거운 값(°C). 센서 파일이 막힌 기기는 null. */
+    val cpuTempC: Double?,
+    val gpuTempC: Double?,
     /** PowerManager 의 발열 단계(0~6). 안드로이드 10 미만은 null. */
     val thermalStatus: Int?,
 )
@@ -54,8 +59,73 @@ object HardwareStats {
         else -> raw.toDouble()
     }
 
+    /**
+     * 온도 센서 파일의 값을 °C 로 바꾼다. 대부분 1/1000 도 단위지만 도 단위로 주는 기기가 있어 크기로 가린다.
+     * 온도로 보기 어려운 값(0 이하, 150 이상)은 버린다. 센서 목록에는 전압이나 경보 단계 같은 것도 섞여 있다.
+     */
+    fun zoneCelsius(raw: Long): Double? {
+        val celsius = if (raw >= MILLI_DEGREE_FLOOR) raw / 1000.0 else raw.toDouble()
+        return celsius.takeIf { it > 0.0 && it < MAX_PLAUSIBLE_CELSIUS }
+    }
+
+    /** 센서 이름으로 CPU 와 GPU 를 가린다. 그 밖의 센서(배터리, 카메라, 모뎀 등)는 null. */
+    fun zoneKind(type: String): ZoneKind? {
+        val name = type.lowercase(Locale.US)
+        return when {
+            "gpu" in name -> ZoneKind.GPU
+            "cpu" in name -> ZoneKind.CPU
+            else -> null
+        }
+    }
+
+    enum class ZoneKind { CPU, GPU }
+
+    /** 전체에서 차지하는 비율(0~100). 전체를 모르면 0. */
+    fun percent(part: Long, total: Long): Int =
+        if (total <= 0) 0 else (part * 100 / total).toInt().coerceIn(0, 100)
+
+    /** 앱 CPU 를 기기 전체 코어에 대한 비율(0~100)로 바꾼다. 막대에 쓴다. */
+    fun cpuBarPercent(sample: HardwareSample): Int =
+        sample.appCpuPercent?.let { (it / sample.cores.coerceAtLeast(1)).toInt().coerceIn(0, 100) } ?: 0
+
+    fun cpuText(sample: HardwareSample): String = sample.appCpuPercent?.let {
+        "%.0f%% (코어 %.1f개 / %d개)".format(Locale.US, it, it / 100.0, sample.cores)
+    } ?: "재는 중"
+
+    /** 앱이 차지한 메모리. 실사용을 못 읽으면 네이티브 힙과 자바 힙의 합으로 대신한다. */
+    fun appMemoryMb(sample: HardwareSample): Long = sample.appRssMb ?: (sample.nativeHeapMb + sample.javaHeapMb)
+
+    fun appMemoryText(sample: HardwareSample): String {
+        val used = appMemoryMb(sample)
+        return "${used}MB / 기기 전체 ${sample.systemTotalMb}MB (${percent(used, sample.systemTotalMb)}%)"
+    }
+
+    fun appMemoryDetail(sample: HardwareSample): String =
+        "네이티브 힙 ${sample.nativeHeapMb}MB · 자바 힙 ${sample.javaHeapMb}MB"
+
+    fun systemUsedMb(sample: HardwareSample): Long = (sample.systemTotalMb - sample.systemAvailMb).coerceAtLeast(0)
+
+    fun systemMemoryText(sample: HardwareSample): String {
+        val used = systemUsedMb(sample)
+        return "사용 ${used}MB / 전체 ${sample.systemTotalMb}MB (${percent(used, sample.systemTotalMb)}%) · 남음 ${sample.systemAvailMb}MB" +
+            if (sample.lowMemory) " (부족)" else ""
+    }
+
+    fun batteryText(sample: HardwareSample): String = listOfNotNull(
+        sample.batteryMilliAmps?.let { "%.0fmA".format(Locale.US, it) },
+        sample.batteryVolts?.let { "%.2fV".format(Locale.US, it) },
+        sample.batteryTempC?.let { "%.1f°C".format(Locale.US, it) },
+    ).joinToString(" · ").ifEmpty { UNREADABLE }
+
+    /** 잰 온도를 앞에 두고 발열 단계를 뒤에 붙인다. 온도를 못 읽으면 단계만 보인다. */
+    fun thermalText(sample: HardwareSample): String = listOfNotNull(
+        sample.cpuTempC?.let { "CPU %.1f°C".format(Locale.US, it) },
+        sample.gpuTempC?.let { "GPU %.1f°C".format(Locale.US, it) },
+        thermalLabel(sample.thermalStatus),
+    ).joinToString(" · ")
+
     fun thermalLabel(status: Int?): String = when (status) {
-        null -> UNREADABLE
+        null -> "단계 $UNREADABLE"
         0 -> "정상(0)"
         1 -> "약간 더움(1)"
         2 -> "더움(2)"
@@ -66,40 +136,12 @@ object HardwareStats {
         else -> "알 수 없음($status)"
     }
 
-    /** 패널에 그릴 줄들. 이름과 값의 쌍이다. */
-    fun lines(sample: HardwareSample): List<Pair<String, String>> {
-        val cpu = sample.appCpuPercent?.let {
-            "%.0f%% (코어 %.1f개 / %d개)".format(Locale.US, it, it / 100.0, sample.cores)
-        } ?: "재는 중"
-        val clocks = if (sample.coreMhz.all { it == null }) {
-            UNREADABLE
-        } else {
-            sample.coreMhz.joinToString(" ") { it?.toString() ?: "-" } + " MHz"
-        }
-        val appMemory = listOfNotNull(
-            sample.appRssMb?.let { "실사용 ${it}MB" },
-            "네이티브 힙 ${sample.nativeHeapMb}MB",
-            "자바 힙 ${sample.javaHeapMb}MB",
-        ).joinToString(" · ")
-        val systemMemory = "남음 ${sample.systemAvailMb}MB / 전체 ${sample.systemTotalMb}MB" +
-            if (sample.lowMemory) " (부족)" else ""
-        val battery = listOfNotNull(
-            sample.batteryMilliAmps?.let { "%.0fmA".format(Locale.US, it) },
-            sample.batteryVolts?.let { "%.2fV".format(Locale.US, it) },
-            sample.batteryTempC?.let { "%.1f°C".format(Locale.US, it) },
-        ).joinToString(" · ").ifEmpty { UNREADABLE }
-        return listOf(
-            "앱 CPU" to cpu,
-            "코어 클럭" to clocks,
-            "앱 메모리" to appMemory,
-            "기기 메모리" to systemMemory,
-            "배터리" to battery,
-            "발열" to thermalLabel(sample.thermalStatus),
-        )
-    }
-
     const val UNREADABLE = "읽을 수 없음"
 
     /** 이 값 이상이면 µA 로 본다. 20mA 를 µA 로 쓴 값이다. */
     private const val MICRO_AMP_FLOOR = 20_000
+
+    /** 이 값 이상이면 1/1000 도 단위로 본다. */
+    private const val MILLI_DEGREE_FLOOR = 1_000L
+    private const val MAX_PLAUSIBLE_CELSIUS = 150.0
 }
