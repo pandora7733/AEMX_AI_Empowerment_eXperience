@@ -52,4 +52,8 @@ class MicHealth(private val silentFramesLimit: Int = SILENT_FRAMES_LIMIT) {
 object MicStatus {
     @Volatile
     var silenced = false
+
+    /** 마지막 프레임의 소리 크기(RMS). 빠른 메뉴가 마이크에 소리가 들어오는지 보여 줄 때 읽는다. 꺼지면 0 이다. */
+    @Volatile
+    var level = 0.0
 }

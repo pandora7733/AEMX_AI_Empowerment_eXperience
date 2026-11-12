@@ -43,6 +43,7 @@ import com.sihoo.aemx.pipeline.port.PlanGenerator
 import com.sihoo.aemx.pipeline.port.PlanRequest
 import com.sihoo.aemx.pipeline.port.PlanResult
 import com.sihoo.aemx.pipeline.port.SpeechResult
+import com.sihoo.aemx.pipeline.stt.MicStatus
 import com.sihoo.aemx.pipeline.stt.SherpaSpeechSource
 import com.sihoo.aemx.pipeline.stt.SpeakerVerifier
 import com.sihoo.aemx.pipeline.stt.WakeWordSpeechSource
@@ -829,6 +830,8 @@ object PipelineCore {
      * 마이크 권한은 호출하는 쪽(화면이나 서비스)이 먼저 확인한다.
      */
     fun startVoice() {
+        // 켜라는 요청이 오면 잠시 끈 상태는 끝난다(홈의 마이크 버튼, 빠른 메뉴 모두).
+        micPaused = false
         if (_listening.value || preparingMic) return
         val source = speech ?: SherpaSpeechSource(appContext, scope).also {
             speech = it
@@ -837,7 +840,10 @@ object PipelineCore {
             gate = wakeGate
             scope.launch { wakeGate.results.collect { result -> onSpeech(result) } }
             // 디버깅 패널용. 호출어 문을 지나기 전의 원본 결과와 소리 크기를 넘긴다(모드가 꺼져 있으면 버린다).
-            it.levelListener = SpeechTrace::onLevel
+            it.levelListener = { rms, threshold, gateOpen ->
+                MicStatus.level = rms
+                SpeechTrace.onLevel(rms, threshold, gateOpen)
+            }
             scope.launch { it.results.collect { result -> SpeechTrace.onResult(result) } }
             scope.launch {
                 it.rejections.collect { text -> _status.value = appContext.getString(R.string.pipeline_owner_rejected, text) }
@@ -891,8 +897,31 @@ object PipelineCore {
         }
     }
 
+    /**
+     * 빠른 메뉴에서 마이크를 잠시 껐는지. 켜져 있는 동안은 앱이 스스로 마이크를 다시 켜지 않는다([VoiceService.resumeIfIdle]).
+     * 저장하지 않으므로 앱이 다시 시작되면 사라진다. 사용자가 끈 상태([VoicePrefs])와는 별개다.
+     */
+    @Volatile
+    var micPaused = false
+        private set
+
+    /**
+     * 마이크를 잠시 끈다. 듣기 서비스는 그대로 둔다. 서비스를 내리면 다른 앱이 앞에 있을 때 다시 올릴 수 없기 때문이다
+     * (안드로이드 14 이후의 백그라운드 마이크 서비스 시작 제한).
+     */
+    fun pauseMic() {
+        stopVoice()
+        micPaused = true
+    }
+
+    /** 잠시 껐던 마이크를 다시 켠다. */
+    fun resumeMic() {
+        startVoice()
+    }
+
     fun stopVoice() {
         speech?.stop()
+        MicStatus.level = 0.0
         if (_listening.value) {
             _listening.value = false
             _status.value = appContext.getString(R.string.pipeline_stt_stopped)

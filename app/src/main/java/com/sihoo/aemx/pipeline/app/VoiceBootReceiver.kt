@@ -14,6 +14,7 @@ class VoiceBootReceiver : BroadcastReceiver() {
         val action = intent?.action
         if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         if (VoiceAutoStart.clearsUserStop(action)) VoicePrefs.setUserStopped(context, false)
+        if (VoiceAutoStart.clearsQuit(action)) QuitPrefs.setQuit(context, false)
         VoiceService.autoStart(context)
     }
 }

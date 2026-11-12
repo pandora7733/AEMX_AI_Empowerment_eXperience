@@ -9,8 +9,8 @@ import android.content.Context
  */
 object VoiceAutoStart {
 
-    fun shouldAutoStart(micGranted: Boolean, userStopped: Boolean, running: Boolean): Boolean =
-        micGranted && !userStopped && !running
+    fun shouldAutoStart(micGranted: Boolean, userStopped: Boolean, running: Boolean, quit: Boolean = false): Boolean =
+        micGranted && !userStopped && !running && !quit
 
     /**
      * 서비스는 떠 있는데 마이크가 꺼져 있을 때 다시 켤지. 준비가 실패했거나 무음으로 막힌 뒤 화면이 올라오면
@@ -27,6 +27,12 @@ object VoiceAutoStart {
         micGranted && !userStopped && running && micIdle
 
     /**
+     * 완전히 종료한 상태([QuitPrefs])를 지울지. 부팅과 업데이트는 새로 시작하는 것이라 지운다.
+     * 그 밖에는 사용자가 앱을 열거나 마이크를 켤 때 지운다.
+     */
+    fun clearsQuit(action: String?): Boolean = action == BOOT_COMPLETED || action == PACKAGE_REPLACED
+
+    /**
      * 앱이 업데이트되어 새로 설치됐을 때 예전의 끈 상태를 지울지. 업데이트는 사용자가 새로 설치한 것이므로
      * 끈 상태가 남아 자동 시작을 영영 막지 않게 지운다. 부팅에서는 지우지 않는다(끈 상태를 존중한다).
      */
@@ -39,6 +45,28 @@ object VoiceAutoStart {
     fun shouldRetryMic(silenced: Boolean, running: Boolean): Boolean = silenced && running
 
     private const val PACKAGE_REPLACED = "android.intent.action.MY_PACKAGE_REPLACED"
+    private const val BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED"
+}
+
+/**
+ * 빠른 메뉴의 "완전히 종료"를 누른 상태. 참인 동안은 앱이 스스로 마이크를 켜지 않는다.
+ *
+ * 접근성 서비스는 켜 둔 채로 끝내기 때문에 안드로이드가 프로세스를 다시 띄워 서비스를 연결한다. 그때 듣기가
+ * 되살아나지 않도록 저장해 둔다. 사용자가 앱을 열거나 마이크를 켜면, 또는 부팅하거나 업데이트하면 지운다.
+ * 사용자가 마이크 버튼으로 끈 상태([VoicePrefs])는 건드리지 않아서, 다시 열면 종료 전 설정대로 돌아간다.
+ */
+object QuitPrefs {
+
+    private const val FILE = "aemx_voice"
+    private const val KEY_QUIT = "app_quit"
+
+    fun isQuit(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(KEY_QUIT, false)
+
+    /** 바로 뒤에 프로세스를 끝낼 수 있어서 저장이 끝난 뒤에 돌아온다(commit). */
+    fun setQuit(context: Context, value: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY_QUIT, value).commit()
+    }
 }
 
 /**

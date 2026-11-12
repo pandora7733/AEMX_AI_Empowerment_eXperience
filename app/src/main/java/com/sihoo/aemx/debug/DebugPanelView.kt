@@ -234,9 +234,9 @@ class DebugPanelView(context: Context) : LinearLayout(context) {
     }
 }
 
-/** 0~100 을 채워 그리는 둥근 막대. 강조할 때는 주황으로 바뀐다. */
+/** 0~100 을 채워 그리는 둥근 막대. 강조할 때는 주황으로 바뀐다. 빠른 메뉴의 소리 크기 막대도 이것을 쓴다. */
 @SuppressLint("ViewConstructor")
-private class MeterView(context: Context) : View(context) {
+internal class MeterView(context: Context) : View(context) {
 
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = context.getColor(R.color.onb_track) }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)

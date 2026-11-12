@@ -145,6 +145,7 @@ class VoiceService : Service() {
         /** 사용자가 버튼으로 듣기를 켰다. 끈 상태를 지운다. 서비스가 이미 떠 있으면 그대로 둔다. */
         fun start(context: Context) {
             VoicePrefs.setUserStopped(context, false)
+            QuitPrefs.setQuit(context, false)
             startService(context)
         }
 
@@ -159,6 +160,7 @@ class VoiceService : Service() {
                 micGranted = micGranted,
                 userStopped = VoicePrefs.userStopped(context),
                 running = running,
+                quit = QuitPrefs.isQuit(context),
             )
             if (!should) return false
             // 진단: 배터리 최적화 제외 여부를 남긴다. 백그라운드 시작이 막히면 이 값과 함께 원인을 본다.
@@ -199,6 +201,10 @@ class VoiceService : Service() {
          * 같다. 사용자가 끈 상태면 하지 않는다. 화면이 올라왔을 때와 접근성이 연결될 때 부른다.
          */
         fun resumeIfIdle(context: Context): Boolean {
+            // 빠른 메뉴에서 잠시 끈 마이크는 사용자가 다시 켤 때까지 그대로 둔다.
+            if (PipelineCore.micPaused) return false
+            // 완전히 종료한 뒤에는 사용자가 앱을 열거나 마이크를 켤 때까지 아무것도 다시 켜지 않는다.
+            if (QuitPrefs.isQuit(context)) return false
             if (!running) {
                 if (backgroundStartBlocked) Log.i(TAG, "백그라운드에서 막혔던 자동 시작을 앱이 화면에 올라와 다시 시도한다")
                 return autoStart(context)

@@ -1,7 +1,12 @@
 package com.sihoo.aemx.accessibility
 
+import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.Manifest
+import android.app.ActivityManager
+import android.os.Process
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Path
@@ -10,7 +15,15 @@ import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import com.sihoo.aemx.AndroidTtsController
+import com.sihoo.aemx.MainActivity
 import com.sihoo.aemx.assistant.overlay.AssistantOverlayController
+import com.sihoo.aemx.assistant.overlay.MicState
+import com.sihoo.aemx.assistant.overlay.QuickMenuController
+import com.sihoo.aemx.assistant.overlay.QuickMenuRules
+import com.sihoo.aemx.pipeline.app.PipelineCore
+import com.sihoo.aemx.pipeline.app.QuitPrefs
+import com.sihoo.aemx.pipeline.app.VoiceService
+import com.sihoo.aemx.pipeline.stt.MicStatus
 import java.lang.ref.WeakReference
 
 class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener {
@@ -33,9 +46,108 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
             it.setEnabled(overlayEnabled)
             it.attach()
         }
+        if (QuitPrefs.isQuit(this)) Log.i(TAG, "완전히 종료한 상태라 듣기를 켜지 않는다")
         // 접근성 서비스는 앱을 최근 앱에서 지워도 시스템이 다시 연결한다. 그래서 여기서 호출어 듣기를 켜 두면
         // 앱 화면을 열지 않아도 된다. 마이크 권한과 사용자의 끈 상태는 확인한다. 떠 있는데 꺼진 마이크는 다시 켠다.
         com.sihoo.aemx.pipeline.app.VoiceService.resumeIfIdle(this)
+        // 화면에 떠 있는 접근성 버튼. 설정 파일에서 버튼을 요청했으므로 누르면 시스템이 서비스를 끄지 않고 여기로 알린다.
+        accessibilityButtonController.registerAccessibilityButtonCallback(buttonCallback)
+        quickMenu?.hide()
+        quickMenu = buildQuickMenu()
+    }
+
+    /** 접근성 버튼을 눌렀을 때. 빠른 메뉴를 열고 닫는다. */
+    private val buttonCallback = object : AccessibilityButtonController.AccessibilityButtonCallback() {
+        override fun onClicked(controller: AccessibilityButtonController) {
+            Log.i(TAG, "접근성 버튼 눌림")
+            quickMenu?.toggle()
+        }
+    }
+
+    /** 접근성 버튼을 누르면 뜨는 메뉴(앱 열기, 마이크, 완전히 종료). 서비스가 닫힐 때 꼭 떼어야 한다. */
+    private var quickMenu: QuickMenuController? = null
+
+    private fun buildQuickMenu() = QuickMenuController(
+        service = this,
+        micState = ::micStateNow,
+        micLevel = { MicStatus.level },
+        micNotice = ::micNoticeNow,
+        onOpenApp = ::openApp,
+        onToggleMic = ::toggleMic,
+        onQuit = ::quitApp,
+    )
+
+    /**
+     * 앱을 완전히 끝낸다. 도는 계획을 멈추고, 마이크와 듣기 서비스(알림 포함)를 내리고, 화면을 최근 앱에서 지운 뒤
+     * 프로세스를 끝내 모델이 쓰던 메모리를 돌려준다.
+     *
+     * 접근성 서비스 설정은 끄지 않는다. 그래서 안드로이드가 프로세스를 다시 띄워 이 서비스만 연결한다. 그 프로세스는
+     * 마이크도 모델도 올리지 않고 떠 있는 버튼만 받는다([QuitPrefs] 가 자동 듣기를 막는다). 사용자가 앱을 열면 평소대로 돌아간다.
+     */
+    private fun quitApp() {
+        Log.i(TAG, "빠른 메뉴: 완전히 종료")
+        QuitPrefs.setQuit(this, true)
+        cancelPlan()
+        PipelineCore.stopVoice()
+        stopService(Intent(this, VoiceService::class.java))
+        getSystemService(ActivityManager::class.java).appTasks.forEach { task ->
+            runCatching { task.finishAndRemoveTask() }
+        }
+        // 서비스와 화면이 내려갈 틈을 준 뒤에 끝낸다.
+        Handler(Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, QUIT_KILL_DELAY_MS)
+    }
+
+    private fun micStateNow(): MicState = QuickMenuRules.micState(
+        listening = PipelineCore.listening.value,
+        micIdle = PipelineCore.isMicIdle(),
+        silenced = MicStatus.silenced,
+    )
+
+    private fun hasMicPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    /** 마이크를 켜지 못하는 이유. 꺼져 있을 때만 보여 준다. */
+    private fun micNoticeNow(): String? = when {
+        micStateNow() != MicState.OFF -> null
+        !hasMicPermission() -> "앱을 열어 마이크를 허용해 주세요"
+        VoiceService.backgroundStartBlocked -> "앱을 열어서 켜 주세요"
+        else -> null
+    }
+
+    /**
+     * 마이크 칸을 눌렀다. 켜져 있으면 잠시 끄고, 꺼져 있으면 켠다. 여는 중에는 아무것도 하지 않는다.
+     * 듣기 서비스가 떠 있으면 마이크만 여닫고, 없으면 서비스를 올린다. 다른 앱이 앞에 있을 때 서비스를 올리는 것은
+     * 안드로이드가 막을 수 있어서, 막히면 안내 줄이 앱을 열라고 알린다([micNoticeNow]).
+     */
+    private fun toggleMic() {
+        val turnOff = QuickMenuRules.tapTurnsOff(micStateNow()) ?: return
+        PipelineCore.init(applicationContext)
+        if (turnOff) {
+            Log.i(TAG, "빠른 메뉴: 마이크 잠시 끔")
+            PipelineCore.pauseMic()
+            return
+        }
+        if (!hasMicPermission()) return
+        Log.i(TAG, "빠른 메뉴: 마이크 켬 (듣기 서비스=${VoiceService.running})")
+        if (VoiceService.running) {
+            PipelineCore.resumeMic()
+        } else {
+            runCatching { VoiceService.start(this) }
+                .onFailure { Log.w(TAG, "빠른 메뉴: 듣기 서비스를 올리지 못했다 (${it.javaClass.simpleName})") }
+        }
+    }
+
+    /**
+     * AEMX 홈 화면을 앞으로 가져온다. 이미 떠 있던 화면이 있으면 그 화면이 올라온다.
+     * 런처 인텐트를 쓰지 않고 화면을 직접 지정한다. 디버그 빌드에는 런처 항목이 둘(홈, 개발 화면)이라
+     * 런처 인텐트가 개발 화면을 열 수 있기 때문이다.
+     */
+    private fun openApp() {
+        val intent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        runCatching { startActivity(intent) }
+            .onSuccess { Log.i(TAG, "빠른 메뉴: 앱 열기") }
+            .onFailure { Log.w(TAG, "빠른 메뉴: 앱을 열지 못했다 (${it.javaClass.simpleName})") }
     }
 
     /** 다른 앱 위에 뜨는 캡슐. 서비스가 닫힐 때 꼭 떼어야 한다. */
@@ -44,11 +156,14 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         overlay?.onConfigurationChanged()
+        quickMenu?.onConfigurationChanged()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         overlay?.detach()
         overlay = null
+        quickMenu?.hide()
+        quickMenu = null
         return super.onUnbind(intent)
     }
 
@@ -83,6 +198,8 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
         if (::executor.isInitialized) executor.cancel()
         overlay?.detach()
         overlay = null
+        quickMenu?.hide()
+        quickMenu = null
         ttsController?.shutdown()
         ttsController = null
         if (activeService?.get() === this) activeService = null
@@ -208,6 +325,9 @@ class AemxAccessibilityService : AccessibilityService(), ActionExecutor.Listener
 
         /** 창 설정이 반영되기를 기다리는 시간. 캡슐을 터치 통과로 바꾼 직후 제스처를 늦춰 시작한다. */
         private const val GESTURE_START_DELAY_MS = 80L
+
+        /** 완전히 종료에서 서비스와 화면을 내린 뒤 프로세스를 끝내기까지 기다리는 시간. */
+        private const val QUIT_KILL_DELAY_MS = 600L
 
         fun cancelActionPlan() {
             Handler(Looper.getMainLooper()).post { activeService?.get()?.cancelPlan() }

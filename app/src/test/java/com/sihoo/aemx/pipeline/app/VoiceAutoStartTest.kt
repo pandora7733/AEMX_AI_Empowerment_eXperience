@@ -28,6 +28,18 @@ class VoiceAutoStartTest {
         assertFalse(VoiceAutoStart.shouldAutoStart(micGranted = true, userStopped = false, running = true))
     }
 
+    @Test
+    fun `완전히 종료한 상태면 자동으로 켜지 않는다`() {
+        assertFalse(VoiceAutoStart.shouldAutoStart(micGranted = true, userStopped = false, running = false, quit = true))
+    }
+
+    @Test
+    fun `부팅과 업데이트는 완전히 종료한 상태를 지운다`() {
+        assertTrue(VoiceAutoStart.clearsQuit("android.intent.action.BOOT_COMPLETED"))
+        assertTrue(VoiceAutoStart.clearsQuit("android.intent.action.MY_PACKAGE_REPLACED"))
+        assertFalse(VoiceAutoStart.clearsQuit(null))
+    }
+
     @Test fun `무음 마이크는 듣기가 돌고 있을 때만 다시 시작한다`() {
         assertTrue(VoiceAutoStart.shouldRetryMic(silenced = true, running = true))
         assertFalse(VoiceAutoStart.shouldRetryMic(silenced = true, running = false))

@@ -40,6 +40,7 @@ import com.sihoo.aemx.debug.DebugPanelView
 import com.sihoo.aemx.debug.SpeechTrace
 import com.sihoo.aemx.pipeline.PipelineRedaction
 import com.sihoo.aemx.pipeline.app.PipelineCore
+import com.sihoo.aemx.pipeline.app.QuitPrefs
 import com.sihoo.aemx.pipeline.app.VoiceService
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -137,6 +138,8 @@ class MainActivity : AppCompatActivity() {
         splash.setKeepOnScreenCondition {
             SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS && !PipelineCore.modelReady.value
         }
+        // 화면을 열었으면 완전히 종료한 상태는 끝난다. 아래의 준비와 자동 듣기가 평소처럼 돈다.
+        QuitPrefs.setQuit(this, false)
         PipelineCore.init(applicationContext)
         walkthrough = !prefs().getBoolean(KEY_ONBOARDING_SEEN, false)
         debugMode = debuggable && prefs().getBoolean(KEY_DEBUG_MODE, false)
@@ -162,6 +165,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 종료한 뒤에 남아 있던 화면으로 돌아온 경우에도 다시 쓰는 것으로 본다.
+        if (QuitPrefs.isQuit(this)) QuitPrefs.setQuit(this, false)
         VoiceService.retryIfSilenced(this)
         VoiceService.resumeIfIdle(this)
         refresh()
