@@ -8,6 +8,10 @@ import java.net.URLEncoder
  *
  * 구글 앱은 검색 주소(VIEW https)를 받지 못하는 기기가 있어서 웹 검색 인텐트를 한 번 더 두고,
  * 그래도 안 되면 패키지를 지정하지 않은 주소(브라우저)로 연다.
+ *
+ * 쿠팡은 앱 주소(coupang://search)로만 검색을 받는다. 웹 주소(https://www.coupang.com)는 앱이 받지 않고,
+ * 검색어는 keyword 와 q 를 둘 다 넣어야 결과 화면이 바로 열린다. 하나만 넣으면 빈 검색 입력 화면이 열린다
+ * (실기기에서 확인, 2026-11-14). 장바구니 담기처럼 앱 안에서 이어지는 동작이 있어 브라우저로는 넘기지 않는다.
  */
 internal object SearchRoutes {
 
@@ -23,6 +27,9 @@ internal object SearchRoutes {
     fun routes(packageName: String, query: String): List<Route> {
         // 공백은 "+" 가 아니라 "%20" 으로 보낸다(예전 Uri.encode 와 같다).
         val encoded = URLEncoder.encode(query, "UTF-8").replace("+", "%20")
+        if (packageName == AppLauncher.COUPANG_PACKAGE) {
+            return listOf(Route.View("coupang://search?keyword=$encoded&q=$encoded", packageName))
+        }
         val url = when (packageName) {
             AppLauncher.NAVER_PACKAGE -> "https://search.naver.com/search.naver?query=$encoded"
             AppLauncher.GOOGLE_PACKAGE -> "https://www.google.com/search?q=$encoded"

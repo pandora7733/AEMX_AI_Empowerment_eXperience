@@ -662,6 +662,9 @@ internal class ActionExecutor(
 
     /** 입력칸에 글자가 없다(힌트만 보이거나 빈 글자). 글자를 읽을 수 없으면(null) 비었다고 보지 않는다. */
     private fun isBlankField(field: AccessibilityNodeInfo): Boolean {
+        // 화면 정보는 이벤트가 와야 새로 고쳐진다. 방금 글자를 넣은 칸이 옛 값(힌트만 보임)으로 읽히지 않게 다시 읽는다
+        // (쿠팡 검색칸에서 글자를 넣은 직후 비었다고 읽혀 검색을 포기한 일이 있었다).
+        field.refresh()
         if (Build.VERSION.SDK_INT >= 26 && field.isShowingHintText) return true
         return field.text?.isBlank() == true
     }

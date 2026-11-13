@@ -6,5 +6,5 @@
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
     android:description="@string/accessibility_service_description"
-    android:packageNames="mok.android,kr.co.aladin.third_shop,com.nhn.android.search,com.google.android.googlequicksearchbox,com.google.android.youtube,com.instagram.android"
+    android:packageNames="mok.android,kr.co.aladin.third_shop,com.nhn.android.search,com.google.android.googlequicksearchbox,com.google.android.youtube,com.instagram.android,com.coupang.mobile"
     android:notificationTimeout="100" />

@@ -87,7 +87,7 @@ class AccessibilityStepExecutor(
 
         // 서비스 파서가 검색을 받는 앱은 정해져 있다. 제출해서 파서 문구로 거절되기 전에 먼저 막는다.
         if (command is Command.Search && !AppLauncher.supportsDirectSearch(command.appName)) {
-            return ExecutionResult.Failed("${command.appName}에서는 바로 검색할 수 없다(네이버, 구글, 유튜브만 지원한다)")
+            return ExecutionResult.Failed("${command.appName}에서는 바로 검색할 수 없다(네이버, 구글, 유튜브, 쿠팡만 지원한다)")
         }
 
         val app = resolveApp(command) ?: return ExecutionResult.Failed(

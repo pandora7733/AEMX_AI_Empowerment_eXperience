@@ -41,6 +41,26 @@ class SearchRoutesTest {
     }
 
     @Test
+    fun `쿠팡은 앱 주소 하나로만 열고 검색어를 keyword 와 q 에 모두 넣는다`() {
+        val routes = SearchRoutes.routes(AppLauncher.COUPANG_PACKAGE, "무선 마우스")
+
+        // 브라우저로 넘기는 방법은 두지 않는다.
+        assertEquals(1, routes.size)
+        val route = routes[0] as SearchRoutes.Route.View
+        assertEquals(AppLauncher.COUPANG_PACKAGE, route.packageName)
+        assertEquals(
+            "coupang://search?keyword=%EB%AC%B4%EC%84%A0%20%EB%A7%88%EC%9A%B0%EC%8A%A4&q=%EB%AC%B4%EC%84%A0%20%EB%A7%88%EC%9A%B0%EC%8A%A4",
+            route.uri,
+        )
+    }
+
+    @Test
+    fun `쿠팡은 바로 검색을 지원하는 앱이다`() {
+        assertTrue(AppLauncher.supportsDirectSearch("쿠팡"))
+        assertFalse(AppLauncher.supportsDirectSearch("알라딘"))
+    }
+
+    @Test
     fun `직접 검색을 지원하지 않는 앱은 방법이 없다`() {
         assertTrue(SearchRoutes.routes("com.example.other", "고양이").isEmpty())
     }

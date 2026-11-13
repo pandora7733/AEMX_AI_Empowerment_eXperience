@@ -240,7 +240,7 @@ internal class AppLauncher(private val context: Context) {
         private val VIDEO_ID = Regex("[A-Za-z0-9_-]{6,20}")
 
         fun supportsDirectSearch(value: String): Boolean = packageFor(value) in setOf(
-            NAVER_PACKAGE, GOOGLE_PACKAGE, YOUTUBE_PACKAGE, YOUTUBE_MUSIC_PACKAGE, CHROME_PACKAGE,
+            NAVER_PACKAGE, GOOGLE_PACKAGE, YOUTUBE_PACKAGE, YOUTUBE_MUSIC_PACKAGE, CHROME_PACKAGE, COUPANG_PACKAGE,
         )
 
         const val NAVER_PACKAGE = "com.nhn.android.search"
