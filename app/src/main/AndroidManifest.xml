@@ -30,6 +30,12 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- 기기에 기본으로 설정된 브라우저로 검색을 열려고 웹 주소를 받는 앱을 본다. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
         <package android:name="mok.android" />
         <package android:name="kr.co.aladin.third_shop" />
         <package android:name="com.nhn.android.search" />

@@ -3,6 +3,7 @@ package com.sihoo.aemx.accessibility
 import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import android.provider.Telephony
@@ -29,10 +30,33 @@ internal class AppLauncher(private val context: Context) {
         resolved[key]?.let { return Resolution(it) }
         val found = when {
             key in SMS_ALIASES -> Resolution(defaultSmsPackage())
+            // "브라우저" 는 기기에 기본으로 설정된 브라우저다. 기기마다 달라서 실행할 때 푼다.
+            packageFor(appName) == DEFAULT_BROWSER ->
+                defaultBrowserPackage()?.let { Resolution(it) } ?: Resolution(null, "기본 브라우저를 찾지 못했습니다.")
             else -> packageFor(appName)?.let { Resolution(it) } ?: findByLabel(appName)
         }
         found.packageName?.let { resolved[key] = it }
         return found
+    }
+
+    /**
+     * 웹 주소를 여는 기본 앱. 기본이 정해져 있지 않으면(선택 창이 뜨는 상태) 주소를 받을 수 있는 첫 앱이다.
+     * Android 11+ 에서는 매니페스트 `<queries>` 에 https 보기 인텐트가 있어야 보인다.
+     */
+    private fun defaultBrowserPackage(): String? = runCatching {
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.example.com"))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        val packageManager = context.packageManager
+        val preferred = packageManager.resolveActivity(view, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        // 기본이 없으면 시스템의 선택 창("android")이 나온다. 그것은 브라우저가 아니다.
+        if (preferred != null && preferred != SYSTEM_CHOOSER) return@runCatching preferred
+        packageManager.queryIntentActivities(view, 0).firstOrNull()?.activityInfo?.packageName
+    }.getOrNull()
+
+    /** 이름으로 지목한 앱이 이 기기에 설치돼 있어 열 수 있는지. 설정 화면이 고를 수 있는 앱만 보여 줄 때 쓴다. */
+    fun isInstalled(appName: String): Boolean {
+        val packageName = resolve(appName) ?: return false
+        return runCatching { context.packageManager.getLaunchIntentForPackage(packageName) != null }.getOrDefault(false)
     }
 
     private fun defaultSmsPackage(): String =
@@ -111,7 +135,11 @@ internal class AppLauncher(private val context: Context) {
         require(query.isNotBlank()) { "검색어가 비어 있습니다." }
         val found = resolution(appName)
         val packageName = found.packageName ?: error(found.reason ?: "지원하지 않는 앱입니다.")
-        val routes = SearchRoutes.routes(packageName, query)
+        val routes = if (packageFor(appName) == DEFAULT_BROWSER) {
+            SearchRoutes.browserRoutes(packageName, query)
+        } else {
+            SearchRoutes.routes(packageName, query)
+        }
         if (routes.isEmpty()) error("이 앱은 직접 검색 실행을 지원하지 않습니다.")
         // 앞의 방법이 받을 앱이 없으면(ActivityNotFoundException) 다음 방법으로 넘어간다. 모두 실패하면 마지막 원인을 알린다.
         var lastError: Exception? = null
@@ -172,6 +200,10 @@ internal class AppLauncher(private val context: Context) {
             "크롬" to CHROME_PACKAGE,
             "구글 크롬" to CHROME_PACKAGE,
             "chrome" to CHROME_PACKAGE,
+            // 기기 기본 브라우저. 실제 패키지는 기기마다 달라서 실행할 때 푼다([resolve]).
+            "브라우저" to DEFAULT_BROWSER,
+            "기본 브라우저" to DEFAULT_BROWSER,
+            "인터넷" to DEFAULT_BROWSER,
             // 메시지 앱은 기기마다 다르다. 실제로 열 때는 기본 SMS 앱으로 바꾼다([resolve]).
             "메시지" to SAMSUNG_MESSAGES_PACKAGE,
             "문자" to SAMSUNG_MESSAGES_PACKAGE,
@@ -241,6 +273,7 @@ internal class AppLauncher(private val context: Context) {
 
         fun supportsDirectSearch(value: String): Boolean = packageFor(value) in setOf(
             NAVER_PACKAGE, GOOGLE_PACKAGE, YOUTUBE_PACKAGE, YOUTUBE_MUSIC_PACKAGE, CHROME_PACKAGE, COUPANG_PACKAGE,
+            DEFAULT_BROWSER,
         )
 
         const val NAVER_PACKAGE = "com.nhn.android.search"
@@ -252,6 +285,15 @@ internal class AppLauncher(private val context: Context) {
         const val MELON_PACKAGE = "com.iloen.melon"
         const val COUPANG_PACKAGE = "com.coupang.mobile"
         const val CHROME_PACKAGE = "com.android.chrome"
+
+        /**
+         * 기기 기본 브라우저를 가리키는 표시. 진짜 패키지명이 아니다. 고정 표에서 "브라우저" 를 이 값으로 두고,
+         * 실제로 열 때 기기에 설정된 브라우저의 패키지로 바꾼다.
+         */
+        const val DEFAULT_BROWSER = "aemx:default-browser"
+
+        /** 기본 앱이 정해져 있지 않을 때 시스템이 돌려주는 선택 창의 패키지. */
+        private const val SYSTEM_CHOOSER = "android"
         const val SAMSUNG_MESSAGES_PACKAGE = "com.samsung.android.messaging"
     }
 }

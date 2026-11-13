@@ -44,6 +44,14 @@ class PipelineSettings(context: Context) {
         get() = prefs.getBoolean(KEY_CONFIRM_SEND, true)
         set(value) = prefs.edit().putBoolean(KEY_CONFIRM_SEND, value).apply()
 
+    /**
+     * 앱을 말하지 않은 웹 검색에 쓸 검색 앱의 키([com.sihoo.aemx.pipeline.llm.SearchApp.key]).
+     * 고른 적이 없으면 null 이고, 그때는 지금까지처럼 네이버다.
+     */
+    var searchApp: String?
+        get() = prefs.getString(KEY_SEARCH_APP, null)
+        set(value) = prefs.edit().putString(KEY_SEARCH_APP, value).apply()
+
     private companion object {
         const val PREFS = "aemx_pipeline_settings"
         const val KEY_REAL_LLM = "real_llm"
@@ -53,5 +61,6 @@ class PipelineSettings(context: Context) {
         const val KEY_OWNER_ONLY = "owner_only"
         const val KEY_AUTO_RUN = "auto_run"
         const val KEY_CONFIRM_SEND = "confirm_send"
+        const val KEY_SEARCH_APP = "search_app"
     }
 }

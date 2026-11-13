@@ -35,6 +35,8 @@ import com.sihoo.aemx.pipeline.fake.ScriptedActionExecutor
 import com.sihoo.aemx.pipeline.llm.CloudSettings
 import com.sihoo.aemx.pipeline.llm.CommandOutcome
 import com.sihoo.aemx.pipeline.llm.CommandTiming
+import com.sihoo.aemx.pipeline.llm.DefaultSearchGuard
+import com.sihoo.aemx.pipeline.llm.SearchApp
 import com.sihoo.aemx.pipeline.llm.HybridPlanGenerator
 import com.sihoo.aemx.pipeline.llm.LlamaPlanGenerator
 import com.sihoo.aemx.pipeline.model.ActionPlan
@@ -771,6 +773,8 @@ object PipelineCore {
         settings = PipelineSettings(appContext)
         cloudSettings = CloudSettings(appContext)
         com.sihoo.aemx.pipeline.llm.SendMessageGuard.logSink = { Log.i("AemxMessageGuard", it) }
+        // 앱을 말하지 않은 웹 검색은 홈 화면에서 고른 검색 앱으로 보낸다. 설정은 명령마다 읽는다.
+        DefaultSearchGuard.preferred = { SearchApp.fromKey(settings.searchApp) }
         _status.value = appContext.getString(R.string.pipeline_state_idle)
         AemxAccessibilityService.setPlanObserver(deviceObserver)
         resetPipeline()
@@ -821,6 +825,13 @@ object PipelineCore {
     fun setAutoRun(enabled: Boolean) {
         settings.autoRun = enabled
     }
+
+    /** 앱을 말하지 않은 웹 검색에 쓸 검색 앱. 홈 화면의 설정이 읽고 쓴다. 다음 명령부터 바로 적용된다. */
+    var searchApp: SearchApp
+        get() = SearchApp.fromKey(settings.searchApp)
+        set(value) {
+            settings.searchApp = value.key
+        }
 
     // ---------------------------------------------------------------- 음성
 

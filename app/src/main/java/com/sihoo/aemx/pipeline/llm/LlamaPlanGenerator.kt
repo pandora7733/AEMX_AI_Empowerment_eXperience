@@ -181,7 +181,9 @@ class LlamaPlanGenerator(
                 // 바로 검색할 수 있는 앱에서 검색칸 입력으로 풀어 낸 계획은 search 한 단계로 바로잡는다.
                 val searched = SearchShortcutGuard.apply(request.utterance, checked)
                 val ordered = PlayOrdinalGuard.apply(request.utterance, searched)
-                PlanResult.Success(CartGuard.apply(request.utterance, ordered), raw, parsed.warnings)
+                val carted = CartGuard.apply(request.utterance, ordered)
+                // 앱을 말하지 않은 웹 검색은 사용자가 고른 검색 앱으로 보낸다.
+                PlanResult.Success(DefaultSearchGuard.apply(request.utterance, carted), raw, parsed.warnings)
             }
             is ParseResult.Failure -> PlanResult.Malformed(raw, parsed.reason)
         }

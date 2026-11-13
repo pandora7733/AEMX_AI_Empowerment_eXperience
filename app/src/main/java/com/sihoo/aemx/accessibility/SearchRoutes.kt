@@ -48,4 +48,14 @@ internal object SearchRoutes {
             listOf(inApp, inBrowser)
         }
     }
+
+    /**
+     * 기기 기본 브라우저로 검색을 열 방법들. [browserPackage] 는 지금 기본으로 설정된 브라우저이고,
+     * 그 앱이 주소를 받지 못하면 패키지를 지정하지 않은 주소로 넘긴다. 검색 엔진은 구글이다.
+     */
+    fun browserRoutes(browserPackage: String, query: String): List<Route> {
+        val encoded = URLEncoder.encode(query, "UTF-8").replace("+", "%20")
+        val url = "https://www.google.com/search?q=$encoded"
+        return listOf(Route.View(url, browserPackage), Route.View(url, null))
+    }
 }

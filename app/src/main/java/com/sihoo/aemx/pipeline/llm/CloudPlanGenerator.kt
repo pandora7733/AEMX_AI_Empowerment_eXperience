@@ -143,6 +143,7 @@ internal object PlanGuards {
             ?: return PlanResult.Malformed(raw, "send_message 의 value 가 사용자가 말한 내용에 없다")
         val searched = SearchShortcutGuard.apply(request.utterance, checked)
         val ordered = PlayOrdinalGuard.apply(request.utterance, searched)
-        return PlanResult.Success(CartGuard.apply(request.utterance, ordered), raw, warnings)
+        val carted = CartGuard.apply(request.utterance, ordered)
+        return PlanResult.Success(DefaultSearchGuard.apply(request.utterance, carted), raw, warnings)
     }
 }

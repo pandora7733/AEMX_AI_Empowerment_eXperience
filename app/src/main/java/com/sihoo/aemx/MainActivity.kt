@@ -26,6 +26,7 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
@@ -36,10 +37,12 @@ import androidx.lifecycle.lifecycleScope
 import com.sihoo.aemx.accessibility.AccessibilityState
 import com.sihoo.aemx.accessibility.AccessibilityStatus
 import com.sihoo.aemx.accessibility.AemxAccessibilityService
+import com.sihoo.aemx.accessibility.AppLauncher
 import com.sihoo.aemx.debug.DebugPanelView
 import com.sihoo.aemx.debug.SpeechTrace
 import com.sihoo.aemx.pipeline.PipelineRedaction
 import com.sihoo.aemx.pipeline.app.PipelineCore
+import com.sihoo.aemx.pipeline.llm.SearchApp
 import com.sihoo.aemx.pipeline.app.QuitPrefs
 import com.sihoo.aemx.pipeline.app.VoiceService
 import kotlinx.coroutines.flow.launchIn
@@ -110,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exampleRows: List<LinearLayout>
     private lateinit var recentRows: List<LinearLayout>
     private lateinit var statusView: TextView
+    private lateinit var searchAppValue: TextView
     private var pillAnimator: ValueAnimator? = null
 
     /** 디버그 빌드인지. 디버깅 모드 스위치는 디버그 빌드에만 보인다. */
@@ -436,6 +440,27 @@ class MainActivity : AppCompatActivity() {
             recentRows = recent
             renderRecent(PipelineCore.recent.value)
 
+            // 기본 검색 앱. 앱을 말하지 않은 검색이 어디로 가는지 보여 주고, 누르면 바꾼다.
+            addView(text(15f, R.color.onb_ink, bold = true).apply { setText(R.string.home_search_app_title) }, matchWrap().apply { topMargin = dp(20) })
+            val searchRow = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = shape(R.color.onb_card, 14)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                minimumHeight = dp(56)
+                isClickable = true
+                setOnClickListener { chooseSearchApp() }
+            }
+            val searchTexts = column()
+            searchAppValue = text(15f, R.color.onb_ink, bold = true)
+            searchTexts.addView(searchAppValue, matchWrap())
+            searchTexts.addView(text(12.5f, R.color.onb_muted).apply { setText(R.string.home_search_app_hint) }, matchWrap().apply { topMargin = dp(2) })
+            searchRow.addView(searchTexts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            searchRow.addView(text(14f, R.color.onb_plum, bold = true).apply { setText(R.string.home_search_app_change) },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12) })
+            addView(searchRow, matchWrap().apply { topMargin = dp(6) })
+            renderSearchApp()
+
             statusView = text(13f, R.color.onb_hint)
             addView(statusView, matchWrap().apply { topMargin = dp(16) })
 
@@ -455,6 +480,39 @@ class MainActivity : AppCompatActivity() {
                 addView(debugPanel, matchWrap().apply { topMargin = dp(4) })
             }
         }
+    }
+
+    private fun searchAppLabel(app: SearchApp): Int = when (app) {
+        SearchApp.NAVER -> R.string.search_app_naver
+        SearchApp.GOOGLE -> R.string.search_app_google
+        SearchApp.CHROME -> R.string.search_app_chrome
+        SearchApp.BROWSER -> R.string.search_app_browser
+    }
+
+    private fun renderSearchApp() {
+        if (::searchAppValue.isInitialized) searchAppValue.setText(searchAppLabel(PipelineCore.searchApp))
+    }
+
+    /**
+     * 기본 검색 앱을 고르는 창. 이 기기에 설치된 앱만 보여 준다(지금 고른 앱은 지워졌더라도 보여 준다).
+     * 고르면 바로 저장하고 다음 명령부터 적용된다.
+     */
+    private fun chooseSearchApp() {
+        val launcher = AppLauncher(this)
+        val current = PipelineCore.searchApp
+        val options = SearchApp.entries.filter { it == current || launcher.isInstalled(it.appName) }
+        val labels = options.map { getString(searchAppLabel(it)) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.home_search_app_dialog)
+            .setSingleChoiceItems(labels, options.indexOf(current)) { dialog, which ->
+                PipelineCore.searchApp = options[which]
+                renderSearchApp()
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+            // 기본 버튼 색은 어두운 화면에서 잘 보이지 않는다. 홈 화면의 강조색으로 맞춘다.
+            .getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(getColor(R.color.onb_plum))
     }
 
     /** 디버깅 모드를 켜고 끈다. 켜면 홈 아래에 패널이 붙고, 끄면 모아 둔 인식 내용을 지운다. */

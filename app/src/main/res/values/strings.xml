@@ -163,6 +163,14 @@
     <string name="home_recent_line">%1$s Â· %2$.1fì´ Â· %3$s</string>
     <string name="home_recent_ok">ì±ê³µ</string>
         <string name="home_recent_title">최근 실행</string>
+    <string name="home_search_app_title">기본 검색 앱</string>
+    <string name="home_search_app_hint">앱을 말하지 않고 검색하면 이 앱으로 검색해요</string>
+    <string name="home_search_app_change">바꾸기</string>
+    <string name="home_search_app_dialog">기본 검색 앱 고르기</string>
+    <string name="search_app_naver">네이버</string>
+    <string name="search_app_google">구글</string>
+    <string name="search_app_chrome">크롬</string>
+    <string name="search_app_browser">기기 기본 브라우저</string>
     <string name="step_access_1">1  아래 버튼으로 설정을 열어요</string>
     <string name="step_access_2">2  설치된 앱에서 AEMX를 골라요</string>
     <string name="step_access_3">3  스위치를 켜고 돌아오면 끝이에요</string>
