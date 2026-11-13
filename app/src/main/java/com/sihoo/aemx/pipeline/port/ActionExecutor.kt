@@ -80,6 +80,12 @@ interface ActionExecutor {
         data class Scroll(val direction: Direction) : Command
 
         /**
+         * 쿠팡에서 [ordinal]번째(1부터) 상품을 장바구니에 담는다. 검색 결과 화면이면 그 상품을 열어서 담고,
+         * 이미 상품 화면이면 그 상품을 담는다. 담겼다는 안내를 확인하지 못하면 실패한다. 구매는 하지 않는다.
+         */
+        data class AddToCart(val ordinal: Int) : Command
+
+        /**
          * 카카오톡·문자(문자는 [appName] 이 "메시지")로 [target] 에게 [value] 를 보낸다.
          * 받는 사람이 정확히 하나로 정해지지 않거나 화면이 기대와 다르면 보내지 않고 실패한다.
          */

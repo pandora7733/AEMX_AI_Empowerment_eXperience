@@ -84,6 +84,13 @@ internal object StepPlanFactory {
                 value = command.delay?.takeIf { it.isNotBlank() }
             }
 
+            // 순번은 value 로 간다(서비스 규칙). 첫 번째면 넣지 않는다.
+            is Command.AddToCart -> {
+                action = A11yType.ADD_TO_CART
+                target = PLACEHOLDER_TARGET
+                if (command.ordinal > 1) value = command.ordinal.toString()
+            }
+
             is Command.Scroll -> {
                 action = A11yType.SCROLL
                 target = if (command.direction == Command.Direction.UP) "up" else "down"

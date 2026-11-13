@@ -100,6 +100,13 @@ enum class ActionType(val wire: String, val label: String) {
     /** 유튜브 쇼츠 피드를 바로 연다. target 은 쓰지 않는다. 쇼츠를 말한 명령을 탭 대신 이걸로 바꾼다(ShortsShortcut). */
     OPEN_SHORTS("open_shorts", "쇼츠 열기"),
 
+    /**
+     * 쿠팡 검색 결과(또는 상품 화면)의 상품을 장바구니에 담는다. value 는 몇 번째 상품인지(선택, 없으면 첫 번째).
+     * 사용자가 "장바구니에 담아줘" 처럼 담으라고 분명히 말했을 때만 계획에 남는다(pipeline/llm/CartGuard).
+     * 구매나 결제는 하지 않는다.
+     */
+    ADD_TO_CART("add_to_cart", "장바구니 담기"),
+
     /** 파서가 모르는 action 문자열. 실행하지 않고 재분석 대상이 된다. */
     UNKNOWN("", "알 수 없는 동작");
 

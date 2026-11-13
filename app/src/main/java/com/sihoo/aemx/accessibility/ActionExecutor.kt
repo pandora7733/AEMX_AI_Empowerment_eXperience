@@ -314,6 +314,7 @@ internal class ActionExecutor(
                 }
             }
             ActionType.TAP -> tap(root, step.target)
+            ActionType.ADD_TO_CART -> StepResult.Fatal("장바구니 담기는 아직 실행할 수 없습니다.")
             ActionType.INPUT_TEXT -> inputText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
                 val ordinal = step.value?.let(Ordinal::find) ?: 1

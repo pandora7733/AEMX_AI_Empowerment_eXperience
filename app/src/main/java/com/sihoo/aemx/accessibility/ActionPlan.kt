@@ -44,7 +44,10 @@ enum class ActionType(val wireName: String) {
     OPEN_VIDEO("open_video"),
 
     /** 유튜브 쇼츠 피드를 바로 연다. target 은 쓰지 않는다. */
-    OPEN_SHORTS("open_shorts");
+    OPEN_SHORTS("open_shorts"),
+
+    /** 쿠팡에서 상품을 장바구니에 담는다. value 는 몇 번째 상품인지(선택). 구매는 하지 않는다. */
+    ADD_TO_CART("add_to_cart");
 
     companion object {
         fun fromWireName(value: String): ActionType = entries.firstOrNull { it.wireName == value }
@@ -81,7 +84,7 @@ object ActionPlanParser {
                         "open_app target은 plan.app과 같아야 합니다."
                     }
                     require(action != ActionType.SEARCH || AppLauncher.supportsDirectSearch(app)) {
-                        "search는 네이버, 구글, 유튜브, 유튜브 뮤직에서만 지원합니다."
+                        "search는 네이버, 구글, 유튜브, 유튜브 뮤직, 쿠팡에서만 지원합니다."
                     }
                     require(action != ActionType.PLAY_FIRST || AppLauncher.packageFor(app) in setOf(
                         AppLauncher.YOUTUBE_PACKAGE, AppLauncher.YOUTUBE_MUSIC_PACKAGE,
@@ -94,6 +97,9 @@ object ActionPlanParser {
                     }
                     require(action != ActionType.OPEN_SHORTS || AppLauncher.packageFor(app) == AppLauncher.YOUTUBE_PACKAGE) {
                         "open_shorts는 유튜브에서만 지원합니다."
+                    }
+                    require(action != ActionType.ADD_TO_CART || AppLauncher.packageFor(app) == AppLauncher.COUPANG_PACKAGE) {
+                        "add_to_cart는 쿠팡에서만 지원합니다."
                     }
                     require(action != ActionType.OPEN_VIDEO || AppLauncher.isVideoId(target)) {
                         "open_video의 target은 유튜브 영상 id여야 합니다."
@@ -139,6 +145,9 @@ object ActionPlanParser {
         // value 는 1부터 시작하는 순번(선택)이다. "2", "두 번째" 같은 꼴만 받는다.
         require(action != ActionType.PLAY_FIRST || value == null || Ordinal.find(value) != null) {
             "play_first의 value는 순번(예: 2)이어야 합니다."
+        }
+        require(action != ActionType.ADD_TO_CART || value == null || Ordinal.find(value) != null) {
+            "add_to_cart의 value는 순번(예: 2)이어야 합니다."
         }
         if (action == ActionType.NEXT_VIDEO && value != null) WaitDuration.millis(value)
         require(action != ActionType.SCROLL || target in setOf("up", "down", "forward", "backward")) {

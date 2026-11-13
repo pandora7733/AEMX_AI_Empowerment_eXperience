@@ -678,6 +678,12 @@ class PipelineOrchestrator(
 
             ActionType.OPEN_SHORTS -> CommandMapping.Ready(ActionExecutor.Command.OpenShorts)
 
+            // 순번은 value 로 오고, 모델이 target("두 번째 상품")에 적은 것도 읽는다. 없으면 첫 번째다.
+            ActionType.ADD_TO_CART -> {
+                val ordinal = Ordinal.find(step.value) ?: Ordinal.inUtterance(step.target.orEmpty()) ?: 1
+                CommandMapping.Ready(ActionExecutor.Command.AddToCart(ordinal))
+            }
+
             ActionType.SCROLL ->
                 CommandMapping.Ready(
                     ActionExecutor.Command.Scroll(

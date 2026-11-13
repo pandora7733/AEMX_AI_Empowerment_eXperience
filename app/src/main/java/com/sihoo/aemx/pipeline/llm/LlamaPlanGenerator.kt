@@ -177,7 +177,9 @@ class LlamaPlanGenerator(
                 val checked = SendMessageGuard.check(request.utterance, channelChecked)
                     ?: return PlanResult.Malformed(raw, "send_message 의 value 가 사용자가 말한 내용에 없다")
                 // "두 번째 영상 틀어줘" 를 모델이 play_first 두 번으로 내면 하나로 합치고 순번을 value 로 채운다.
-                PlanResult.Success(PlayOrdinalGuard.apply(request.utterance, checked), raw, parsed.warnings)
+                // 장바구니 담기는 사용자가 담으라고 분명히 말했을 때만 남긴다(말하지 않았으면 뺀다).
+                val ordered = PlayOrdinalGuard.apply(request.utterance, checked)
+                PlanResult.Success(CartGuard.apply(request.utterance, ordered), raw, parsed.warnings)
             }
             is ParseResult.Failure -> PlanResult.Malformed(raw, parsed.reason)
         }

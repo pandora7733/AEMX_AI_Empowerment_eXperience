@@ -141,6 +141,7 @@ internal object PlanGuards {
         }
         val checked = SendMessageGuard.check(request.utterance, channelChecked)
             ?: return PlanResult.Malformed(raw, "send_message 의 value 가 사용자가 말한 내용에 없다")
-        return PlanResult.Success(PlayOrdinalGuard.apply(request.utterance, checked), raw, warnings)
+        val ordered = PlayOrdinalGuard.apply(request.utterance, checked)
+        return PlanResult.Success(CartGuard.apply(request.utterance, ordered), raw, warnings)
     }
 }

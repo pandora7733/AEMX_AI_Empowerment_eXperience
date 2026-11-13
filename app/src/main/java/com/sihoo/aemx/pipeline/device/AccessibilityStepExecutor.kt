@@ -138,6 +138,8 @@ class AccessibilityStepExecutor(
         // 영상 열기는 유튜브 앱에서만 한다.
         is Command.OpenVideo -> YOUTUBE
         Command.OpenShorts -> YOUTUBE
+        // 장바구니 담기는 쿠팡에서만 한다.
+        is Command.AddToCart -> COUPANG.takeIf { isSupportedApp(it) }
         // 첫 영상 재생을 받는 앱은 유튜브와 유튜브 뮤직뿐이다. 앞 화면이 유튜브 뮤직일 때만 그쪽으로 보내고,
         // 그 밖에는 앞 화면이나 직전 앱을 보지 않고 유튜브다. 서비스가 패키지를 비교하므로 이름이 틀리면 늘 NotReady 다.
         Command.PlayFirst, is Command.PlayNth ->
@@ -158,6 +160,8 @@ class AccessibilityStepExecutor(
         is Command.LaunchApp, is Command.Search -> LAUNCH_TIMEOUT_MS
         // 서비스 쪽 제한(카톡 40초 + 확인 8초 + 정착)보다 넉넉하게.
         is Command.SendMessage -> SEND_MESSAGE_TIMEOUT_MS
+        // 상품을 열고, 담기를 누르고, 담겼다는 안내를 기다린다. 서비스 쪽 제한(20초)보다 넉넉하게.
+        is Command.AddToCart -> ADD_TO_CART_TIMEOUT_MS
         is Command.NextVideo -> {
             val delay = command.delay?.let { runCatching { WaitDuration.millis(it) }.getOrNull() } ?: 0L
             ACTION_TIMEOUT_MS + delay
@@ -169,12 +173,14 @@ class AccessibilityStepExecutor(
         const val LAUNCH_TIMEOUT_MS = 25_000L
         const val ACTION_TIMEOUT_MS = 13_000L
         const val SEND_MESSAGE_TIMEOUT_MS = 55_000L
+        const val ADD_TO_CART_TIMEOUT_MS = 30_000L
         private const val TAG = "AccessibilityStepExecutor"
         private const val YOUTUBE = "유튜브"
 
         /** 우리 앱의 패키지 머리. 디버그 빌드는 접미사가 붙을 수 있어 앞부분으로 본다. */
         private const val OWN_PACKAGE = "com.sihoo.aemx"
         private const val YOUTUBE_MUSIC = "유튜브 뮤직"
+        private const val COUPANG = "쿠팡"
 
         /**
          * 서비스의 끝 알림을 오케스트레이터의 결과로 옮긴다.
@@ -195,7 +201,8 @@ class AccessibilityStepExecutor(
         }
 
         private val UI_ACTIONS = setOf(
-            A11yType.TAP, A11yType.INPUT_TEXT, A11yType.PLAY_FIRST, A11yType.NEXT_VIDEO, A11yType.SCROLL
+            A11yType.TAP, A11yType.INPUT_TEXT, A11yType.PLAY_FIRST, A11yType.NEXT_VIDEO, A11yType.SCROLL,
+            A11yType.ADD_TO_CART,
         )
     }
 }

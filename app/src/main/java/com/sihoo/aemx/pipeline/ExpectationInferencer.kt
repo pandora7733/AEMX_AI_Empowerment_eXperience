@@ -97,6 +97,16 @@ class ExpectationInferencer(
                 )
             }
 
+            // 담은 뒤에는 쿠팡 화면에 "장바구니에 상품을 담았습니다" 안내나 "장바구니 담기" 버튼이 보인다.
+            // 실제로 담겼는지는 실행모듈이 안내 문구로 확인해 증거로 알려 준다.
+            ActionType.ADD_TO_CART -> step.copy(
+                expect = Expectation(
+                    packageName = appResolver.resolvePackage(appName),
+                    anyText = listOf("장바구니"),
+                    note = "쿠팡 화면에 장바구니 안내가 보여야 한다"
+                )
+            )
+
             // 쇼츠 열기도 영상 열기와 같다. 유튜브 앱 화면이 쇼츠 피드로 바뀌어야 한다.
             ActionType.OPEN_SHORTS -> step.copy(
                 expect = Expectation(
