@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.sihoo.aemx.R
+import com.sihoo.aemx.TtsStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +47,7 @@ class DebugPanelView(context: Context) : LinearLayout(context) {
     private val systemMemoryLine: TextView
     private val batteryLine: TextView
     private val thermalLine: TextView
+    private val ttsLine: TextView
     private val vadLine: TextView
     private val levelBar: MeterView
     private val sentenceLine: TextView
@@ -81,6 +83,8 @@ class DebugPanelView(context: Context) : LinearLayout(context) {
         label("발열")
         thermalLine = value()
 
+        label("음성 안내 (TTS)")
+        ttsLine = value()
         label("언어")
         value().text = "한국어 모델"
         label("VAD")
@@ -138,6 +142,8 @@ class DebugPanelView(context: Context) : LinearLayout(context) {
 
         batteryLine.text = HardwareStats.batteryText(sample)
         thermalLine.text = HardwareStats.thermalText(sample)
+        // TTS 상태는 드물게 바뀌므로 하드웨어와 같이 1초마다 다시 읽는다.
+        ttsLine.text = TtsStatus.label(TtsStatus.state, TtsStatus.engine)
     }
 
     private fun renderSpeech(state: SpeechTraceState) {

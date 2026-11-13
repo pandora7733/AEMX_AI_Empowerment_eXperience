@@ -6,13 +6,23 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import java.util.Locale
 
 /** Android TTS lifecycle and playback wrapper shared by the UI and future LLM flow. */
 internal class AndroidTtsController(
     context: Context,
-    private val onStateChanged: (State) -> Unit,
+    private val stateListener: (State) -> Unit,
 ) : TextToSpeech.OnInitListener {
+
+    /**
+     * 상태를 알린다. 부르는 쪽 대부분이 상태를 보지 않아서, 엔진이 없거나 한국어가 안 되는 실패가 겉으로 드러나지 않았다.
+     * 그래서 바뀔 때마다 로그에 남기고 [TtsStatus] 에 적어 둔다. 말하는 내용은 남기지 않는다.
+     */
+    private fun onStateChanged(state: State) {
+        if (TtsStatus.record(state)) Log.i(TAG, "TTS 상태: ${TtsStatus.label(state, TtsStatus.engine)}")
+        stateListener(state)
+    }
     private var textToSpeech: TextToSpeech? = null
     private var isReady = false
 
@@ -29,15 +39,20 @@ internal class AndroidTtsController(
     override fun onInit(status: Int) {
         val engine = textToSpeech
         if (status != TextToSpeech.SUCCESS || engine == null) {
+            // 기기에 쓸 수 있는 TTS 엔진이 없으면 여기로 온다(엔진이 설치되지 않았거나 사용 중지됨).
+            Log.w(TAG, "TTS 엔진을 켜지 못했다(status=$status). 기기에 TTS 엔진이 설치돼 있고 켜져 있는지 확인한다")
             pendingSpeech.clear()
             onStateChanged(State.INIT_FAILED)
             return
         }
+        TtsStatus.engine = runCatching { engine.defaultEngine }.getOrNull()
 
-        when (engine.setLanguage(Locale.KOREAN)) {
+        val language = engine.setLanguage(Locale.KOREAN)
+        when (language) {
             TextToSpeech.LANG_MISSING_DATA,
             TextToSpeech.LANG_NOT_SUPPORTED,
             -> {
+                Log.w(TAG, "TTS 엔진(${TtsStatus.engine})이 한국어를 말하지 못한다(setLanguage=$language). 한국어 음성 데이터를 받아야 한다")
                 pendingSpeech.clear()
                 onStateChanged(State.KOREAN_UNAVAILABLE)
                 return
@@ -163,12 +178,53 @@ internal class AndroidTtsController(
     private var nextUtterance = 0
 
     private companion object {
+        const val TAG = "AemxTts"
         const val UTTERANCE_ID_PREFIX = "aemx-korean-tts-"
 
         val SPEECH_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
+    }
+}
+
+/**
+ * 음성 안내(TTS)가 지금 쓸 수 있는 상태인지. 디버깅 패널이 읽는다.
+ *
+ * 컨트롤러가 여러 개(접근성 서비스, 파이프라인) 있어도 같은 기기 엔진을 쓰므로 마지막으로 알려진 것 하나만 둔다.
+ * 말하는 중과 끝남은 자주 바뀌고 준비된 것과 같은 뜻이라 준비됨으로 묶는다.
+ */
+internal object TtsStatus {
+
+    @Volatile
+    var state: AndroidTtsController.State? = null
+        private set
+
+    /** 연결된 엔진의 패키지 이름. 연결되기 전이나 실패했으면 null. */
+    @Volatile
+    var engine: String? = null
+
+    /** 상태를 적는다. 화면에 보이는 뜻이 바뀌었으면 true(로그를 한 번만 남기려는 것이다). */
+    fun record(next: AndroidTtsController.State): Boolean {
+        // 빈 문장을 말하라고 한 것은 엔진 상태가 아니다.
+        if (next == AndroidTtsController.State.EMPTY_TEXT) return false
+        val changed = label(next, engine) != label(state, engine)
+        state = next
+        return changed
+    }
+
+    fun label(state: AndroidTtsController.State?, engine: String?): String = when (state) {
+        null -> "아직 쓰지 않음"
+        AndroidTtsController.State.INITIALIZING -> "엔진 연결 중"
+        AndroidTtsController.State.READY,
+        AndroidTtsController.State.SPEAKING,
+        AndroidTtsController.State.DONE,
+        AndroidTtsController.State.EMPTY_TEXT,
+        -> "준비됨" + (engine?.let { " ($it)" } ?: "")
+        AndroidTtsController.State.INIT_FAILED -> "엔진 없음 (기기에 TTS 엔진을 설치하거나 켜야 함)"
+        AndroidTtsController.State.KOREAN_UNAVAILABLE ->
+            "한국어 음성 없음" + (engine?.let { " ($it)" } ?: "") + " (한국어 음성 데이터를 받아야 함)"
+        AndroidTtsController.State.SPEAK_FAILED -> "말하기 실패" + (engine?.let { " ($it)" } ?: "")
     }
 }
 
