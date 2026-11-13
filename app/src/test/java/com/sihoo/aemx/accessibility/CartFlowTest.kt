@@ -25,6 +25,27 @@ class CartFlowTest {
     }
 
     @Test
+    fun `할인 상품의 담기 완료 문구도 담겼다는 안내다`() {
+        assertTrue(CartFlow.isAddedNotice("5,510원 할인받고 담기 완료"))
+    }
+
+    @Test
+    fun `안내 창의 옵션 줄을 읽어 증거에 붙인다`() {
+        val texts = listOf("옵션: 블랙, 5XL", "5,510원 할인받고 담기 완료", "이런 상품은 어때요?")
+
+        assertEquals("옵션: 블랙, 5XL", CartFlow.optionLine(texts))
+        assertEquals("장바구니에 담았다는 안내를 확인했다 (옵션: 블랙, 5XL)", CartFlow.evidence(texts))
+    }
+
+    @Test
+    fun `옵션이 없는 상품은 증거에 옵션을 붙이지 않는다`() {
+        val texts = listOf("장바구니에 상품을 담았습니다.", "바로가기")
+
+        assertNull(CartFlow.optionLine(texts))
+        assertEquals(CartFlow.EVIDENCE, CartFlow.evidence(texts))
+    }
+
+    @Test
     fun `버튼 글자나 탭 이름은 담겼다는 안내가 아니다`() {
         assertFalse(CartFlow.isAddedNotice("장바구니 담기"))
         assertFalse(CartFlow.isAddedNotice("장바구니"))

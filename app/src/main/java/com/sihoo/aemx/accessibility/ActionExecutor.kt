@@ -524,10 +524,16 @@ internal class ActionExecutor(
     private fun addToCart(root: AccessibilityNodeInfo, ordinal: Int): StepResult {
         val now = SystemClock.uptimeMillis()
         if (cartStage == CartStage.ADDED) {
-            val noticed = visibleTexts(root).any(CartFlow::isAddedNotice)
+            val texts = visibleTexts(root)
+            val noticed = texts.any(CartFlow::isAddedNotice)
             if (noticed || CartFlow.badgeIncreased(cartBadgeBefore, cartBadge(root))) {
-                evidence = CartFlow.EVIDENCE
-                Log.i(TAG, "장바구니 담기 확인: 안내=$noticed 숫자 $cartBadgeBefore -> ${cartBadge(root)}")
+                evidence = CartFlow.evidence(texts)
+                // 옵션 줄은 상품 옵션이라 남겨도 된다. 사용자가 고르지 않은 옵션으로 담겼는지 볼 수 있다.
+                Log.i(
+                    TAG,
+                    "장바구니 담기 확인: 안내=$noticed 숫자 $cartBadgeBefore -> ${cartBadge(root)} " +
+                        "옵션=${CartFlow.optionLine(texts) ?: "없음"}"
+                )
                 return StepResult.Success
             }
             if (now - cartActedAt < CART_CONFIRM_MS) return StepResult.NotReady
