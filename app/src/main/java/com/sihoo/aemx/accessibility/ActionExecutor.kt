@@ -98,6 +98,9 @@ internal class ActionExecutor(
         submitActedAt = 0L
         submitStage = 0
         submitMethods = emptyList()
+        cartStage = CartStage.FIND
+        cartActedAt = 0L
+        cartBadgeBefore = null
         when (step.action) {
             ActionType.OPEN_APP -> appLauncher.launch(step.target).fold(
                 onSuccess = { retryUntilReady(plan, index, id) },
@@ -138,8 +141,12 @@ internal class ActionExecutor(
 
     private fun retryUntilReady(plan: ActionPlan, index: Int, id: Long) {
         val step = plan.steps[index]
-        val deadline = SystemClock.uptimeMillis() +
-            if (step.action in setOf(ActionType.OPEN_APP, ActionType.SEARCH)) OPEN_APP_TIMEOUT_MS else ACTION_TIMEOUT_MS
+        val deadline = SystemClock.uptimeMillis() + when (step.action) {
+            ActionType.OPEN_APP, ActionType.SEARCH -> OPEN_APP_TIMEOUT_MS
+            // 상품을 열고, 담기를 누르고, 담겼다는 안내를 기다리는 데 화면을 두 번 넘긴다.
+            ActionType.ADD_TO_CART -> ADD_TO_CART_TIMEOUT_MS
+            else -> ACTION_TIMEOUT_MS
+        }
         var foregroundSince = 0L
         var popupDismisses = 0
         var prePopupChecked = false
@@ -195,6 +202,7 @@ internal class ActionExecutor(
                         val message = when (step.action) {
                             ActionType.SEARCH -> "검색 결과 화면에 검색어가 보이지 않았습니다."
                             ActionType.OPEN_APP -> "앱 화면이 열리지 않았습니다. 앱이 종료되거나 접근이 차단되었는지 확인해 주세요."
+                            ActionType.ADD_TO_CART -> "담을 상품이나 장바구니 담기 버튼을 찾지 못했습니다."
                             else -> "대상 화면 또는 조작 가능한 요소를 8초 안에 찾지 못했습니다."
                         }
                         fail(index, step, message, id)
@@ -314,7 +322,7 @@ internal class ActionExecutor(
                 }
             }
             ActionType.TAP -> tap(root, step.target)
-            ActionType.ADD_TO_CART -> StepResult.Fatal("장바구니 담기는 아직 실행할 수 없습니다.")
+            ActionType.ADD_TO_CART -> addToCart(root, step.value?.let(Ordinal::find) ?: 1)
             ActionType.INPUT_TEXT -> inputText(root, step.target, step.value.orEmpty())
             ActionType.PLAY_FIRST -> {
                 val ordinal = step.value?.let(Ordinal::find) ?: 1
@@ -484,6 +492,109 @@ internal class ActionExecutor(
             )
         }
     }
+
+    /** 장바구니 담기의 진행 단계. step 마다 [CartStage.FIND] 에서 새로 시작한다. */
+    private enum class CartStage {
+        /** 담기 버튼이 있는 상품 화면인지 보고, 아니면 검색 결과에서 상품을 연다. */
+        FIND,
+
+        /** 상품을 눌렀다. 상품 화면이 뜨기를 기다린다. */
+        OPENING,
+
+        /** 담기 버튼을 눌렀다. 담겼다는 안내를 기다린다. */
+        ADDED,
+    }
+
+    private var cartStage = CartStage.FIND
+    private var cartActedAt = 0L
+
+    /** 담기를 누르기 직전의 장바구니 숫자. 안내 문구를 놓쳤을 때 숫자가 늘었는지로 확인한다. */
+    private var cartBadgeBefore: Int? = null
+
+    /**
+     * 쿠팡에서 상품을 장바구니에 담는다. 화면 구조는 [CartFlow] 에 적어 두었다.
+     *
+     * 1. 상품 화면이면(글자가 정확히 "장바구니 담기" 인 버튼이 있으면) 그 버튼을 누른다.
+     * 2. 아니면 검색 결과 목록에서 [ordinal]번째 상품 칸을 한 번 눌러 상품 화면으로 간다.
+     * 3. 누른 뒤 "장바구니에 상품을 담았습니다" 안내나 장바구니 숫자가 늘어난 것을 확인해야 성공이다.
+     *    확인하지 못하면 담았다고 하지 않고 실패로 알린다(옵션을 골라야 하는 상품은 안내가 뜨지 않는다).
+     *
+     * "바로구매" 는 누르지 않는다. 담기 버튼도 한 번만 누른다(두 번 누르면 수량이 둘이 된다).
+     */
+    private fun addToCart(root: AccessibilityNodeInfo, ordinal: Int): StepResult {
+        val now = SystemClock.uptimeMillis()
+        if (cartStage == CartStage.ADDED) {
+            val noticed = visibleTexts(root).any(CartFlow::isAddedNotice)
+            if (noticed || CartFlow.badgeIncreased(cartBadgeBefore, cartBadge(root))) {
+                evidence = CartFlow.EVIDENCE
+                Log.i(TAG, "장바구니 담기 확인: 안내=$noticed 숫자 $cartBadgeBefore -> ${cartBadge(root)}")
+                return StepResult.Success
+            }
+            if (now - cartActedAt < CART_CONFIRM_MS) return StepResult.NotReady
+            return StepResult.Fatal("장바구니에 담겼는지 확인하지 못했습니다. 옵션을 골라야 하는 상품일 수 있습니다.")
+        }
+
+        val button = collect(root) { it.isVisibleToUser && CartFlow.isAddButton(it.text?.toString()) }.firstOrNull()
+        if (button != null) {
+            val clickable = NodeFinder.clickableAncestor(button) ?: return StepResult.NotReady
+            // 버튼만 감싼 영역이어야 한다. 화면 전체를 감싼 눌림 영역이면 엉뚱한 곳이 눌린다.
+            val bounds = Rect().also(clickable::getBoundsInScreen)
+            if (bounds.height() > service.resources.displayMetrics.heightPixels / CART_BUTTON_MAX_FRACTION) {
+                return StepResult.NotReady
+            }
+            cartBadgeBefore = cartBadge(root)
+            if (!clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return StepResult.NotReady
+            Log.i(TAG, "장바구니 담기 버튼을 눌렀다: 누르기 전 숫자=$cartBadgeBefore")
+            cartStage = CartStage.ADDED
+            cartActedAt = now
+            return StepResult.NotReady
+        }
+
+        if (cartStage == CartStage.FIND) {
+            val cards = productCards(root)
+            val card = cards.getOrNull(ordinal - 1)
+            val clicked = card?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+            if (!clicked) {
+                logCartSearch(root, cards.size, card != null)
+                return StepResult.NotReady
+            }
+            Log.i(TAG, "장바구니에 담을 상품을 열었다: ${ordinal}번째 (보이는 상품 ${cards.size}개)")
+            cartStage = CartStage.OPENING
+            cartActedAt = now
+        }
+        return StepResult.NotReady
+    }
+
+    /** 검색 결과 목록의 상품 칸들(위에서부터). 가격 글자가 들어 있고 눌리는 칸만 센다. */
+    private fun productCards(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val list = collect(root) { it.viewIdResourceName?.endsWith(CartFlow.RESULT_LIST_ID) == true }.firstOrNull()
+            ?: return emptyList()
+        return (0 until list.childCount).mapNotNull { index ->
+            val item = list.getChild(index) ?: return@mapNotNull null
+            if (!item.isVisibleToUser) return@mapNotNull null
+            if (collect(item) { CartFlow.looksLikePrice(it.text?.toString()) }.isEmpty()) return@mapNotNull null
+            collect(item) { it.isClickable && it.isEnabled }.firstOrNull()
+        }
+    }
+
+    /** 담을 상품을 못 찾는 동안 1초마다 화면이 어떻게 보이는지 남긴다. 글자 내용은 남기지 않는다. */
+    private fun logCartSearch(root: AccessibilityNodeInfo, cards: Int, found: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastProbeAt < PROBE_INTERVAL_MS) return
+        lastProbeAt = now
+        val list = collect(root) { it.viewIdResourceName?.endsWith(CartFlow.RESULT_LIST_ID) == true }.firstOrNull()
+        runCatching {
+            Log.i(
+                TAG,
+                "담을 상품을 찾는 중: 화면=${root.className} 목록=${list != null} 목록 자식=${list?.childCount} " +
+                    "상품 칸=$cards 대상 있음=$found 노드 수=${collect(root) { true }.size}"
+            )
+        }
+    }
+
+    private fun cartBadge(root: AccessibilityNodeInfo): Int? =
+        collect(root) { it.viewIdResourceName?.endsWith(CartFlow.CART_BADGE_ID) == true }
+            .firstOrNull()?.let { CartFlow.badgeCount(it.text?.toString()) }
 
     /**
      * 누르기. 이름으로 먼저 찾고, 실패하면 역할로 찾는다. 검색 입력칸 말이면 칸을 누르고, 검색 버튼 말이면 버튼을 누른다.
@@ -941,6 +1052,13 @@ internal class ActionExecutor(
 
         /** 입력 방법은 이만큼 있다(SET_TEXT, 붙여넣기, 좌표 포커스 후 SET_TEXT, 붙여넣기). */
         const val INPUT_STAGES = 5
+
+        /** 장바구니 담기 한 단계의 제한 시간과, 담기를 누른 뒤 안내를 기다리는 시간. */
+        const val ADD_TO_CART_TIMEOUT_MS = 20_000L
+        const val CART_CONFIRM_MS = 5_000L
+
+        /** 담기 버튼의 눌림 영역은 화면 높이의 이 분의 일보다 낮아야 한다. */
+        const val CART_BUTTON_MAX_FRACTION = 4
 
         /** 넣은 뒤 칸이 비어 보여도 화면이 바뀔 틈을 이만큼 준 다음에야 다음 방법으로 넘어간다. */
         const val INPUT_VERIFY_MS = 400L
